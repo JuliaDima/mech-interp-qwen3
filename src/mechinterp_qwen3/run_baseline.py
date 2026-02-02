@@ -6,6 +6,7 @@ import platform
 import time
 from pathlib import Path
 from typing import Any, Dict
+import os
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer

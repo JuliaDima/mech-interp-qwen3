@@ -2,10 +2,10 @@
 name = "mechinterp-qwen3"
 version = "0.1.0"
 description = "Independent mechanistic interpretability pipeline for Qwen3-4B-Instruct"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
   "torch>=2.2",
-  "transformers>=4.44",
+  "transformers>=4.45",
   "accelerate>=0.33",
   "safetensors>=0.4",
   "numpy>=1.26",
