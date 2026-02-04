@@ -10,7 +10,6 @@ stages:
 
 unit-test-job:
   stage: test
-  tags: [csd3,login,shell]   # must match your runner tags; remove if runner has no tags
   before_script:
     - python -V
     - python -m pip install -U pip
@@ -31,7 +30,6 @@ unit-test-job:
 
 lint-test-job:
   stage: lint
-  tags: [csd3,login,shell]   # must match your runner tags; remove if runner has no tags
   before_script:
     - python -V
     - python -m pip install -U pip
