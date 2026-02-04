@@ -45,7 +45,11 @@ def setup_hf_env() -> None:
 def generate_one(
     model, tok, prompt: str, max_new_tokens: int, temperature: float, top_p: float
 ) -> str:
-    inputs = tok(prompt, return_tensors="pt")
+    # Format as a chat message for Instruct models
+    messages = [{"role": "user", "content": prompt}]
+    formatted_prompt = tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+
+    inputs = tok(formatted_prompt, return_tensors="pt")
     inputs = {k: v.to(model.device) for k, v in inputs.items()}
 
     do_sample = temperature > 0.0
