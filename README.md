@@ -16,9 +16,7 @@ The workflow: run Qwen3-4B-Instruct on a small prompt set for each chosen behavi
 
 2. (**Not needed anymore, branch to 2.1 instead**) Train sparse autoencoders. Collect MLP activations on a small prompt set for a few selected layers, then train lightweight SAEs per layer (clear train/validation split, bottleneck size reported). Map discovered features to tokens or behaviours.
 
-2.1. Start with one of the transcoder models linked in this repository: https://github.com/safety-research/circuit-tracer?tab=readme-ov-file. There are Qwen transcoders linked in the "Available Transcoders" section. Furthermore, you can explore different scales of the Qwen3 models if you so wish (such as 0.6B through 14B) - there are transcoders linked for each of these.
-
-The repository has the transcoder class which you will need to actually load the modules (https://github.com/safety-research/circuit-tracer/tree/main/circuit_tracer/transcoder).
+2.1. Start with one of the transcoder models linked in this repository: https://github.com/safety-research/circuit-tracer?tab=readme-ov-file. There are Qwen transcoders linked in the "Available Transcoders" section. Furthermore, you can explore different scales of the Qwen3 models if you so wish (such as 0.6B through 14B) - there are transcoders linked for each of these. The repository has the transcoder class which you will need to actually load the modules (https://github.com/safety-research/circuit-tracer/tree/main/circuit_tracer/transcoder).
 
 3. Attribution-style graph. Construct a pruned dependency graph from input features through SAE features to decisive logits, mirroring the key publication’s diagrams at small scale.
 
@@ -51,11 +49,17 @@ pip install "transformers>=4.45" "huggingface_hub>=0.23" accelerate safetensors 
 ```
 
 ## Build prompts
+```bash
 miq-build-prompts --out src/mechinterp_qwen3/prompts/greater_than.jsonl --n 80 --seed 0
+```
 # Writes N prompts -> output path
 
 ## Run baseline (greedy)
-miq-run-baseline --prompts src/mechinterp_qwen3/prompts/greater_than.jsonl --seed 0
+```bash
+miq-run-baseline --prompts src/mechinterp_qwen3/prompts/greater_than.jsonl --seed 0 # 10-15 mins
+```
 
 ## Capture activations (not needed anymore - step 2 crossed)
-<!-- miq-capture-acts --run_path runs/RUN_ID --layers 4,12,20,28 --seed 0 -->
+```bash
+miq-extract-sae --run_path runs/RUN_ID
+```
