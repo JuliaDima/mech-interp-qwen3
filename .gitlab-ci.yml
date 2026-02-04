@@ -1,20 +1,16 @@
-# GitLab CI/CD configuration for mechinterp-qwen3
-
 stages:
   - test
   - lint
 
-# Test job - runs pytest with coverage
 unit-test-job:
   stage: test
-  image: python:3.11
+  tags: [csd3,login]   # remove if your runner has no tags
   before_script:
-    # Install dependencies
-    - pip install --upgrade pip
-    - pip install -e ".[test]"
+    - python -V
+    - python -m pip install -U pip
+    - python -m pip install -e ".[test]"
   script:
-    # Run tests with coverage
-    - pytest tests/ -v --cov=src/mechinterp_qwen3 --cov-report=term --cov-report=html --cov-report=xml
+    - python -m pytest tests/ -v --cov=src/mechinterp_qwen3 --cov-report=term --cov-report=html --cov-report=xml
   coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
   artifacts:
     when: always
@@ -27,14 +23,13 @@ unit-test-job:
         path: coverage.xml
     expire_in: 30 days
 
-# Lint job - can be extended with ruff, black, mypy, etc.
 lint-test-job:
   stage: lint
-  image: python:3.11
+  tags: [csd3,login]   # remove if your runner has no tags
   before_script:
-    - pip install --upgrade pip
-    - pip install ruff
+    - python -V
+    - python -m pip install -U pip
+    - python -m pip install ruff
   script:
-    # Basic linting with ruff
-    - ruff check src/ tests/ --output-format=gitlab || true
+    - ruff check src/ tests/ --output-format=gitlab
   allow_failure: true
