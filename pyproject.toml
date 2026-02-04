@@ -10,6 +10,7 @@ dependencies = [
   "safetensors>=0.4",
   "numpy>=1.26",
   "tqdm>=4.66",
+  "circuit-tracer @ git+https://github.com/safety-research/circuit-tracer.git",
 ]
 
 [project.optional-dependencies]
@@ -23,6 +24,7 @@ test = [
 miq-build-prompts = "mechinterp_qwen3.build_prompts:main"
 miq-run-baseline  = "mechinterp_qwen3.run_baseline:main"
 miq-capture-acts  = "mechinterp_qwen3.capture_activations:main"
+miq-extract-sae   = "mechinterp_qwen3.extract_sae_features:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
