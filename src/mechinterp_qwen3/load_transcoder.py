@@ -5,7 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import torch
-from circuit_tracer.transcoder import Transcoder
+from circuit_tracer.transcoder import SingleLayerTranscoder
+from huggingface_hub import hf_hub_download
+from safetensors.torch import load_file
 
 DEFAULT_TRANSCODER_REPO = "mwhanna/qwen3-4b-transcoders"
 
@@ -15,25 +17,48 @@ def load_transcoder(
     layer_id: int = 0,
     device: str = "cpu",
     cache_dir: Path | None = None,
-) -> Transcoder:
+) -> SingleLayerTranscoder:
     """
     Load a single transcoder for a specific layer.
 
     Args:
         transcoder_repo: HuggingFace repo containing transcoders
         layer_id: Layer number to load transcoder for
-        device: Device to load transcoder on ('cpu' or 'cuda')
-        cache_dir: Optional cache directory for transcoder weights
+        device: Device to load transcoder on ('cpu' or 'cuda')\n        cache_dir: Optional cache directory for transcoder weights
 
     Returns:
         Loaded transcoder instance
     """
-    transcoder = Transcoder.from_pretrained(
-        transcoder_repo,
-        layer=layer_id,
+    # Download the transcoder file from HuggingFace (use safetensors format)
+    transcoder_path = hf_hub_download(
+        repo_id=transcoder_repo,
+        filename=f"layer_{layer_id}.safetensors",
         cache_dir=str(cache_dir) if cache_dir else None,
     )
-    transcoder = transcoder.to(device)
+
+    # Load the safetensors file
+    state_dict = load_file(transcoder_path, device=device)
+
+    # Extract dimensions from the state dict
+    # W_enc shape: [d_transcoder, d_model], W_dec shape: [d_transcoder, d_model]
+    d_transcoder, d_model = state_dict["W_enc"].shape
+
+    # Create a SingleLayerTranscoder instance with the correct parameters
+    # activation_function is typically ReLU for transcoders
+    import torch.nn as nn
+
+    transcoder = SingleLayerTranscoder(
+        d_model=d_model,
+        d_transcoder=d_transcoder,
+        activation_function=nn.ReLU(),
+        layer_idx=layer_id,
+        device=device,
+    )
+
+    # Load the state dict into the transcoder
+    transcoder.load_state_dict(state_dict)
+
+    # Set to eval mode
     transcoder.eval()
 
     return transcoder
@@ -44,7 +69,7 @@ def load_transcoders_for_layers(
     transcoder_repo: str = DEFAULT_TRANSCODER_REPO,
     device: str = "cpu",
     cache_dir: Path | None = None,
-) -> dict[int, Transcoder]:
+) -> dict[int, SingleLayerTranscoder]:
     """
     Load transcoders for multiple layers.
 
@@ -55,7 +80,7 @@ def load_transcoders_for_layers(
         cache_dir: Optional cache directory
 
     Returns:
-        Dictionary mapping layer_id -> Transcoder
+        Dictionary mapping layer_id -> SingleLayerTranscoder
     """
     transcoders = {}
 
@@ -75,7 +100,7 @@ def load_transcoders_for_layers(
 @torch.no_grad()
 def extract_sae_features(
     activations: torch.Tensor,
-    transcoder: Transcoder,
+    transcoder: SingleLayerTranscoder,
 ) -> torch.Tensor:
     """
     Extract SAE features from MLP activations using a transcoder.
@@ -96,7 +121,6 @@ def extract_sae_features(
         activations = activations.unsqueeze(0)
 
     # Extract features using transcoder's encoder
-    # Transcoders typically have an encoder that maps activations -> SAE features
     sae_features = transcoder.encode(activations)
 
     # Remove batch dimension: [1, seq_len, n_features] -> [seq_len, n_features]
@@ -106,7 +130,7 @@ def extract_sae_features(
     return sae_features.cpu()
 
 
-def get_transcoder_info(transcoder: Transcoder) -> dict[str, any]:
+def get_transcoder_info(transcoder: SingleLayerTranscoder) -> dict[str, any]:
     """
     Get information about a transcoder.
 
@@ -117,10 +141,8 @@ def get_transcoder_info(transcoder: Transcoder) -> dict[str, any]:
         Dictionary with transcoder metadata
     """
     info = {
-        "n_features": transcoder.n_dict_components
-        if hasattr(transcoder, "n_dict_components")
-        else None,
-        "d_model": transcoder.d_model if hasattr(transcoder, "d_model") else None,
+        "n_features": transcoder.encoder.out_features if hasattr(transcoder, "encoder") else None,
+        "d_model": transcoder.encoder.in_features if hasattr(transcoder, "encoder") else None,
         "device": str(next(transcoder.parameters()).device),
     }
 

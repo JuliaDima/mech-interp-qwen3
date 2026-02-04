@@ -18,9 +18,10 @@ class MLPHookManager:
     Intended for *prompt-only* forward passes (no autoregressive loop).
     """
 
-    def __init__(self, model: nn.Module, layer_ids: list[int]):
+    def __init__(self, model: nn.Module, layer_ids: list[int], detach: bool = True):
         self.model = model
         self.layer_ids = layer_ids
+        self.detach = detach  # Whether to detach activations (breaks gradients)
         self.handles: list[torch.utils.hooks.RemovableHandle] = []
         self.cache: dict[int, LayerActs] = {i: LayerActs() for i in layer_ids}
 
@@ -45,12 +46,21 @@ class MLPHookManager:
                 # inputs is a tuple; first is hidden_states [batch, seq, d_model]
                 x = inputs[0]
                 # Save batch=0; you can extend to batch later.
-                self.cache[lid].mlp_in = x[0].detach().to("cpu")
+                if self.detach:
+                    self.cache[lid].mlp_in = x[0].detach().to("cpu")
+                else:
+                    self.cache[lid].mlp_in = x[0]
 
             def fwd_hook(module, inputs, output, lid=lid):
                 # output should be [batch, seq, d_model]
                 y = output
-                self.cache[lid].mlp_out = y[0].detach().to("cpu")
+                if self.detach:
+                    self.cache[lid].mlp_out = y[0].detach().to("cpu")
+                else:
+                    # Keep on device and retain gradient for non-leaf tensor
+                    mlp_out = y[0]
+                    mlp_out.retain_grad()
+                    self.cache[lid].mlp_out = mlp_out
 
             self.handles.append(mlp.register_forward_pre_hook(pre_hook))
             self.handles.append(mlp.register_forward_hook(fwd_hook))

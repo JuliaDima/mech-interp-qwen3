@@ -59,6 +59,34 @@ miq-build-prompts --out src/mechinterp_qwen3/prompts/greater_than.jsonl --n 80 -
 miq-run-baseline --prompts src/mechinterp_qwen3/prompts/greater_than.jsonl --seed 0 # 10-15 mins
 ```
 
+## Build attribution graph (step 3 - from scratch implementation)
+
+We implement attribution graph construction ourselves rather than using circuit-tracer's high-level API:
+- **Forward pass**: Capture MLP activations and extract SAE features using transcoders
+- **Attribution**: Compute gradients from output logits to SAE features (∂logit/∂feature)
+- **Graph building**: Create nodes (tokens, features, logits) and edges (attributions)
+- **Pruning**: Remove low-attribution nodes and edges
+
+```bash
+# Build attribution graph for a specific example
+miq-build-graph \
+  --prompt "You are solving a simple comparison task.
+Two numbers are given: A and B.
+Answer with a single character: 'A' if A is larger, otherwise 'B'.
+
+A = 864
+B = 394
+Answer: " \
+  --slug gt_864_394 \
+  --layers 4,12,20 \
+  --graph_dir graphs
+
+# Output: graphs/gt_864_394/
+#   - raw_graph.json: Full attribution graph
+#   - pruned_graph.json: Pruned graph (top 80% nodes, 98% edges)
+#   - metadata.json: Run configuration and statistics
+```
+
 ## Capture activations (not needed anymore - step 2 crossed)
 ```bash
 miq-extract-sae --run_path runs/RUN_ID

@@ -29,6 +29,7 @@ miq-build-prompts = "mechinterp_qwen3.build_prompts:main"
 miq-run-baseline  = "mechinterp_qwen3.run_baseline:main"
 miq-capture-acts  = "mechinterp_qwen3.capture_activations:main"
 miq-extract-sae   = "mechinterp_qwen3.extract_sae_features:main"
+miq-build-graph   = "mechinterp_qwen3.build_attribution_graph:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
