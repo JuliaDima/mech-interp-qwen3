@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
 
 import torch
 import torch.nn as nn
@@ -9,7 +8,7 @@ import torch.nn as nn
 
 @dataclass
 class LayerActs:
-    mlp_in: torch.Tensor | None = None   # [seq, d_model]
+    mlp_in: torch.Tensor | None = None  # [seq, d_model]
     mlp_out: torch.Tensor | None = None  # [seq, d_model]
 
 
@@ -18,13 +17,14 @@ class MLPHookManager:
     Collects MLP input/output activations for a small list of layers.
     Intended for *prompt-only* forward passes (no autoregressive loop).
     """
-    def __init__(self, model: nn.Module, layer_ids: List[int]):
+
+    def __init__(self, model: nn.Module, layer_ids: list[int]):
         self.model = model
         self.layer_ids = layer_ids
-        self.handles: List[torch.utils.hooks.RemovableHandle] = []
-        self.cache: Dict[int, LayerActs] = {i: LayerActs() for i in layer_ids}
+        self.handles: list[torch.utils.hooks.RemovableHandle] = []
+        self.cache: dict[int, LayerActs] = {i: LayerActs() for i in layer_ids}
 
-    def _get_layers(self) -> List[nn.Module]:
+    def _get_layers(self) -> list[nn.Module]:
         # Works for many HF causal LMs: model.model.layers
         # Qwen typically follows this layout.
         if hasattr(self.model, "model") and hasattr(self.model.model, "layers"):

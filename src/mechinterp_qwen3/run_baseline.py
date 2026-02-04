@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import platform
 import time
 from pathlib import Path
-from typing import Any, Dict
-import os
+from typing import Any
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -22,6 +22,7 @@ def now_run_id() -> str:
 def get_git_commit() -> str | None:
     try:
         import subprocess
+
         r = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
         return r
     except Exception:
@@ -41,7 +42,9 @@ def setup_hf_env() -> None:
 
 
 @torch.inference_mode()
-def generate_one(model, tok, prompt: str, max_new_tokens: int, temperature: float, top_p: float) -> str:
+def generate_one(
+    model, tok, prompt: str, max_new_tokens: int, temperature: float, top_p: float
+) -> str:
     inputs = tok(prompt, return_tensors="pt")
     inputs = {k: v.to(model.device) for k, v in inputs.items()}
 
@@ -55,14 +58,16 @@ def generate_one(model, tok, prompt: str, max_new_tokens: int, temperature: floa
         pad_token_id=tok.eos_token_id,
     )
     # Only decode the new tokens.
-    new_tokens = out[0, inputs["input_ids"].shape[1]:]
+    new_tokens = out[0, inputs["input_ids"].shape[1] :]
     return tok.decode(new_tokens, skip_special_tokens=True)
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", type=str, default="Qwen/Qwen3-4B-Instruct-2507")
-    ap.add_argument("--prompts", type=str, default="src/mechinterp_qwen3/prompts/greater_than.jsonl")
+    ap.add_argument(
+        "--prompts", type=str, default="src/mechinterp_qwen3/prompts/greater_than.jsonl"
+    )
     ap.add_argument("--run_dir", type=str, default="runs")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
@@ -75,7 +80,9 @@ def main() -> None:
 
     set_all_seeds(SeedConfig(seed=args.seed))
 
-    dtype = {"float16": torch.float16, "bfloat16": torch.bfloat16, "float32": torch.float32}[args.dtype]
+    dtype = {"float16": torch.float16, "bfloat16": torch.bfloat16, "float32": torch.float32}[
+        args.dtype
+    ]
     run_id = now_run_id()
     run_path = Path(args.run_dir) / run_id
     run_path.mkdir(parents=True, exist_ok=True)
@@ -99,7 +106,9 @@ def main() -> None:
     outputs = []
     for r in prompt_rows:
         completion = generate_one(
-            model, tok, r["prompt"],
+            model,
+            tok,
+            r["prompt"],
             max_new_tokens=args.max_new_tokens,
             temperature=args.temperature,
             top_p=args.top_p,
@@ -107,12 +116,14 @@ def main() -> None:
         # Normalize baseline answer: take first non-whitespace char if any.
         stripped = completion.strip()
         first_char = stripped[0] if stripped else ""
-        outputs.append({
-            "prompt_id": r["prompt_id"],
-            "expected": r.get("expected"),
-            "completion_raw": completion,
-            "completion_first_char": first_char,
-        })
+        outputs.append(
+            {
+                "prompt_id": r["prompt_id"],
+                "expected": r.get("expected"),
+                "completion_raw": completion,
+                "completion_first_char": first_char,
+            }
+        )
 
     out_path = run_path / "outputs.jsonl"
     write_jsonl(out_path, outputs)
@@ -127,7 +138,7 @@ def main() -> None:
         if o["completion_first_char"] == o["expected"]:
             correct += 1
 
-    manifest: Dict[str, Any] = {
+    manifest: dict[str, Any] = {
         "run_id": run_id,
         "git_commit": get_git_commit(),
         "model": args.model,
@@ -162,5 +173,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    setup_hf_env() # to avoid flaky downloads
+    setup_hf_env()  # to avoid flaky downloads
     main()

@@ -1,0 +1,10 @@
+[init]
+	defaultBranch = none
+[fetch]
+	recurseSubmodules = false
+[credential]
+	interactive = never
+[gc]
+	autoDetach = false
+[include]
+	path = /home/eid23/mechinterp-qwen-3B-Instruct/mechinterp-qwen3/builds/gracZj95W/0/phy/data-intensive-science-mphil/assessments/projects/eid23.tmp/.gitlab-runner.ext.conf

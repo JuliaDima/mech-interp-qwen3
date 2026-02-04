@@ -46,12 +46,7 @@ def generate_examples(n: int, seed: int, low: int, high: int) -> list[GTExample]
             b = rng.randint(low, high)
 
         prompt, expected = make_gt_prompt(a, b)
-        exs.append(GTExample(
-            prompt_id=f"gt_{i:04d}",
-            a=a, b=b,
-            prompt=prompt,
-            expected=expected
-        ))
+        exs.append(GTExample(prompt_id=f"gt_{i:04d}", a=a, b=b, prompt=prompt, expected=expected))
     return exs
 
 
@@ -69,14 +64,16 @@ def main() -> None:
 
     rows = []
     for e in exs:
-        rows.append({
-            "prompt_id": e.prompt_id,
-            "behaviour": "greater_than",
-            "a": e.a,
-            "b": e.b,
-            "prompt": e.prompt,
-            "expected": e.expected,
-        })
+        rows.append(
+            {
+                "prompt_id": e.prompt_id,
+                "behaviour": "greater_than",
+                "a": e.a,
+                "b": e.b,
+                "prompt": e.prompt,
+                "expected": e.expected,
+            }
+        )
 
     write_jsonl(out, rows)
     print(f"Wrote {len(rows)} prompts -> {out}")

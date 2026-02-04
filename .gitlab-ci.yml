@@ -22,12 +22,15 @@ unit-test-job:
         path: coverage.xml
     expire_in: 30 days
 
-lint-test-job:
+lint-job:
   stage: lint
   before_script:
     - python -V
     - python -m pip install -U pip
     - python -m pip install ruff
   script:
+    - echo "Running linting checks..."
     - ruff check src/ tests/ --output-format=gitlab
-  allow_failure: true
+    - echo "Running format checks..."
+    - ruff format src/ tests/ --check
+  allow_failure: false
