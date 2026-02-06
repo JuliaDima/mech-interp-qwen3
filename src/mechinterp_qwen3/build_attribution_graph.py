@@ -209,7 +209,7 @@ def main() -> None:
     print(f"\nOutput directory: {graph_dir}")
     print("  - raw_graph.json: Full attribution graph")
     print(
-        f"  - pruned_graph.json: Pruned graph (top {args.node_threshold*100}% nodes, {args.edge_threshold*100}% edges)"
+        f"  - pruned_graph.json: Pruned graph (top {args.node_threshold * 100}% nodes, {args.edge_threshold * 100}% edges)"
     )
     print("  - metadata.json: Run configuration and statistics")
 
