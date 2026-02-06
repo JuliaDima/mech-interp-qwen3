@@ -240,9 +240,7 @@ def compute_attribution_graph(
                     )
                     edge_count += 1
 
-        print(
-            f"  Layer {layer_id}: {len(created_nodes)} feature nodes, " f"{edge_count} edges so far"
-        )
+        print(f"  Layer {layer_id}: {len(created_nodes)} feature nodes, {edge_count} edges so far")
 
     print(f"Added {feature_count} SAE feature nodes (threshold={feature_threshold})")
     print(f"Added {edge_count} attribution edges (threshold={min_attribution})")

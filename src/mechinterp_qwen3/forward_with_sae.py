@@ -38,8 +38,8 @@ def forward_with_sae_features_grad(
         Same as forward_with_sae_features, but tensors have gradients
     """
     # Tokenize input
-    inputs = tokenizer(prompt, return_tensors="pt")
-    input_ids = inputs["input_ids"].to(model.device)
+    inputs = tokenizer(prompt, return_tensors="pt", add_special_tokens=False).to(model.device)
+    input_ids = inputs["input_ids"]
     tokens = [tokenizer.decode([tok_id]) for tok_id in input_ids[0]]
 
     # Install hooks to capture MLP activations (with gradients!)
@@ -119,9 +119,40 @@ def forward_linearized_with_sae_features(
     """
     # Tokenize input
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
-    input_ids = inputs["input_ids"]
-    tokens = [tokenizer.decode([tok_id]) for tok_id in input_ids[0]]
+    input_ids = inputs["input_ids"].squeeze(0)
+    tokens = [tokenizer.decode([tok_id]) for tok_id in input_ids]
 
+    # Defensively ensure a "dummy" token exists at position 0 to absorb artifacts. (aka "Sink Token")
+    if tokens[0] not in tokenizer.all_special_ids:
+        candidate_bos_token_ids = [
+            tokenizer.bos_token_id,
+            tokenizer.pad_token_id,
+            tokenizer.eos_token_id,
+        ]
+        candidate_bos_token_ids += tokenizer.all_special_ids
+
+        dummy_bos_token_id = next(filter(None, candidate_bos_token_ids))
+        if dummy_bos_token_id is None:
+            print(
+                "No suitable special token found for BOS token replacement. The first token will be ignored."
+            )
+        else:
+            input_ids = torch.cat(
+                [
+                    torch.tensor([dummy_bos_token_id], device=input_ids.device),
+                    input_ids,
+                ]
+            )
+            tokens = [tokenizer.decode([tok_id]) for tok_id in input_ids]
+
+            # Update attention_mask to include the new token
+            if "attention_mask" in inputs:
+                mask = inputs["attention_mask"]
+                ones = torch.ones((mask.shape[0], 1), device=mask.device, dtype=mask.dtype)
+                inputs["attention_mask"] = torch.cat([ones, mask], dim=1)
+
+    input_ids = input_ids.unsqueeze(0)  # just to match dimensions
+    inputs["input_ids"] = input_ids
     # Install linearized gradient hooks (embed grad, attn detach, LN freeze)
     lin_hooks = LinearizedHookManager(model)
     lin_hooks.install()
