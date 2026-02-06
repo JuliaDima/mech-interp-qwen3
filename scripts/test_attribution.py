@@ -49,24 +49,38 @@ Answer: """
         prompt=prompt,
         layers_to_analyze=[4, 12, 20],
         transcoder_repo="mwhanna/qwen3-4b-transcoders",
-        max_n_logits=5,
+        max_n_logits=10,
+        desired_logit_prob=0.95,
         feature_threshold=0.01,
+        min_attribution=1e-3,
     )
 
-    print(f"\n✓ Graph constructed: {graph}")
+    print(f"\n{'=' * 80}")
+    print(f"Graph constructed: {graph}")
+    print(f"{'=' * 80}")
 
     # Prune graph
     print("\nPruning graph...")
     pruned_graph = graph.prune(node_threshold=0.8, edge_threshold=0.98)
+    print(f"Pruned graph: {pruned_graph}")
 
-    print(f"✓ Pruned graph: {pruned_graph}")
-
-    # Print some statistics
-    print("\n" + "=" * 80)
+    # Print statistics
+    print(f"\n{'=' * 80}")
     print("Graph Statistics")
-    print("=" * 80)
+    print(f"{'=' * 80}")
     print(f"Raw graph: {len(graph.nodes)} nodes, {len(graph.edges)} edges")
     print(f"Pruned graph: {len(pruned_graph.nodes)} nodes, {len(pruned_graph.edges)} edges")
+
+    # Diagnostics
+    n_edges = len(graph.edges)
+    if n_edges == 0:
+        print("\nWARNING: No edges in graph! Check gradient flow.")
+    else:
+        attr_scores = [abs(e.attribution_score) for e in graph.edges]
+        print(f"\nAttribution magnitude stats ({n_edges} edges):")
+        print(f"  max:  {max(attr_scores):.6f}")
+        print(f"  mean: {sum(attr_scores)/len(attr_scores):.6f}")
+        print(f"  min:  {min(attr_scores):.6f}")
 
     # Show top features by attribution
     print("\nTop 10 features by total attribution:")
@@ -80,7 +94,13 @@ Answer: """
             f"act={node.activation:.4f})"
         )
 
-    print("\n✓ Test complete!")
+    # Show logit nodes
+    print("\nLogit nodes:")
+    logit_nodes = [n for n in graph.nodes.values() if n.node_type == "logit"]
+    for node in logit_nodes:
+        print(f"  '{node.logit_token_str}' (prob={node.activation:.4f})")
+
+    print("\nTest complete!")
 
 
 if __name__ == "__main__":

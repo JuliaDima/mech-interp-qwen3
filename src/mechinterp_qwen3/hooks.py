@@ -74,3 +74,63 @@ class MLPHookManager:
         for h in self.handles:
             h.remove()
         self.handles = []
+
+
+class LinearizedHookManager:
+    """Linearized gradient flow hooks matching the Attribution Graphs paper.
+
+    Installs three types of hooks:
+    1. Embedding hook: enables gradients on embedding output
+    2. Attention detach hooks: detach attention outputs so gradients only flow
+       through the residual skip connections
+    3. RMSNorm linearize hooks: treat normalization scale as constant in backward
+    """
+
+    def __init__(self, model: nn.Module):
+        self.model = model
+        self.handles: list[torch.utils.hooks.RemovableHandle] = []
+
+    def install(self) -> None:
+        # 1. Embedding hook: enable gradients on embedding output
+        embed = self.model.model.embed_tokens
+
+        def embed_hook(module, input, output):
+            output.requires_grad_(True)
+            return output
+
+        self.handles.append(embed.register_forward_hook(embed_hook))
+
+        # 2. Attention detach hooks: detach attention output, re-enable grad
+        for layer in self.model.model.layers:
+            attn = layer.self_attn
+
+            def attn_hook(module, input, output):
+                detached = output[0].detach()
+                detached.requires_grad_(True)
+                return (detached,) + output[1:]
+
+            self.handles.append(attn.register_forward_hook(attn_hook))
+
+        # 3. RMSNorm linearize hooks: treat scale factor as constant
+        norm_modules = []
+        for layer in self.model.model.layers:
+            norm_modules.append(layer.input_layernorm)
+            norm_modules.append(layer.post_attention_layernorm)
+        norm_modules.append(self.model.model.norm)
+
+        for norm in norm_modules:
+
+            def norm_hook(module, input, output):
+                x = input[0]
+                with torch.no_grad():
+                    rms_scale = (
+                        x.float().pow(2).mean(-1, keepdim=True).add(module.variance_epsilon).rsqrt()
+                    )
+                return module.weight * (x.float() * rms_scale).to(x.dtype)
+
+            self.handles.append(norm.register_forward_hook(norm_hook))
+
+    def remove(self) -> None:
+        for h in self.handles:
+            h.remove()
+        self.handles = []
