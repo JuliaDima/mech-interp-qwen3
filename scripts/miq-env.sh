@@ -23,11 +23,10 @@ mkdir -p "$MIQ_CACHE_DIR" "$MIQ_RUNS_DIR" "$MIQ_TMP_DIR"
 
 # ---- Hugging Face / Transformers caches (into /local) ----
 export HF_HOME="${MIQ_CACHE_DIR}/hf"
-export TRANSFORMERS_CACHE="${MIQ_CACHE_DIR}/hf/transformers"
 export HF_DATASETS_CACHE="${MIQ_CACHE_DIR}/hf/datasets"
 export HUGGINGFACE_HUB_CACHE="${MIQ_CACHE_DIR}/hf/hub"
 
-mkdir -p "$HF_HOME" "$TRANSFORMERS_CACHE" "$HF_DATASETS_CACHE" "$HUGGINGFACE_HUB_CACHE"
+mkdir -p "$HF_HOME" "$HF_DATASETS_CACHE" "$HUGGINGFACE_HUB_CACHE"
 
 # ---- Fix CAS/Xet flakiness ----
 export HF_HUB_DISABLE_XET=1

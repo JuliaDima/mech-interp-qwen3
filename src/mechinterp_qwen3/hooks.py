@@ -57,10 +57,11 @@ class MLPHookManager:
                 if self.detach:
                     self.cache[lid].mlp_out = y[0].detach().to("cpu")
                 else:
-                    # Keep on device and retain gradient for non-leaf tensor
-                    mlp_out = y[0]
-                    mlp_out.retain_grad()
-                    self.cache[lid].mlp_out = mlp_out
+                    # Keep the FULL tensor (not y[0]) so it remains in the
+                    # computation graph.  y[0] creates a view that is NOT an
+                    # ancestor of logits, causing autograd.grad to return None.
+                    y.retain_grad()
+                    self.cache[lid].mlp_out = y
 
             self.handles.append(mlp.register_forward_pre_hook(pre_hook))
             self.handles.append(mlp.register_forward_hook(fwd_hook))

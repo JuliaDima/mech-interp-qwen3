@@ -97,7 +97,7 @@ def load_transcoders_for_layers(
     return transcoders
 
 
-@torch.no_grad()
+# @torch.no_grad()
 def extract_sae_features(
     activations: torch.Tensor,
     transcoder: SingleLayerTranscoder,

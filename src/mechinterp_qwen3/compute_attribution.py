@@ -58,6 +58,17 @@ def compute_attribution_graph(
     logits = forward_result["logits"]  # [seq_len, vocab_size]
     sae_features = forward_result["sae_features"]  # {layer_id: [seq_len, n_features]}
 
+    # sanity check
+    for l_id in layers_to_analyze:
+        x = sae_features[l_id]  # [seq, n_feat]
+        x = x.float()
+        print(l_id, x.shape, x.dtype)
+        print("abs mean", x.abs().mean().item())
+        print("abs p50", x.abs().median().item())
+        print("abs p90", x.abs().quantile(0.9).item())
+        print("abs p99", x.abs().quantile(0.99).item())
+        print("frac > 0.01", (x.abs() > 0.01).float().mean().item())
+    exit()
     # Focus on the last token position (where the answer is generated)
     last_pos = len(tokens) - 1
 
@@ -113,87 +124,60 @@ def compute_attribution_graph(
 
     # Add logit nodes
     print(f"Adding {max_n_logits} logit nodes...")
+    edge_count = 0
     for logit_idx in top_logit_indices:
+        logit_value = last_logits[logit_idx]
         token_str = tokenizer.decode([logit_idx.item()])
-        node = Node(
+        logit_node = Node(
             node_id=f"logit_{logit_idx.item()}",
             node_type="logit",
             logit_token_id=logit_idx.item(),
             logit_token_str=token_str,
-            activation=last_logits[logit_idx].item(),
+            activation=logit_value.item(),
         )
-        graph.add_node(node)
+        graph.add_node(logit_node)
+        mlp_activations = forward_result["mlp_activations"]
+        mlp_tensors = [mlp_activations[layer_id] for layer_id in layers_to_analyze]
 
-    # Compute attributions from SAE features to logits
-    print("\nComputing attributions from SAE features to logits...")
-    edge_count = 0
+        model.zero_grad(set_to_none=True)
+        mlp_grads = torch.autograd.grad(
+            logit_value,
+            mlp_tensors,
+            retain_graph=True,
+            allow_unused=True,
+        )
 
-    # Get MLP activations (these are part of the computational graph)
-    mlp_activations = forward_result.get("mlp_activations", {})
-
-    for logit_idx in top_logit_indices:
-        logit_value = last_logits[logit_idx]
-        logit_node = graph.get_node(f"logit_{logit_idx.item()}")
-
-        # Compute gradients of this logit w.r.t. all MLP activations
-        model.zero_grad()
-
-        # Backward pass from this logit
-        logit_value.backward(retain_graph=True)
-
-        # For each layer, compute attribution via the chain rule:
-        # d(logit)/d(feature) = d(logit)/d(mlp) * d(mlp)/d(feature)
-        # But since features = encoder(mlp), we need:
-        # attribution = d(logit)/d(mlp) * mlp * d(feature)/d(mlp)
-        # Using the fact that feature activation ≈ how much that feature "explains" the MLP
-
-        for layer_id in layers_to_analyze:
-            mlp_acts = mlp_activations[layer_id]  # [seq_len, d_model]
+        for layer_id, mlp_acts, dlogit_dmlp in zip(
+            layers_to_analyze, mlp_tensors, mlp_grads, strict=False
+        ):
             features = sae_features[layer_id]  # [seq_len, n_features]
-
-            # Get gradient of logit w.r.t. MLP output
-            if mlp_acts.grad is None:
-                print(f"Warning: No gradients for MLP layer {layer_id}")
-                continue
-
-            mlp_grad = mlp_acts.grad.squeeze(0)  # [seq_len, d_model]
-
-            # For attribution, we use: attribution = feature_activation * (gradient of logit w.r.t. feature)
-            # Since we can't directly get d(logit)/d(feature), we approximate using:
-            # The feature's contribution to the logit via its reconstruction of the MLP
-
             transcoder = transcoders[layer_id]
 
-            for pos in range(features.shape[0]):
-                for feat_id in range(features.shape[1]):
-                    activation = features[pos, feat_id].item()
+            if mlp_acts.dim() == 3:
+                mlp_acts = mlp_acts[0]
+            if dlogit_dmlp.dim() == 3:
+                dlogit_dmlp = dlogit_dmlp[0]
 
-                    if abs(activation) <= feature_threshold:
-                        continue
+            W_dec = transcoder.W_dec  # [d_transcoder, d_model]
+            n_features = features.shape[1]
 
-                    # Compute how this feature contributes to the MLP output
-                    # feature_contribution = activation * decoder_weight[feat_id]
-                    # Then: attribution ≈ mlp_grad @ feature_contribution
+            active = (features.abs() > feature_threshold).nonzero(as_tuple=False)
+            for pos, feat_id in active.tolist():
+                a = features[pos, feat_id].item()
+                d_vec = W_dec[feat_id] if W_dec.shape[0] == n_features else W_dec[:, feat_id]
+                attribution = (dlogit_dmlp[pos] * (a * d_vec)).sum().item()
 
-                    # Get decoder weight for this feature
-                    decoder_weight = transcoder.decoder.weight[feat_id]  # [d_model]
-
-                    # Contribution of this feature to MLP output
-                    feature_contribution = activation * decoder_weight  # [d_model]
-
-                    # Attribution = gradient @ contribution
-                    attribution = (mlp_grad[pos] * feature_contribution).sum().item()
-
-                    if abs(attribution) > 1e-6:  # Only add significant attributions
-                        feature_node = graph.get_node(f"feature_L{layer_id}_P{pos}_F{feat_id}")
-                        if feature_node and logit_node:
-                            edge = Edge(
+                if abs(attribution) > 1e-6:
+                    feature_node = graph.get_node(f"feature_L{layer_id}_P{pos}_F{feat_id}")
+                    if feature_node and logit_node:
+                        graph.add_edge(
+                            Edge(
                                 source=feature_node,
                                 target=logit_node,
                                 attribution_score=attribution,
                             )
-                            graph.add_edge(edge)
-                            edge_count += 1
+                        )
+                        edge_count += 1
 
     print(f"Added {edge_count} attribution edges")
     print(f"\nGraph construction complete: {graph}")
