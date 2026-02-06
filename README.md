@@ -6,7 +6,7 @@ This repository contains the code for the paper "Mechanistic Interpretability of
 
 ## Project goals
 
-This reproducibility project asks the student to select two behaviours or circuits described in the key publication, and investigate whether equivalent mechanisms can be found in an open model, **Qwen3-4B-Instruct**.
+The scope of this project is to investigate the mechanistic interpretability of Qwen3-4B-Instruct. We aim to identify and understand the circuits responsible for specific behaviours in the model. We will use sparse autoencoders (SAEs) to extract interpretable features from the model's activations, and then build a pruned dependency graph to visualise the flow of information through the model. Finally, we will validate our findings through inhibition or swap-in interventions.
 
 The focus is on independent implementation and documentation, with a standalone repository, in line with Research Computing guidance that projects investigate reproducibility rather than merely match numbers.
 
