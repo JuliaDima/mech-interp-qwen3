@@ -29,7 +29,7 @@ Answer: """
     print("=" * 80)
 
     # Load model
-    model_name = "Qwen/Qwen2.5-3B-Instruct"
+    model_name = "Qwen/Qwen3-4B-Instruct"
     print(f"\nLoading model: {model_name}")
 
     tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
