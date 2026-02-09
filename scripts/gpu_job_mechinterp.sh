@@ -42,4 +42,5 @@ Answer: " \
   --slug gt_864_394 \
   --layers 4,12,20 \
   --graph_dir graphs \
-  --top_k_features 10000
+  --top_k_features 10000 \
+  2>&1 | tee logs/job_1gpu_$(date +%s).log

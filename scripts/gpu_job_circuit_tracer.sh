@@ -42,4 +42,5 @@ Answer:" \
   --verbose \
   --lazy-encoder \
   --dtype bfloat16 \
-  --offload disk
+  --offload disk \
+  2>&1 | tee logs/job_1gpu_circuit_tracer$(date +%s).log
