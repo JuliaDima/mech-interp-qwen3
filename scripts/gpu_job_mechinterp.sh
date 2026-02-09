@@ -8,20 +8,28 @@
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
 
-set -euo pipefail
 mkdir -p logs
 
 # Recommended Ampere environment (per docs)
 module purge
 module load rhel8/default-amp
 
-source ~/.bashrc
+source /home/eid23/miniforge3/etc/profile.d/conda.sh
 conda activate p28_py311_env
+
+# Debugging info
+which python
+python --version
+python -c "import torch; print(f'Torch: {torch.__version__}, CUDA: {torch.cuda.is_available()}, Device Count: {torch.cuda.device_count()}')"
+nvidia-smi
+
+set -euo pipefail
 
 # Helpful defaults (tune if needed)
 export OMP_NUM_THREADS=16
+export PYTHONPATH=${PYTHONPATH-}:/home/eid23/mechinterp-qwen-3B-Instruct/mechinterp-qwen3
+export LD_LIBRARY_PATH=/home/eid23/miniforge3/envs/p28_py311_env/lib
 
-# Run your program
 # Build attribution graph for a specific example
 miq-build-graph \
   --prompt "You are solving a simple comparison task.
@@ -33,4 +41,5 @@ B = 394
 Answer: " \
   --slug gt_864_394 \
   --layers 4,12,20 \
-  --graph_dir graphs
+  --graph_dir graphs \
+  --top_k_features 10000

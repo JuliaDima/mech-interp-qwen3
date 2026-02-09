@@ -5,9 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import torch
-from circuit_tracer.transcoder import SingleLayerTranscoder
 from huggingface_hub import hf_hub_download
 from safetensors.torch import load_file
+
+from .transcoder import SingleLayerTranscoder
 
 DEFAULT_TRANSCODER_REPO = "mwhanna/qwen3-4b-transcoders"
 

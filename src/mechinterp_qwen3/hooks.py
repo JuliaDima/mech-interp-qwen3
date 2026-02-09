@@ -122,7 +122,7 @@ class LinearizedHookManager:
 
             def norm_hook(module, input, output):
                 x = input[0]
-                with torch.no_grad():
+                with torch.no_grad():  # freeze the denominator
                     rms_scale = (
                         x.float().pow(2).mean(-1, keepdim=True).add(module.variance_epsilon).rsqrt()
                     )
