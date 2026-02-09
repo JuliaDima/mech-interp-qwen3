@@ -28,6 +28,7 @@ def compute_attribution_graph(
     desired_logit_prob: float = 0.95,
     feature_threshold: float = 0.01,
     min_attribution: float = 1e-3,
+    top_k_features: int | None = None,
 ) -> AttributionGraph:
     """Compute attribution graph from input tokens through SAE features to output logits.
 
@@ -41,6 +42,7 @@ def compute_attribution_graph(
         desired_logit_prob: Cumulative probability threshold for logit selection
         feature_threshold: Minimum feature activation to include
         min_attribution: Minimum |attribution score| to include an edge
+        top_k_features: If set, keep only top K features per token (sparse storage)
 
     Returns:
         Attribution graph with nodes and edges
@@ -60,6 +62,7 @@ def compute_attribution_graph(
         transcoders=transcoders,
         prompt=prompt,
         layers_to_analyze=layers_to_analyze,
+        top_k_features=top_k_features,
     )
 
     tokens = forward_result["tokens"]
@@ -111,6 +114,10 @@ def compute_attribution_graph(
         # Detach grads immediately to free graph memory
         grads_per_logit.append(tuple(g.detach() if g is not None else None for g in grads_j))
 
+    # Save detached MLP activations for error computation
+    # (We need the values, but not the graph, to compute residuals)
+    mlp_acts_detached = {lid: act.detach() for lid, act in mlp_activations.items()}
+
     # Free the computation graph — no longer needed
     del pre_logit_hidden, h, mlp_activations, mlp_tensors, logits
     del forward_result
@@ -152,90 +159,162 @@ def compute_attribution_graph(
     feature_count = 0
 
     for layer_idx, layer_id in enumerate(layers_to_analyze):
-        features = sae_features[layer_id].detach()  # [seq_len, n_features]
+        features = sae_features[layer_id]  # [seq_len, n_features] (maybe sparse)
         transcoder = transcoders[layer_id]
         W_dec = transcoder.W_dec.detach().float()  # [n_features, d_model]
-        features_f = features.float()
+
+        # Get MLP activations for error computation
+        mlp_act = mlp_acts_detached[layer_id].float()
+        if mlp_act.dim() == 3:
+            mlp_act = mlp_act[0]
+
+        # Compute reconstruction and error
+        is_sparse = features.is_sparse
+        with torch.no_grad():
+            if is_sparse:
+                # decode_sparse returns (reconstruction, scaled_decoders)
+                reconstruction, _ = transcoder.decode_sparse(features, mlp_act)
+            else:
+                reconstruction = transcoder.decode(features, mlp_act)
+
+            # Compute reconstruction error (MLP_out - Reconstruction)
+            # This represents what the SAE failed to explain
+            error = mlp_act - reconstruction.detach()
+
+        features_f = features.float() if not is_sparse else features
 
         # Track which (pos, feat_id) have a node already
         created_nodes: dict[tuple[int, int], str] = {}  # (pos, feat_id) -> node_id
 
+        # ---------------------------------------------------------------------
+        # Part A: Diagnostics (Logit 0 only, optional)
+        # ---------------------------------------------------------------------
         with torch.no_grad():
-            # Diagnostics: compute attribution distribution for first logit
-            diag_grad = grads_per_logit[0][layer_idx]
-            if diag_grad is not None:
-                if diag_grad.dim() == 3:
-                    diag_grad = diag_grad[0]
-                diag_attr = features_f * (diag_grad.float() @ W_dec.t())
-                active = diag_attr[features.abs() > feature_threshold].abs()
-                if active.numel() > 0:
-                    pcts = torch.quantile(
-                        active.float(),
-                        torch.tensor([0.5, 0.9, 0.95, 0.99, 1.0], device=active.device),
+            if not is_sparse:
+                diag_grad = grads_per_logit[0][layer_idx]
+                if diag_grad is not None:
+                    if diag_grad.dim() == 3:
+                        diag_grad = diag_grad[0]
+                    diag_attr = features_f * (diag_grad.float() @ W_dec.t())
+                    active = diag_attr[features.abs() > feature_threshold].abs()
+                    if active.numel() > 0:
+                        pcts = torch.quantile(
+                            active.float(),
+                            torch.tensor([0.5, 0.9, 0.95, 0.99, 1.0], device=active.device),
+                        )
+                        print(
+                            f"  Layer {layer_id} attribution |a| distribution "
+                            f"(active features, logit 0):"
+                        )
+                        print(
+                            f"    p50={pcts[0]:.4f}  p90={pcts[1]:.4f}  "
+                            f"p95={pcts[2]:.4f}  p99={pcts[3]:.4f}  max={pcts[4]:.4f}"
+                        )
+
+        # ---------------------------------------------------------------------
+        # Part B: Attribution Computation (Features & Error)
+        # ---------------------------------------------------------------------
+        for j in range(n_logits):
+            dlogit_dmlp = grads_per_logit[j][layer_idx]
+            if dlogit_dmlp is None:
+                continue
+            if dlogit_dmlp.dim() == 3:
+                dlogit_dmlp = dlogit_dmlp[0]  # [seq_len, d_model]
+
+            # --- 1. Feature Attribution ---
+            dec_dot_grad = dlogit_dmlp.float() @ W_dec.t()
+            attributions = features_f * dec_dot_grad
+
+            if is_sparse:
+                attributions = attributions.coalesce()
+                attr_vals = attributions.values()
+                attr_indices = attributions.indices()
+                feat_vals = features_f.coalesce().values()
+
+                mask = (feat_vals.abs() > feature_threshold) & (attr_vals.abs() > min_attribution)
+                valid_indices = torch.nonzero(mask).squeeze(1)
+
+                if valid_indices.numel() > 0:
+                    final_attr_vals = attr_vals[valid_indices].tolist()
+                    final_pos_list = attr_indices[0, valid_indices].tolist()
+                    final_feat_list = attr_indices[1, valid_indices].tolist()
+                    final_feat_vals = feat_vals[valid_indices].tolist()
+
+                    loop_zip = zip(
+                        final_pos_list,
+                        final_feat_list,
+                        final_attr_vals,
+                        final_feat_vals,
+                        strict=True,
                     )
-                    print(
-                        f"  Layer {layer_id} attribution |a| distribution "
-                        f"(active features, logit 0):"
-                    )
-                    print(
-                        f"    p50={pcts[0]:.4f}  p90={pcts[1]:.4f}  "
-                        f"p95={pcts[2]:.4f}  p99={pcts[3]:.4f}  max={pcts[4]:.4f}"
-                    )
-                    for thresh in [0.001, 0.01, 0.1, 0.5]:
-                        n = (active > thresh).sum().item()
-                        print(f"    |a|>{thresh}: {n} edges")
-                del diag_grad, diag_attr, active
-
-            for j in range(n_logits):
-                dlogit_dmlp = grads_per_logit[j][layer_idx]
-                if dlogit_dmlp is None:
-                    continue
-                if dlogit_dmlp.dim() == 3:
-                    dlogit_dmlp = dlogit_dmlp[0]  # [seq_len, d_model]
-
-                # Single matmul: [seq, d_model] @ [d_model, n_feat] = [seq, n_feat]
-                dec_dot_grad = dlogit_dmlp.float() @ W_dec.t()
-
-                # Element-wise: zero features produce zero attribution automatically
-                attributions = features_f * dec_dot_grad  # [seq, n_feat]
-
-                # Joint filter: active feature AND significant attribution
+                else:
+                    loop_zip = []
+            else:
                 mask = (features.abs() > feature_threshold) & (attributions.abs() > min_attribution)
                 edge_pos, edge_feat = mask.nonzero(as_tuple=True)
+                if len(edge_pos) > 0:
+                    attr_vals_list = attributions[edge_pos, edge_feat].tolist()
+                    pos_list = edge_pos.tolist()
+                    feat_list = edge_feat.tolist()
+                    feat_vals_list = features[edge_pos, edge_feat].tolist()
+                    loop_zip = zip(pos_list, feat_list, attr_vals_list, feat_vals_list, strict=True)
+                else:
+                    loop_zip = []
 
-                if len(edge_pos) == 0:
-                    continue
+            for pos, feat_id, attr_val, feat_val in loop_zip:
+                key = (pos, feat_id)
+                if key not in created_nodes:
+                    node_id = f"feature_L{layer_id}_P{pos}_F{feat_id}"
+                    graph.add_node(
+                        Node(
+                            node_id=node_id,
+                            node_type="feature",
+                            layer=layer_id,
+                            feature_id=feat_id,
+                            token_pos=pos,
+                            activation=feat_val,
+                        )
+                    )
+                    created_nodes[key] = node_id
+                    feature_count += 1
 
-                # Batch-extract values to Python (one GPU→CPU transfer)
-                attr_vals = attributions[edge_pos, edge_feat].tolist()
-                pos_list = edge_pos.tolist()
-                feat_list = edge_feat.tolist()
+                graph.add_edge(
+                    Edge(
+                        source=graph.get_node(created_nodes[key]),
+                        target=logit_nodes[j],
+                        attribution_score=attr_val,
+                    )
+                )
+                edge_count += 1
 
-                for idx in range(len(pos_list)):
-                    pos = pos_list[idx]
-                    feat_id = feat_list[idx]
-                    key = (pos, feat_id)
+            # --- 2. Error Term Attribution ---
+            # Attribution = Error · Grad
+            # Error is [seq, d_model], Grad is [seq, d_model]
+            error_attr = (error * dlogit_dmlp.float()).sum(dim=-1)  # [seq]
 
-                    if key not in created_nodes:
-                        node_id = f"feature_L{layer_id}_P{pos}_F{feat_id}"
+            for pos, attr_val in enumerate(error_attr.tolist()):
+                if abs(attr_val) > min_attribution:
+                    # Check/Create Error Node
+                    # One error node per (layer, position)
+                    error_node_id = f"error_L{layer_id}_P{pos}"
+                    if graph.get_node(error_node_id) is None:
                         graph.add_node(
                             Node(
-                                node_id=node_id,
-                                node_type="feature",
+                                node_id=error_node_id,
+                                node_type="error",
                                 layer=layer_id,
-                                feature_id=feat_id,
                                 token_pos=pos,
-                                activation=features[pos, feat_id].item(),
+                                activation=error[pos].norm().item(),
+                                feature_id=-1,  # Marker for error
                             )
                         )
-                        created_nodes[key] = node_id
-                        feature_count += 1
 
+                    # Add Edge
                     graph.add_edge(
                         Edge(
-                            source=graph.get_node(created_nodes[key]),
+                            source=graph.get_node(error_node_id),
                             target=logit_nodes[j],
-                            attribution_score=attr_vals[idx],
+                            attribution_score=attr_val,
                         )
                     )
                     edge_count += 1

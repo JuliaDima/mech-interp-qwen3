@@ -107,6 +107,12 @@ def main() -> None:
         default=0.98,
         help="Pruning: keep fewest edges covering this fraction of total attribution",
     )
+    ap.add_argument(
+        "--top_k_features",
+        type=int,
+        default=None,
+        help="Sparsity: keep only top K features per token (save memory)",
+    )
     args = ap.parse_args()
 
     # Parse layers
@@ -162,6 +168,7 @@ def main() -> None:
         desired_logit_prob=args.desired_logit_prob,
         feature_threshold=args.feature_threshold,
         min_attribution=args.min_attribution,
+        top_k_features=args.top_k_features,
     )
 
     # Save raw graph

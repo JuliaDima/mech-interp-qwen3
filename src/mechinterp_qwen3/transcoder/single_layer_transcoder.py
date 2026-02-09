@@ -173,10 +173,9 @@ class SingleLayerTranscoder(nn.Module):
     def decode_sparse(self, sparse_acts, input_acts: torch.Tensor | None = None):
         """Decode sparse activations and return reconstruction with scaled decoder vectors.
 
-        Returns:
-            reconstruction: Decoded output
-            scaled_decoders: Decoder vectors scaled by activation values
+        scaled_decoders: Decoder vectors scaled by activation values
         """
+        sparse_acts = sparse_acts.coalesce()
         pos_idx, feat_idx = sparse_acts.indices()
         values = sparse_acts.values()
 
