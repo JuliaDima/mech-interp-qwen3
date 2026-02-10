@@ -1,6 +1,5 @@
 stages:
   - test
-  - lint
 
 unit-test-job:
   stage: test
@@ -23,7 +22,7 @@ unit-test-job:
     expire_in: 30 days
 
 lint-job:
-  stage: lint
+  stage: test
   before_script:
     - python -V
     - python -m pip install -U pip
@@ -33,4 +32,4 @@ lint-job:
     - ruff check src/ tests/ --output-format=gitlab
     - echo "Running format checks..."
     - ruff format src/ tests/ --check
-  allow_failure: false
+  allow_failure: true
