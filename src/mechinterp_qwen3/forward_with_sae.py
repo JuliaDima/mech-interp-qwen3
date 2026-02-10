@@ -56,12 +56,28 @@ def forward_with_sae_features_grad(
     mlp_activations = {}
     for layer_id in layers_to_analyze:
         layer_acts: LayerActs = hooker.cache[layer_id]
-        if layer_acts.mlp_out is None:
+        if layer_acts.mlp_out is None or layer_acts.mlp_in is None:
             raise RuntimeError(f"No MLP activations captured for layer {layer_id}")
         mlp_activations[layer_id] = layer_acts.mlp_out
 
+        # We need mlp_in for the transcoder!
+        # layer_acts.mlp_in is [seq, d_model] (detached or not depends on manager)
+        # But wait, MLPHookManager only saves mlp_in if we asked it to?
+        # In hooks.py, pre_hook saves mlp_in.
+
         # Retain gradients on the original tensor used in computation
         mlp_activations[layer_id].retain_grad()
+
+        # Also retain grad for mlp_in if we are going to use it?
+        # mlp_in is an intermediate activation.
+        # But we are in a torch.set_grad_enabled(True) block.
+        # layer_acts.mlp_in should have grad_fn if it's from the graph.
+        # We should check if we need to retain grad on it.
+        # The transcoder path will be a branch off mlp_in.
+        # If we don't retain grad, `mlp_in.grad` will be None, but backprop will still work through it to earlier layers?
+        # Yes. We only need retain_grad if we want to INSPECT the gradient at mlp_in.
+        # We don't need to inspect it here.
+        # But we DO need to use it for encoding.
 
     hooker.remove()
 
@@ -69,13 +85,21 @@ def forward_with_sae_features_grad(
     sae_features = {}
     for layer_id in layers_to_analyze:
         transcoder = transcoders[layer_id]
-        mlp_acts = mlp_activations[layer_id]
+        # Use MLP Input for encoding!
+        mlp_in = hooker.cache[layer_id].mlp_in
 
-        # Already batched [1, seq_len, d_model]
-        mlp_acts_batched = mlp_acts
+        # Already batched [1, seq_len, d_model]?
+        # MLPHookManager saves [seq, d_model] usually (x[0]).
+        # Let's check hooks.py: `self.cache[lid].mlp_in = x[0]`.
+        # So it is [seq, d_model].
 
         # Encode to get SAE features (with gradients)
-        features = transcoder.encode(mlp_acts_batched)
+        features = transcoder.encode(mlp_in.unsqueeze(0))  # Expects [batch, seq, d_model] usually?
+        # Transcoder.encode handles [1, seq, d] or [seq, d]?
+        # SingleLayerTranscoder.encode usually handles it.
+        # Let's double check. extract_sae_features in load_transcoder.py unsqueezes.
+        # So we should probably unsqueeze here too to be safe.
+
         features = features.squeeze(0)
 
         # Retain gradients for non-leaf tensors (critical for attribution!)
@@ -197,8 +221,13 @@ def forward_linearized_with_sae_features(
     sae_features = {}
     for layer_id in layers_to_analyze:
         transcoder = transcoders[layer_id]
-        mlp_acts = mlp_activations[layer_id]
-        features = transcoder.encode(mlp_acts)
+        # Use MLP Input for encoding!
+        mlp_in = mlp_hooks.cache[layer_id].mlp_in
+
+        if mlp_in is None:
+            raise RuntimeError(f"No MLP input captured for layer {layer_id}")
+
+        features = transcoder.encode(mlp_in.unsqueeze(0))
         features = features.squeeze(0)
 
         if top_k_features is not None:

@@ -158,6 +158,9 @@ def compute_attribution_graph(
     edge_count = 0
     feature_count = 0
 
+    # Start attribution from position 1 to ignore BOS/system tokens which often cause artifacts
+    start_pos = 1
+
     for layer_idx, layer_id in enumerate(layers_to_analyze):
         features = sae_features[layer_id]  # [seq_len, n_features] (maybe sparse)
         transcoder = transcoders[layer_id]
@@ -262,6 +265,10 @@ def compute_attribution_graph(
                     loop_zip = []
 
             for pos, feat_id, attr_val, feat_val in loop_zip:
+                # Filter out positions before start_pos
+                if pos < start_pos:
+                    continue
+
                 key = (pos, feat_id)
                 if key not in created_nodes:
                     node_id = f"feature_L{layer_id}_P{pos}_F{feat_id}"
@@ -287,12 +294,14 @@ def compute_attribution_graph(
                 )
                 edge_count += 1
 
-            # --- 2. Error Term Attribution ---
+            # --- 2b. Error Term Attribution ---
             # Attribution = Error · Grad
             # Error is [seq, d_model], Grad is [seq, d_model]
             error_attr = (error * dlogit_dmlp.float()).sum(dim=-1)  # [seq]
 
             for pos, attr_val in enumerate(error_attr.tolist()):
+                if pos < start_pos:
+                    continue
                 if abs(attr_val) > min_attribution:
                     # Check/Create Error Node
                     # One error node per (layer, position)
@@ -318,6 +327,97 @@ def compute_attribution_graph(
                         )
                     )
                     edge_count += 1
+
+            # --- 2c. Bias Term Attribution ---
+            # The decoder bias b_dec is a constant vector added to the reconstruction
+            # Attribution = b_dec · Grad
+            if hasattr(transcoder, "b_dec"):
+                b_dec = transcoder.b_dec.detach().float()  # [d_model]
+                bias_attr = (b_dec * dlogit_dmlp.float()).sum(
+                    dim=-1
+                )  # scalar (since batch=1 usually)
+
+                # If dlogit_dmlp has sequence dim, bias_attr might be [seq]
+                # But b_dec is global (not seq-dependent), so this is technically
+                # adding the *same* bias vector at every position.
+                # The gradient dlogit_dmlp is [seq, d_model].
+                # So bias_attr is [seq].
+
+                for pos, attr_val in enumerate(bias_attr.view(-1).tolist()):
+                    if pos < start_pos:
+                        continue
+                    if abs(attr_val) > min_attribution:
+                        # Create Bias Node (one per layer, shared across positions?
+                        # Actually, bias contribution is position-dependent because gradient is pos-dependent)
+                        # Let's create one bias node per layer/position to be consistent with error nodes
+
+                        bias_node_id = f"bias_L{layer_id}_P{pos}"
+                        if graph.get_node(bias_node_id) is None:
+                            graph.add_node(
+                                Node(
+                                    node_id=bias_node_id,
+                                    node_type="bias",
+                                    layer=layer_id,
+                                    token_pos=pos,
+                                    activation=1.0,  # Bias is constant, effectively activity 1.0 * b_dec
+                                    feature_id=-2,  # Marker for bias
+                                )
+                            )
+
+                        graph.add_edge(
+                            Edge(
+                                source=graph.get_node(bias_node_id),
+                                target=logit_nodes[j],
+                                attribution_score=attr_val,
+                            )
+                        )
+                        edge_count += 1
+            else:
+                bias_attr = torch.zeros_like(error_attr)
+
+            # --- 3. Verification: Check Sum ---
+            # Direct Attribution: mlp_act * grad
+            # Component Attribution: Sum(Features * grad @ W_dec.T) + (Error * grad) + (Bias * grad)
+            # which equals (Rec + Error) * grad = mlp_act * grad
+
+            with torch.no_grad():
+                # Direct attribution of MLP output to logit (exclude start_pos)
+                if mlp_act.shape[0] > start_pos and dlogit_dmlp.shape[0] > start_pos:
+                    direct_attr = (mlp_act[start_pos:] * dlogit_dmlp[start_pos:].float()).sum()
+                else:
+                    direct_attr = torch.tensor(0.0, device=mlp_act.device)
+
+                # Sum of all feature attributions (sparse or dense)
+                # We need to filter feature attributions for pos >= start_pos
+                if is_sparse:
+                    # Filter values where stored index (pos) >= start_pos
+                    # attributions is sparse [seq, n_feat]
+                    # indices[0] is pos
+                    mask_pos = attributions.indices()[0] >= start_pos
+                    feat_attr_sum = attributions.values()[mask_pos].sum()
+                else:
+                    feat_attr_sum = attributions[start_pos:].sum()
+
+                # Sum of error attribution
+                err_attr_sum = error_attr[start_pos:].sum()
+
+                # Sum of bias attribution
+                bias_attr_sum = bias_attr[start_pos:].sum()
+
+                total_component_attr = feat_attr_sum + err_attr_sum + bias_attr_sum
+                diff = abs(direct_attr - total_component_attr).item()
+                rel_diff = diff / (abs(direct_attr).item() + 1e-8)
+
+                print(f"  Layer {layer_id} Verification (Logit {j}):")
+                print(f"    Direct MLP Attr:   {direct_attr.item():.4f}")
+                print(
+                    f"    Component Sum:     {total_component_attr.item():.4f} "
+                    f"(Feat: {feat_attr_sum.item():.4f} + Err: {err_attr_sum.item():.4f} + Bias: {bias_attr_sum.item():.4f})"
+                )
+                print(f"    Difference:        {diff:.6f} (Rel: {rel_diff:.2%})")
+
+                if rel_diff > 0.01:  # >1% error warning
+                    print(f"    [WARNING] Attribution mismatch in Layer {layer_id}!")
 
         print(f"  Layer {layer_id}: {len(created_nodes)} feature nodes, {edge_count} edges so far")
 
