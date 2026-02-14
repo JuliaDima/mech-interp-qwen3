@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import torch
 from huggingface_hub import hf_hub_download
 from safetensors.torch import load_file
 
@@ -30,14 +29,12 @@ def load_transcoder(
     Returns:
         Loaded transcoder instance
     """
-    # Download the transcoder file from HuggingFace (use safetensors format)
     transcoder_path = hf_hub_download(
         repo_id=transcoder_repo,
         filename=f"layer_{layer_id}.safetensors",
         cache_dir=str(cache_dir) if cache_dir else None,
     )
 
-    # Load the safetensors file
     state_dict = load_file(transcoder_path, device=device)
 
     # Extract dimensions from the state dict
@@ -51,7 +48,7 @@ def load_transcoder(
     transcoder = SingleLayerTranscoder(
         d_model=d_model,
         d_transcoder=d_transcoder,
-        activation_function=nn.ReLU(),
+        activation_function=nn.ReLU(),  # Anthropic (March 2025) uses JumpReLU, however mwhanna/qwen3-4b-transcoders uses ReLU
         layer_idx=layer_id,
         device=device,
     )
@@ -96,55 +93,3 @@ def load_transcoders_for_layers(
         transcoders[layer_id] = transcoder
 
     return transcoders
-
-
-@torch.no_grad()
-def extract_sae_features(
-    activations: torch.Tensor,
-    transcoder: SingleLayerTranscoder,
-) -> torch.Tensor:
-    """
-    Extract SAE features from MLP activations using a transcoder.
-
-    Args:
-        activations: MLP activations [seq_len, d_model]
-        transcoder: Loaded transcoder instance
-
-    Returns:
-        SAE feature activations [seq_len, n_features]
-    """
-    # Ensure activations are on same device as transcoder
-    device = next(transcoder.parameters()).device
-    activations = activations.to(device)
-
-    # Add batch dimension if needed: [seq_len, d_model] -> [1, seq_len, d_model]
-    if activations.dim() == 2:
-        activations = activations.unsqueeze(0)
-
-    # Extract features using transcoder's encoder
-    sae_features = transcoder.encode(activations)
-
-    # Remove batch dimension: [1, seq_len, n_features] -> [seq_len, n_features]
-    if sae_features.dim() == 3 and sae_features.shape[0] == 1:
-        sae_features = sae_features.squeeze(0)
-
-    return sae_features.cpu()
-
-
-def get_transcoder_info(transcoder: SingleLayerTranscoder) -> dict[str, any]:
-    """
-    Get information about a transcoder.
-
-    Args:
-        transcoder: Loaded transcoder instance
-
-    Returns:
-        Dictionary with transcoder metadata
-    """
-    info = {
-        "n_features": transcoder.encoder.out_features if hasattr(transcoder, "encoder") else None,
-        "d_model": transcoder.encoder.in_features if hasattr(transcoder, "encoder") else None,
-        "device": str(next(transcoder.parameters()).device),
-    }
-
-    return info

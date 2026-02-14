@@ -2,9 +2,8 @@
 
 Selects the smallest set of top logits whose cumulative probability exceeds
 a desired threshold, and returns demeaned unembedding vectors for attribution.
+Implements uses the same logic as circuit_tracer, with some minor differences.
 """
-
-from __future__ import annotations
 
 import torch
 

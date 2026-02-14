@@ -4,6 +4,8 @@ Implements the Attribution Graphs paper methodology:
 - Linearized gradient flow (detached attention, frozen RMSNorm scale)
 - Cumulative-probability logit selection with demeaned unembedding vectors
 - Vectorized attribution computation
+TODO: This implementation assumes batch_size 1 and Per-Layer Transcoder (SingleLayerTranscoder). Should extend to batch_size > 1 and Cross-Layer Transcoder.
+TODO: Maybe use thresholding instead of 0 for masking of feat * attr_vals ?
 """
 
 from __future__ import annotations
@@ -62,40 +64,46 @@ def compute_attribution_graph(
     logits = forward_result["logits"]  # [seq_len, vocab_size]
     sae_features = forward_result["sae_features"]  # {layer_id: [seq_len, n_features]}
     mlp_activations = forward_result["mlp_activations"]
-    pre_logit_hidden = forward_result["pre_logit_hidden"]  # [batch, seq_len, d_model]
+    pre_logit_hidden = forward_result[
+        "pre_logit_hidden"
+    ]  # [batch, seq_len, d_model] # final RMSNorm layer before logits
 
     last_pos = len(tokens) - 1
 
     # Phase 2: Salient logit selection
-    unembed_weight = model.lm_head.weight.detach()
+    unembed_weight = model.lm_head.weight.detach()  # [vocab_size, d_model]
     logit_indices, logit_probs, demeaned_vecs = compute_salient_logits(
-        logits[last_pos].detach(),
+        logits[last_pos].detach(),  # [vocab_size]
         unembed_weight,
         max_n_logits=max_n_logits,
         desired_logit_prob=desired_logit_prob,
     )
     n_logits = len(logit_indices)
 
-    print(f"\nSalient logits ({n_logits} tokens, cumprob={logit_probs.sum():.3f}):")
+    print(
+        f"\nSalient logits ({n_logits} tokens, cumprob={logit_probs.sum():.3f}):"
+    )  # the first `n_logits` tokens that sum to desired_logit_prob
     for i in range(n_logits):
         tok_str = tokenizer.decode([logit_indices[i].item()])
         print(f"  {i + 1}. '{tok_str}' (prob={logit_probs[i].item():.4f})")
 
     # Phase 3: Demeaned gradient computation
-    mlp_tensors = [mlp_activations[layer_id] for layer_id in layers_to_analyze]
+    mlp_tensors = [
+        mlp_activations[layer_id] for layer_id in layers_to_analyze
+    ]  # [MLP_out^{(0)}, MLP_out^{(1)}, ..., MLP_out^{(L)}]
 
     # h is the pre-logit hidden state at the last position (with live grad)
     h = pre_logit_hidden[0, last_pos]  # [d_model]
 
     # Cast demeaned_vecs to same dtype as h for the element-wise multiply
-    demeaned_vecs = demeaned_vecs.to(dtype=h.dtype, device=h.device)
+    demeaned_vecs = demeaned_vecs.to(dtype=h.dtype, device=h.device)  # logits_j - mean(logits)
 
     # Compute gradients for each salient logit
     grads_per_logit = []
     for j in range(n_logits):
         # Element-wise multiply + sum avoids matmul backward codepath
         # (matmul backward can call .H on 1-D tensors in some PyTorch versions)
-        target_j = (h * demeaned_vecs[j]).sum()
+        target_j = (h * demeaned_vecs[j]).sum()  # W_j_T @ h * (logits_j - mean(logits))
 
         model.zero_grad(set_to_none=True)
         grads_j = torch.autograd.grad(
@@ -103,7 +111,7 @@ def compute_attribution_graph(
             mlp_tensors,
             retain_graph=(j < n_logits - 1),
             allow_unused=True,
-        )
+        )  # grads_j[l] = ∂(target_j) / ∂(MLP_out(l))
         # Detach grads immediately to free graph memory
         grads_per_logit.append(tuple(g.detach() if g is not None else None for g in grads_j))
 
@@ -155,13 +163,25 @@ def compute_attribution_graph(
     start_pos = 1
 
     for layer_idx, layer_id in enumerate(layers_to_analyze):
-        features = sae_features[layer_id]  # [seq_len, n_features] (maybe sparse)
+        features = sae_features[layer_id]  # [seq_len, n_features] (should be sparse)
+
+        # Log sparsity and format
+        nonzero_count = features._nnz()
+        total_elements = features.numel()
+        sparsity = 100 * (1 - nonzero_count / total_elements)
+
+        print(
+            f"Layer {layer_id}: {nonzero_count:,} active features "
+            f"(sparsity: {sparsity:.1f}%, "
+            f"format: {'sparse' if features.is_sparse else 'dense'})"
+        )
+
         transcoder = transcoders[layer_id]
         W_dec = transcoder.W_dec.detach().float()  # [n_features, d_model]
 
         # Get MLP activations for error computation
-        mlp_act = mlp_acts_detached[layer_id].float()
-        if mlp_act.dim() == 3:
+        mlp_act = mlp_acts_detached[layer_id].float()  # [batch, seq_len, d_model]
+        if mlp_act.dim() == 3:  # TODO: batch size is 1, but should support batch_size > 1
             mlp_act = mlp_act[0]
 
         # Compute reconstruction and error
@@ -183,43 +203,27 @@ def compute_attribution_graph(
         created_nodes: dict[tuple[int, int], str] = {}  # (pos, feat_id) -> node_id
 
         # ---------------------------------------------------------------------
-        # Part A: Diagnostics (Logit 0 only, optional)
-        # ---------------------------------------------------------------------
-        with torch.no_grad():
-            if not is_sparse:
-                diag_grad = grads_per_logit[0][layer_idx]
-                if diag_grad is not None:
-                    if diag_grad.dim() == 3:
-                        diag_grad = diag_grad[0]
-                    diag_attr = features_f * (diag_grad.float() @ W_dec.t())
-                    active = diag_attr[features.abs() > 0].abs()
-                    if active.numel() > 0:
-                        pcts = torch.quantile(
-                            active.float(),
-                            torch.tensor([0.5, 0.9, 0.95, 0.99, 1.0], device=active.device),
-                        )
-                        print(
-                            f"  Layer {layer_id} attribution |a| distribution "
-                            f"(active features, logit 0):"
-                        )
-                        print(
-                            f"    p50={pcts[0]:.4f}  p90={pcts[1]:.4f}  "
-                            f"p95={pcts[2]:.4f}  p99={pcts[3]:.4f}  max={pcts[4]:.4f}"
-                        )
-
-        # ---------------------------------------------------------------------
         # Part B: Attribution Computation (Features & Error)
         # ---------------------------------------------------------------------
         for j in range(n_logits):
-            dlogit_dmlp = grads_per_logit[j][layer_idx]
+            dlogit_dmlp = grads_per_logit[j][layer_idx]  # J v_in
             if dlogit_dmlp is None:
                 continue
-            if dlogit_dmlp.dim() == 3:
+            if dlogit_dmlp.dim() == 3:  # TODO: add batch_size > 1 support
                 dlogit_dmlp = dlogit_dmlp[0]  # [seq_len, d_model]
 
             # --- 1. Feature Attribution ---
-            dec_dot_grad = dlogit_dmlp.float() @ W_dec.t()
-            attributions = features_f * dec_dot_grad
+            dec_dot_grad = dlogit_dmlp.float() @ W_dec.t()  # [seq_len, n_features] (W_dec^T J v_in)
+            attributions = features_f * dec_dot_grad  # [seq_len, n_features] (a_s * W_dec^T J v_in)
+
+            """ Comment:
+            Cross-Layer Transcoder would be:
+            attribution = a_s * (
+                W_dec^{i→i}^T @ J_{i→final} +
+                W_dec^{i→i+1}^T @ J_{i+1→final} +
+                W_dec^{i→i+2}^T @ J_{i+2→final} +
+                ...
+            )"""
 
             if is_sparse:
                 attributions = attributions.coalesce()
@@ -227,7 +231,7 @@ def compute_attribution_graph(
                 attr_indices = attributions.indices()
                 feat_vals = features_f.coalesce().values()
 
-                mask = (feat_vals.abs() > 0) & (attr_vals.abs() > 0)
+                mask = attr_vals.abs() > 0
                 valid_indices = torch.nonzero(mask).squeeze(1)
 
                 if valid_indices.numel() > 0:
@@ -246,7 +250,7 @@ def compute_attribution_graph(
                 else:
                     loop_zip = []
             else:
-                mask = (features.abs() > 0) & (attributions.abs() > 0)
+                mask = attributions.abs() > 0
                 edge_pos, edge_feat = mask.nonzero(as_tuple=True)
                 if len(edge_pos) > 0:
                     attr_vals_list = attributions[edge_pos, edge_feat].tolist()
