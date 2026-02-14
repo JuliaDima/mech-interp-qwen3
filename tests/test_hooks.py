@@ -201,9 +201,9 @@ class TestLinearizedHookManager:
 
         # Should have:
         # 1 embedding hook
-        # n_layers attention hooks
         # (2 * n_layers + 1) norm hooks (input_norm, post_attn_norm per layer, + final norm)
-        expected_handles = 1 + enhanced_mock_model.n_layers + (2 * enhanced_mock_model.n_layers + 1)
+        # Note: Attention detach hooks are no longer handled by LinearizedHookManager
+        expected_handles = 1 + (2 * enhanced_mock_model.n_layers + 1)
         assert len(lin_hooks.handles) == expected_handles
 
         lin_hooks.remove()
@@ -221,24 +221,6 @@ class TestLinearizedHookManager:
         # The embeddings should require grad after the hook
         # We can't directly access them, but we can verify gradients flow through
         assert outputs.logits.requires_grad
-
-        lin_hooks.remove()
-
-    def test_attention_detach(self, enhanced_mock_model):
-        """Test that attention outputs are detached."""
-        lin_hooks = LinearizedHookManager(enhanced_mock_model)
-        lin_hooks.install()
-
-        input_ids = torch.randint(0, 100, (1, 10))
-
-        with torch.set_grad_enabled(True):
-            outputs = enhanced_mock_model(input_ids)
-            loss = outputs.logits.sum()
-            loss.backward()
-
-        # We should be able to backward without errors
-        # Attention detaching should not break the graph
-        assert True  # If we got here, backward worked
 
         lin_hooks.remove()
 
@@ -405,25 +387,6 @@ class TestAttributionGraphCompatibility:
             assert hooker.cache[lid].mlp_out.shape == (8, enhanced_mock_model.d_model)
 
         hooker.remove()
-
-    def test_frozen_attention_patterns(self, enhanced_mock_model):
-        """Test that attention patterns can be frozen for attribution graphs."""
-        from mechinterp_qwen3.hooks import LinearizedHookManager
-
-        lin_hooks = LinearizedHookManager(enhanced_mock_model)
-        lin_hooks.install()
-
-        input_ids = torch.randint(0, 100, (1, 10))
-
-        # First forward pass
-        with torch.set_grad_enabled(True):
-            outputs1 = enhanced_mock_model(input_ids)
-
-        # The attention patterns are effectively frozen by the detach hook
-        # This is a smoke test - the real verification is in perturbation experiments
-        assert outputs1.logits is not None
-
-        lin_hooks.remove()
 
     def test_error_correction_workflow_support(self, enhanced_mock_model):
         """Test that hooks support error correction workflow for attribution graphs."""
