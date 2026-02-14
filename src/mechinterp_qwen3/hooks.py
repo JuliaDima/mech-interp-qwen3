@@ -105,15 +105,8 @@ class LinearizedHookManager:
         self.handles.append(embed.register_forward_hook(embed_hook))
 
         # 2. Attention detach hooks: detach attention output, re-enable grad
-        for layer in self.model.model.layers:
-            attn = layer.self_attn
-
-            def attn_hook(module, input, output):
-                detached = output[0].detach()
-                detached.requires_grad_(True)
-                return (detached,) + output[1:]
-
-            self.handles.append(attn.register_forward_hook(attn_hook))
+        # REMOVED: Unconditional detachment loop caused zero attributions.
+        # Strict attention freezing (Pattern only) is now handled via monkey-patching in `forward_with_sae.py`.
 
         # 3. RMSNorm linearize hooks: treat scale factor as constant
         norm_modules = []

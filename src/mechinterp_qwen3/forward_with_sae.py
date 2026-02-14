@@ -198,8 +198,79 @@ def forward_linearized_with_sae_features(
     embed_module = model.get_input_embeddings()
     embed_handle = embed_module.register_forward_hook(embed_hook)
 
-    # Forward pass with gradients
-    with torch.set_grad_enabled(True):
+    # --- MONKEY PATCHING ATTENTION ---
+    # We need to freeze attention patterns (QK) but allow gradient flow through values (OV).
+    # The only way to do this strictly is to patch the attention forward pass.
+
+    import contextlib
+
+    from transformers.models.qwen2 import modeling_qwen2
+
+    # 1. Save original eager attention function
+    original_eager_forward = modeling_qwen2.eager_attention_forward
+
+    # 2. Define patched function that detaches attn_weights
+    def patched_eager_attention_forward(
+        module, query, key, value, attention_mask, scaling, dropout=0.0, **kwargs
+    ):
+        # Call the ORIGINAL logic up to weight computation, but we have to replicate it
+        # because the original function does everything in one go.
+        # We'll rely on the source code of eager_attention_forward from transformers.
+
+        # Re-implementation of eager_attention_forward with DETACH
+        # Source: https://github.com/huggingface/transformers/blob/main/src/transformers/models/qwen2/modeling_qwen2.py
+
+        key_states = modeling_qwen2.repeat_kv(key, module.num_key_value_groups)
+        value_states = modeling_qwen2.repeat_kv(value, module.num_key_value_groups)
+
+        attn_weights = torch.matmul(query, key_states.transpose(2, 3)) * scaling
+        if attention_mask is not None:
+            causal_mask = attention_mask[:, :, :, : key_states.shape[-2]]
+            attn_weights = attn_weights + causal_mask
+
+        attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(
+            query.dtype
+        )
+        attn_weights = torch.nn.functional.dropout(
+            attn_weights, p=dropout, training=module.training
+        )
+
+        # --- CRITICAL CHANGE: DETACH ATTENTION WEIGHTS ---
+        attn_weights = attn_weights.detach()
+        # -------------------------------------------------
+
+        attn_output = torch.matmul(attn_weights, value_states)
+        attn_output = attn_output.transpose(1, 2).contiguous()
+
+        return attn_output, attn_weights
+
+    # Context manager to apply checks
+    @contextlib.contextmanager
+    def patch_attention():
+        # Force eager implementation
+        original_attn_implementation = model.config._attn_implementation
+        model.config._attn_implementation = "eager"
+
+        # Try to update all layer configs as well, just in case
+        for layer in model.model.layers:
+            if hasattr(layer.self_attn, "config"):
+                layer.self_attn.config._attn_implementation = "eager"
+
+        # Apply patch
+        modeling_qwen2.eager_attention_forward = patched_eager_attention_forward
+        try:
+            yield
+        finally:
+            # Restore
+            modeling_qwen2.eager_attention_forward = original_eager_forward
+            model.config._attn_implementation = original_attn_implementation
+            for layer in model.model.layers:
+                if hasattr(layer.self_attn, "config"):
+                    layer.self_attn.config._attn_implementation = original_attn_implementation
+
+    # Forward pass with gradients AND monkey-patched attention
+    with torch.set_grad_enabled(True), patch_attention():
+        # Ensure model uses the new config
         outputs = model(**inputs)
         logits = outputs.logits[0]  # [seq_len, vocab_size]
 
