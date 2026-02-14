@@ -45,16 +45,18 @@ class MLPHookManager:
             def pre_hook(module, inputs, lid=lid):
                 # inputs is a tuple; first is hidden_states [batch, seq, d_model]
                 x = inputs[0]  # [1, seq_len, d_model]
-                # Save batch=0; you can extend to batch later.
-                if self.detach:
+                if self.detach:  # TODO: for now, only batch 0, but can extend later
                     self.cache[lid].mlp_in = x[0].detach().to("cpu")
                 else:
                     self.cache[lid].mlp_in = x[0]
 
             def fwd_hook(module, inputs, output, lid=lid):
-                # output should be [batch, seq, d_model]
-                y = output[0]  # [1, seq_len, d_model]
-                if self.detach:
+                # If tuple, first element is [batch, seq, d_model]
+                # If plain tensor, it's directly [batch, seq, d_model]
+                y = output[0] if isinstance(output, tuple) else output
+
+                # y is [batch, seq, d_model]
+                if self.detach:  # TODO: for now, only batch 0, but can extend later
                     self.cache[lid].mlp_out = y[0].detach().to("cpu")
                 else:
                     # Keep the FULL tensor (not y[0]) so it remains in the
@@ -119,7 +121,10 @@ class LinearizedHookManager:
         norm_modules.append(self.model.model.norm)
 
         for norm in norm_modules:
-
+            # Standard RMSNorm forward pass
+            # rms_scale = sqrt(mean(x^2) + eps)
+            # output = weight * (x / rms_scale)
+            # But we linearize the scale factor
             def norm_hook(module, input, output):
                 x = input[0]
                 with torch.no_grad():  # freeze the denominator
