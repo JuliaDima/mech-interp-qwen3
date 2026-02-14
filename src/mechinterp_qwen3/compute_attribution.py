@@ -95,32 +95,55 @@ def compute_attribution_graph(
     # h is the pre-logit hidden state at the last position (with live grad)
     h = pre_logit_hidden[0, last_pos]  # [d_model]
 
+    # Embeddings for token attribution
+    embedding_act = forward_result["embedding_activations"]  # [seq_len, d_model]
+
     # Cast demeaned_vecs to same dtype as h for the element-wise multiply
     demeaned_vecs = demeaned_vecs.to(dtype=h.dtype, device=h.device)  # logits_j - mean(logits)
 
     # Compute gradients for each salient logit
     grads_per_logit = []
+    token_attributions = []  # Store token attributions [n_logits, seq_len]
+
     for j in range(n_logits):
         # Element-wise multiply + sum avoids matmul backward codepath
         # (matmul backward can call .H on 1-D tensors in some PyTorch versions)
         target_j = (h * demeaned_vecs[j]).sum()  # W_j_T @ h * (logits_j - mean(logits))
 
         model.zero_grad(set_to_none=True)
+
+        # We want gradients w.r.t MLP activations AND Embeddings
+        inputs_for_grad = mlp_tensors + [embedding_act]
+
         grads_j = torch.autograd.grad(
             target_j,
-            mlp_tensors,
-            retain_graph=(j < n_logits - 1),
+            inputs_for_grad,
+            retain_graph=(
+                j < n_logits - 1
+            ),  # keep computational graph until final iteration to free memory
             allow_unused=True,
-        )  # grads_j[l] = ∂(target_j) / ∂(MLP_out(l))
-        # Detach grads immediately to free graph memory
-        grads_per_logit.append(tuple(g.detach() if g is not None else None for g in grads_j))
+        )
+
+        # Split MLP grads and Embedding grad
+        mlp_grads = grads_j[:-1]  # [MLP_out^{(0)}, MLP_out^{(1)}, ..., MLP_out^{(L)}]
+        embed_grad = grads_j[-1]  # [seq_len, d_model]
+
+        # Detach MLP grads
+        grads_per_logit.append(tuple(g.detach() if g is not None else None for g in mlp_grads))
+
+        # Compute and detach token attribution immediately
+        if embed_grad is not None:
+            # Attr = Dot(Embed, Grad)
+            tok_attr = (embedding_act * embed_grad).sum(dim=-1).detach()  # [seq_len]
+            token_attributions.append(tok_attr)
+        else:
+            token_attributions.append(None)
 
     # Save detached MLP activations for error computation
     # (We need the values, but not the graph, to compute residuals)
     mlp_acts_detached = {lid: act.detach() for lid, act in mlp_activations.items()}
 
-    # Free the computation graph — no longer needed
-    del pre_logit_hidden, h, mlp_activations, mlp_tensors, logits
+    del pre_logit_hidden, h, mlp_activations, mlp_tensors, logits, embedding_act
     del forward_result
 
     # Phase 4: Build graph
@@ -151,6 +174,21 @@ def compute_attribution_graph(
         )
         graph.add_node(logit_node)
         logit_nodes.append(logit_node)
+
+        # Add Token Attribution Edges
+        tok_attr = token_attributions[j]  # [batch_size, seq_len]
+        if tok_attr is not None:
+            # Flatten in case of batch dim [1, seq]
+            # This ensures pos corresponds to token pos in sequence
+            for pos in range(tok_attr.view(-1).shape[0]):
+                val = tok_attr.view(-1)[pos].item()
+                print(f"Token {pos}: {val}")
+                if abs(val) > 1e-6:  # Using small epsilon for float comparison
+                    token_node = graph.get_node(f"token_{pos}")
+                    if token_node:
+                        graph.add_edge(
+                            Edge(source=token_node, target=logit_node, attribution_score=val)
+                        )
 
     # Phase 5: Vectorized attribution via matmul (no large gather)
     # Key identity: attribution[pos,feat] = features[pos,feat] * (W_dec[feat] @ grad[pos])

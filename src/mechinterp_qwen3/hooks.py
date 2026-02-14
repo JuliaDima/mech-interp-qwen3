@@ -1,3 +1,5 @@
+# TODO: Attention is detached, This works fine for CLT, but not really for PLT
+
 from __future__ import annotations
 
 from dataclasses import dataclass
