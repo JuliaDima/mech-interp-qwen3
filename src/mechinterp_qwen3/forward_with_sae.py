@@ -189,6 +189,15 @@ def forward_linearized_with_sae_features(
 
     final_norm_handle = model.model.norm.register_forward_hook(final_norm_hook)
 
+    # Hook on embeddings to capture them
+    embedding_captured = {}
+
+    def embed_hook(module, input, output):
+        embedding_captured["value"] = output
+
+    embed_module = model.get_input_embeddings()
+    embed_handle = embed_module.register_forward_hook(embed_hook)
+
     # Forward pass with gradients
     with torch.set_grad_enabled(True):
         outputs = model(**inputs)
@@ -207,8 +216,13 @@ def forward_linearized_with_sae_features(
     pre_logit = pre_logit_hidden["value"]  # [1, seq_len, d_model]
     pre_logit.retain_grad()
 
+    if "value" not in embedding_captured:
+        raise RuntimeError("No embedding activations captured.")
+    embedding_captured["value"].retain_grad()
+
     # Remove all hooks
     final_norm_handle.remove()
+    embed_handle.remove()
     mlp_hooks.remove()
     lin_hooks.remove()
 
@@ -240,4 +254,5 @@ def forward_linearized_with_sae_features(
         "sae_features": sae_features,
         "mlp_activations": mlp_activations,
         "pre_logit_hidden": pre_logit,
+        "embedding_activations": embedding_captured["value"],
     }
