@@ -9,7 +9,7 @@ from safetensors import safe_open
 from safetensors.torch import save_file
 from torch.nn import functional as F
 
-from transcoder.activation_functions import JumpReLU, get_default_device
+from .activation_functions import JumpReLU, get_default_device
 
 
 class CrossLayerTranscoder(torch.nn.Module):
@@ -87,7 +87,7 @@ class CrossLayerTranscoder(torch.nn.Module):
         elif activation_function == "relu":
             self.activation_function = F.relu
         else:
-            raise ValueError(f"Invalid activation function: {activation_function}")
+            raise ValueError(f"Unknown activation function: {activation_function}")
 
         if not lazy_encoder:
             self.W_enc = torch.nn.Parameter(
