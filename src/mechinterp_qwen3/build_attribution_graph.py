@@ -84,18 +84,6 @@ def main() -> None:
         help="Cumulative probability threshold for salient logit selection",
     )
     ap.add_argument(
-        "--feature_threshold",
-        type=float,
-        default=0.01,
-        help="Minimum feature activation to include",
-    )
-    ap.add_argument(
-        "--min_attribution",
-        type=float,
-        default=1e-3,
-        help="Minimum |attribution score| to include an edge in the raw graph",
-    )
-    ap.add_argument(
         "--node_threshold",
         type=float,
         default=0.8,
@@ -106,12 +94,6 @@ def main() -> None:
         type=float,
         default=0.98,
         help="Pruning: keep fewest edges covering this fraction of total attribution",
-    )
-    ap.add_argument(
-        "--top_k_features",
-        type=int,
-        default=None,
-        help="Sparsity: keep only top K features per token (save memory)",
     )
     args = ap.parse_args()
 
@@ -166,9 +148,6 @@ def main() -> None:
         transcoder_repo=args.transcoder_repo,
         max_n_logits=args.max_n_logits,
         desired_logit_prob=args.desired_logit_prob,
-        feature_threshold=args.feature_threshold,
-        min_attribution=args.min_attribution,
-        top_k_features=args.top_k_features,
     )
 
     # Save raw graph
@@ -206,8 +185,6 @@ def main() -> None:
         "layers": layers,
         "max_n_logits": args.max_n_logits,
         "desired_logit_prob": args.desired_logit_prob,
-        "feature_threshold": args.feature_threshold,
-        "min_attribution": args.min_attribution,
         "node_threshold": args.node_threshold,
         "edge_threshold": args.edge_threshold,
         "raw_graph": {

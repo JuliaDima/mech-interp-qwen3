@@ -44,7 +44,7 @@ class MLPHookManager:
 
             def pre_hook(module, inputs, lid=lid):
                 # inputs is a tuple; first is hidden_states [batch, seq, d_model]
-                x = inputs[0]
+                x = inputs[0]  # [1, seq_len, d_model]
                 # Save batch=0; you can extend to batch later.
                 if self.detach:
                     self.cache[lid].mlp_in = x[0].detach().to("cpu")
@@ -53,7 +53,7 @@ class MLPHookManager:
 
             def fwd_hook(module, inputs, output, lid=lid):
                 # output should be [batch, seq, d_model]
-                y = output
+                y = output[0]  # [1, seq_len, d_model]
                 if self.detach:
                     self.cache[lid].mlp_out = y[0].detach().to("cpu")
                 else:

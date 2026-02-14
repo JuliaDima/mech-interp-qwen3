@@ -26,9 +26,6 @@ def compute_attribution_graph(
     *,
     max_n_logits: int = 10,
     desired_logit_prob: float = 0.95,
-    feature_threshold: float = 0.01,
-    min_attribution: float = 1e-3,
-    top_k_features: int | None = None,
 ) -> AttributionGraph:
     """Compute attribution graph from input tokens through SAE features to output logits.
 
@@ -40,16 +37,13 @@ def compute_attribution_graph(
         transcoder_repo: HuggingFace repo containing transcoders
         max_n_logits: Maximum number of top logits to consider
         desired_logit_prob: Cumulative probability threshold for logit selection
-        feature_threshold: Minimum feature activation to include
-        min_attribution: Minimum |attribution score| to include an edge
-        top_k_features: If set, keep only top K features per token (sparse storage)
 
     Returns:
         Attribution graph with nodes and edges
     """
     # Phase 1: Setup
     print(f"Loading transcoders for layers: {layers_to_analyze}")
-    transcoders = load_transcoders_for_layers(
+    transcoders = load_transcoders_for_layers(  # list of transcoders for each layer
         layer_ids=layers_to_analyze,
         transcoder_repo=transcoder_repo,
         device=str(model.device),
@@ -62,7 +56,6 @@ def compute_attribution_graph(
         transcoders=transcoders,
         prompt=prompt,
         layers_to_analyze=layers_to_analyze,
-        top_k_features=top_k_features,
     )
 
     tokens = forward_result["tokens"]
@@ -199,7 +192,7 @@ def compute_attribution_graph(
                     if diag_grad.dim() == 3:
                         diag_grad = diag_grad[0]
                     diag_attr = features_f * (diag_grad.float() @ W_dec.t())
-                    active = diag_attr[features.abs() > feature_threshold].abs()
+                    active = diag_attr[features.abs() > 0].abs()
                     if active.numel() > 0:
                         pcts = torch.quantile(
                             active.float(),
@@ -234,7 +227,7 @@ def compute_attribution_graph(
                 attr_indices = attributions.indices()
                 feat_vals = features_f.coalesce().values()
 
-                mask = (feat_vals.abs() > feature_threshold) & (attr_vals.abs() > min_attribution)
+                mask = (feat_vals.abs() > 0) & (attr_vals.abs() > 0)
                 valid_indices = torch.nonzero(mask).squeeze(1)
 
                 if valid_indices.numel() > 0:
@@ -253,7 +246,7 @@ def compute_attribution_graph(
                 else:
                     loop_zip = []
             else:
-                mask = (features.abs() > feature_threshold) & (attributions.abs() > min_attribution)
+                mask = (features.abs() > 0) & (attributions.abs() > 0)
                 edge_pos, edge_feat = mask.nonzero(as_tuple=True)
                 if len(edge_pos) > 0:
                     attr_vals_list = attributions[edge_pos, edge_feat].tolist()
@@ -302,7 +295,7 @@ def compute_attribution_graph(
             for pos, attr_val in enumerate(error_attr.tolist()):
                 if pos < start_pos:
                     continue
-                if abs(attr_val) > min_attribution:
+                if abs(attr_val) > 0:
                     # Check/Create Error Node
                     # One error node per (layer, position)
                     error_node_id = f"error_L{layer_id}_P{pos}"
@@ -346,7 +339,7 @@ def compute_attribution_graph(
                 for pos, attr_val in enumerate(bias_attr.view(-1).tolist()):
                     if pos < start_pos:
                         continue
-                    if abs(attr_val) > min_attribution:
+                    if abs(attr_val) > 0:
                         # Create Bias Node (one per layer, shared across positions?
                         # Actually, bias contribution is position-dependent because gradient is pos-dependent)
                         # Let's create one bias node per layer/position to be consistent with error nodes
@@ -421,8 +414,6 @@ def compute_attribution_graph(
 
         print(f"  Layer {layer_id}: {len(created_nodes)} feature nodes, {edge_count} edges so far")
 
-    print(f"Added {feature_count} SAE feature nodes (threshold={feature_threshold})")
-    print(f"Added {edge_count} attribution edges (threshold={min_attribution})")
     print(f"\nGraph construction complete: {graph}")
 
     return graph
