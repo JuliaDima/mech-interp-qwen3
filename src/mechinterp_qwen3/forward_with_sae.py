@@ -95,10 +95,6 @@ def forward_with_sae_features_grad(
 
         # Encode to get SAE features (with gradients)
         features = transcoder.encode(mlp_in.unsqueeze(0))  # Expects [batch, seq, d_model] usually?
-        # Transcoder.encode handles [1, seq, d] or [seq, d]?
-        # SingleLayerTranscoder.encode usually handles it.
-        # Let's double check. extract_sae_features in load_transcoder.py unsqueezes.
-        # So we should probably unsqueeze here too to be safe.
 
         features = features.squeeze(0)
 
@@ -146,7 +142,7 @@ def forward_linearized_with_sae_features(
     input_ids = inputs["input_ids"].squeeze(0)
     tokens = [tokenizer.decode([tok_id]) for tok_id in input_ids]  # [seq_len]
 
-    # Defensively ensure a "dummy" token exists at position 0 to absorb artifacts. (aka "Sink Token")
+    # Defensively ensure a "dummy" token exists at position 0 to absorb artifacts. (aka "sink token")
     if tokens[0] not in tokenizer.all_special_ids:
         candidate_bos_token_ids = [
             tokenizer.bos_token_id,
@@ -228,6 +224,11 @@ def forward_linearized_with_sae_features(
 
         features = transcoder.encode(mlp_in.unsqueeze(0))  # [1, seq_len, transcoder hidden size]
         features = features.squeeze(0)  # [seq_len, transcoder hidden size]
+
+        # Convert to sparse if highly sparse (>80% zeros) for memory efficiency
+        sparsity = 1.0 - (features.count_nonzero().item() / features.numel())
+        if sparsity > 0.8:
+            features = features.to_sparse()
 
         features.retain_grad()
         sae_features[layer_id] = features
