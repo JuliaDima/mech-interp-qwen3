@@ -27,19 +27,15 @@ export LD_LIBRARY_PATH=/home/eid23/miniforge3/envs/p28_py311_env/lib
 # Run your program
 # Build attribution graph for a specific example
 python -m circuit_tracer attribute \
-  --prompt "You are solving a simple comparison task.
-Two numbers are given: A and B.
-Answer with a single character: 'A' if A is larger, otherwise 'B'.
-
-A = 864
-B = 394
-Answer:" \
+  --prompt "You are solving a simple comparison task. Two numbers are given: A and B. Answer with a single character: 'A' if A is larger, otherwise 'B'. A = 864, B = 394, Answer: " \
   --transcoder_set mwhanna/qwen3-4b-transcoders \
-  --model Qwen/Qwen3-4B-Instruct-2507 \
-  --slug gt_864_394 \
-  --graph_file_dir graphs \
-  --backend nnsight \
+  --model Qwen/Qwen3-4B \
+  --slug qwen3-4b \
+  --graph_file_dir ./graphs \
   --verbose \
+  --node_threshold 0.7 \
+  --edge_threshold 0.8 \
+  --backend transformerlens \
   --lazy-encoder \
   --dtype bfloat16 \
   --offload disk \

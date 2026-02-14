@@ -32,15 +32,8 @@ export LD_LIBRARY_PATH=/home/eid23/miniforge3/envs/p28_py311_env/lib
 
 # Build attribution graph for a specific example
 miq-build-graph \
-  --prompt "You are solving a simple comparison task.
-Two numbers are given: A and B.
-Answer with a single character: 'A' if A is larger, otherwise 'B'.
-
-A = 864
-B = 394
-Answer: " \
+  --prompt "You are solving a simple comparison task. Two numbers are given: A and B. Answer with a single character: 'A' if A is larger, otherwise 'B'. A = 864, B = 394, Answer: " \
   --slug gt_864_394 \
   --layers 4,12,20 \
-  --graph_dir graphs \
-  --top_k_features 10000 \
+  --graph_file_dir graphs \
   2>&1 | tee logs/job_1gpu_$(date +%s).log
