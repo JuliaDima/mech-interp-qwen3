@@ -4,6 +4,7 @@ Implements the Attribution Graphs paper methodology:
 - Linearized gradient flow (detached attention, frozen RMSNorm scale)
 - Cumulative-probability logit selection with demeaned unembedding vectors
 - Vectorized attribution computation
+- Inter-layer connectivity via reconstructive patching and salient feature backprop.
 TODO: This implementation assumes batch_size 1 and Per-Layer Transcoder (SingleLayerTranscoder). Should extend to batch_size > 1 and Cross-Layer Transcoder.
 TODO: Maybe use thresholding instead of 0 for masking of feat * attr_vals ?
 """
@@ -28,6 +29,7 @@ def compute_attribution_graph(
     *,
     max_n_logits: int = 10,
     desired_logit_prob: float = 0.95,
+    use_patching: bool = True,
 ) -> AttributionGraph:
     """Compute attribution graph from input tokens through SAE features to output logits.
 
@@ -39,6 +41,7 @@ def compute_attribution_graph(
         transcoder_repo: HuggingFace repo containing transcoders
         max_n_logits: Maximum number of top logits to consider
         desired_logit_prob: Cumulative probability threshold for logit selection
+        use_patching: Whether to patch MLP outputs with SAE reconstructions to enable gradients.
 
     Returns:
         Attribution graph with nodes and edges
@@ -58,6 +61,7 @@ def compute_attribution_graph(
         transcoders=transcoders,
         prompt=prompt,
         layers_to_analyze=layers_to_analyze,
+        use_patching=use_patching,
     )
 
     tokens = forward_result["tokens"]
@@ -67,6 +71,7 @@ def compute_attribution_graph(
     pre_logit_hidden = forward_result[
         "pre_logit_hidden"
     ]  # [batch, seq_len, d_model] # final RMSNorm layer before logits
+    embedding_act = forward_result["embedding_activations"]
 
     last_pos = len(tokens) - 1
 
@@ -91,13 +96,7 @@ def compute_attribution_graph(
     mlp_tensors = [
         mlp_activations[layer_id] for layer_id in layers_to_analyze
     ]  # [MLP_out^{(0)}, MLP_out^{(1)}, ..., MLP_out^{(L)}]
-
-    # h is the pre-logit hidden state at the last position (with live grad)
     h = pre_logit_hidden[0, last_pos]  # [d_model]
-
-    # Embeddings for token attribution
-    embedding_act = forward_result["embedding_activations"]  # [seq_len, d_model]
-
     # Cast demeaned_vecs to same dtype as h for the element-wise multiply
     demeaned_vecs = demeaned_vecs.to(dtype=h.dtype, device=h.device)  # logits_j - mean(logits)
 
@@ -119,7 +118,7 @@ def compute_attribution_graph(
             target_j,
             inputs_for_grad,
             retain_graph=(
-                j < n_logits - 1
+                j < n_logits - 1 or use_patching
             ),  # keep computational graph until final iteration to free memory
             allow_unused=True,
         )
@@ -143,27 +142,18 @@ def compute_attribution_graph(
     # (We need the values, but not the graph, to compute residuals)
     mlp_acts_detached = {lid: act.detach() for lid, act in mlp_activations.items()}
 
-    del pre_logit_hidden, h, mlp_activations, mlp_tensors, logits, embedding_act
+    del pre_logit_hidden, h, mlp_tensors, logits, embedding_act
     del forward_result
 
-    # Phase 4: Build graph
+    # Phase 4: Build nodes and logit-edges
     graph = AttributionGraph()
-
-    # Start attribution from position 1 to ignore BOS/system tokens which often cause artifacts
     start_pos = 1
 
-    # Add input token nodes
     for pos, token_str in enumerate(tokens):
         graph.add_node(
-            Node(
-                node_id=f"token_{pos}",
-                node_type="token",
-                token_pos=pos,
-                token_str=token_str,
-            )
+            Node(node_id=f"token_{pos}", node_type="token", token_pos=pos, token_str=token_str)
         )
 
-    # Add logit nodes
     logit_nodes = []
     for j in range(n_logits):
         tok_id = logit_indices[j].item()
@@ -178,28 +168,22 @@ def compute_attribution_graph(
         graph.add_node(logit_node)
         logit_nodes.append(logit_node)
 
-        # Add Token Attribution Edges
-        tok_attr = token_attributions[j]  # [batch_size, seq_len]
+        tok_attr = token_attributions[j]
         if tok_attr is not None:
-            # Flatten in case of batch dim [1, seq]
-            # This ensures pos corresponds to token pos in sequence
             for pos in range(tok_attr.view(-1).shape[0]):
                 if pos < start_pos:
                     continue
                 val = tok_attr.view(-1)[pos].item()
-                if abs(val) > 1e-6:  # Using small epsilon for float comparison
+                if abs(val) > 1e-6:
                     token_node = graph.get_node(f"token_{pos}")
                     if token_node:
                         graph.add_edge(
                             Edge(source=token_node, target=logit_node, attribution_score=val)
                         )
 
-    # Phase 5: Vectorized attribution via matmul (no large gather)
-    # Key identity: attribution[pos,feat] = features[pos,feat] * (W_dec[feat] @ grad[pos])
-    #             = features * (grad @ W_dec.T)     — [seq, n_feat], zeros stay zero
-    print("Computing attributions...")
-    edge_count = 0
-    feature_count = 0
+    # Phase 5: Feature Attribution
+    print("Computing feature attributions...")
+    salient_per_layer: dict[int, list[tuple[int, int, Node]]] = {}
 
     for layer_idx, layer_id in enumerate(layers_to_analyze):
         features = sae_features[layer_id]  # [seq_len, n_features] (should be sparse)
@@ -217,8 +201,6 @@ def compute_attribution_graph(
 
         transcoder = transcoders[layer_id]
         W_dec = transcoder.W_dec.detach().float()  # [n_features, d_model]
-
-        # Get MLP activations for error computation
         mlp_act = mlp_acts_detached[layer_id].float()  # [batch, seq_len, d_model]
         if mlp_act.dim() == 3:  # TODO: batch size is 1, but should support batch_size > 1
             mlp_act = mlp_act[0]
@@ -237,9 +219,7 @@ def compute_attribution_graph(
             error = mlp_act - reconstruction.detach()
 
         features_f = features.float() if not is_sparse else features
-
-        # Track which (pos, feat_id) have a node already
-        created_nodes: dict[tuple[int, int], str] = {}  # (pos, feat_id) -> node_id
+        created_nodes: dict[tuple[int, int], Node] = {}
 
         # ---------------------------------------------------------------------
         # Part B: Attribution Computation (Features & Error)
@@ -308,27 +288,24 @@ def compute_attribution_graph(
                 key = (pos, feat_id)
                 if key not in created_nodes:
                     node_id = f"feature_L{layer_id}_P{pos}_F{feat_id}"
-                    graph.add_node(
-                        Node(
-                            node_id=node_id,
-                            node_type="feature",
-                            layer=layer_id,
-                            feature_id=feat_id,
-                            token_pos=pos,
-                            activation=feat_val,
-                        )
+                    node = Node(
+                        node_id=node_id,
+                        node_type="feature",
+                        layer=layer_id,
+                        feature_id=feat_id,
+                        token_pos=pos,
+                        activation=feat_val,
                     )
-                    created_nodes[key] = node_id
-                    feature_count += 1
+                    graph.add_node(node)
+                    created_nodes[key] = node
 
                 graph.add_edge(
                     Edge(
-                        source=graph.get_node(created_nodes[key]),
+                        source=created_nodes[key],
                         target=logit_nodes[j],
                         attribution_score=attr_val,
                     )
                 )
-                edge_count += 1
 
             # --- 2b. Error Term Attribution ---
             # Attribution = Error · Grad
@@ -338,7 +315,7 @@ def compute_attribution_graph(
             for pos, attr_val in enumerate(error_attr.tolist()):
                 if pos < start_pos:
                     continue
-                if abs(attr_val) > 0:
+                if abs(attr_val) > 1e-7:
                     # Check/Create Error Node
                     # One error node per (layer, position)
                     error_node_id = f"error_L{layer_id}_P{pos}"
@@ -362,31 +339,18 @@ def compute_attribution_graph(
                             attribution_score=attr_val,
                         )
                     )
-                    edge_count += 1
 
             # --- 2c. Bias Term Attribution ---
             # The decoder bias b_dec is a constant vector added to the reconstruction
             # Attribution = b_dec · Grad
             if hasattr(transcoder, "b_dec"):
                 b_dec = transcoder.b_dec.detach().float()  # [d_model]
-                bias_attr = (b_dec * dlogit_dmlp.float()).sum(
-                    dim=-1
-                )  # scalar (since batch=1 usually)
-
-                # If dlogit_dmlp has sequence dim, bias_attr might be [seq]
-                # But b_dec is global (not seq-dependent), so this is technically
-                # adding the *same* bias vector at every position.
-                # The gradient dlogit_dmlp is [seq, d_model].
-                # So bias_attr is [seq].
+                bias_attr = (b_dec * dlogit_dmlp.float()).sum(dim=-1)  # [seq]
 
                 for pos, attr_val in enumerate(bias_attr.view(-1).tolist()):
                     if pos < start_pos:
                         continue
-                    if abs(attr_val) > 0:
-                        # Create Bias Node (one per layer, shared across positions?
-                        # Actually, bias contribution is position-dependent because gradient is pos-dependent)
-                        # Let's create one bias node per layer/position to be consistent with error nodes
-
+                    if abs(attr_val) > 1e-7:
                         bias_node_id = f"bias_L{layer_id}_P{pos}"
                         if graph.get_node(bias_node_id) is None:
                             graph.add_node(
@@ -395,7 +359,7 @@ def compute_attribution_graph(
                                     node_type="bias",
                                     layer=layer_id,
                                     token_pos=pos,
-                                    activation=1.0,  # Bias is constant, effectively activity 1.0 * b_dec
+                                    activation=1.0,  # Bias is constant
                                     feature_id=-2,  # Marker for bias
                                 )
                             )
@@ -407,7 +371,6 @@ def compute_attribution_graph(
                                 attribution_score=attr_val,
                             )
                         )
-                        edge_count += 1
             else:
                 bias_attr = torch.zeros_like(error_attr)
 
@@ -423,8 +386,7 @@ def compute_attribution_graph(
                 else:
                     direct_attr = torch.tensor(0.0, device=mlp_act.device)
 
-                # Sum of all feature attributions (sparse or dense)
-                # We need to filter feature attributions for pos >= start_pos
+                # Sum of all feature attributions
                 if is_sparse:
                     # Filter values where stored index (pos) >= start_pos
                     # attributions is sparse [seq, n_feat]
@@ -434,10 +396,7 @@ def compute_attribution_graph(
                 else:
                     feat_attr_sum = attributions[start_pos:].sum()
 
-                # Sum of error attribution
                 err_attr_sum = error_attr[start_pos:].sum()
-
-                # Sum of bias attribution
                 bias_attr_sum = bias_attr[start_pos:].sum()
 
                 total_component_attr = feat_attr_sum + err_attr_sum + bias_attr_sum
@@ -452,11 +411,79 @@ def compute_attribution_graph(
                 )
                 print(f"    Difference:        {diff:.6f} (Rel: {rel_diff:.2%})")
 
-                if rel_diff > 0.01:  # >1% error warning
+                if rel_diff > 0.01:
                     print(f"    [WARNING] Attribution mismatch in Layer {layer_id}!")
 
-        print(f"  Layer {layer_id}: {len(created_nodes)} feature nodes, {edge_count} edges so far")
+        layer_salient = []
+        for (pos, feat_id), node in created_nodes.items():
+            layer_salient.append((pos, feat_id, node))
+        layer_salient.sort(key=lambda x: x[2].total_attribution, reverse=True)
+        salient_per_layer[layer_id] = layer_salient[:20]
 
+    # Phase 6: Inter-Layer Connectivity
+    if use_patching and len(layers_to_analyze) > 1:
+        print("Computing feature-to-feature connectivity...")
+        for i in range(len(layers_to_analyze) - 1):
+            layer_n = layers_to_analyze[i]
+            layer_m = layers_to_analyze[i + 1]
+
+            targets_m = salient_per_layer.get(layer_m, [])
+            for pos_m, feat_m_id, node_m in targets_m:
+                target_tensor = sae_features[layer_m][pos_m, feat_m_id]
+                model.zero_grad(set_to_none=True)
+                patch_n = mlp_activations[layer_n]
+
+                grad_output = torch.autograd.grad(
+                    target_tensor, patch_n, retain_graph=True, allow_unused=True
+                )[0]
+                if grad_output is None:
+                    continue
+                if grad_output.dim() == 3:
+                    grad_output = grad_output[0]
+
+                transcoder_n = transcoders[layer_n]
+                W_dec_n = transcoder_n.W_dec.detach().float()
+                feat_n = sae_features[layer_n].float()
+                inter_attr = feat_n * (grad_output.float() @ W_dec_n.t())
+
+                if inter_attr.is_sparse:
+                    inter_attr = inter_attr.coalesce()
+                    attr_vals = inter_attr.values()
+                    attr_indices = inter_attr.indices()
+
+                    mask = attr_vals.abs() > 0
+                    valid_indices = torch.nonzero(mask).squeeze(1)
+
+                    if valid_indices.numel() > 0:
+                        final_attr_vals = attr_vals[valid_indices].tolist()
+                        final_pos_list = attr_indices[0, valid_indices].tolist()
+                        final_feat_list = attr_indices[1, valid_indices].tolist()
+
+                        loop_zip = zip(
+                            final_pos_list,
+                            final_feat_list,
+                            final_attr_vals,
+                            strict=True,
+                        )
+                    else:
+                        loop_zip = []
+                else:
+                    mask = inter_attr.abs() > 0
+                    pos_list, feat_list = mask.nonzero(as_tuple=True)
+                    loop_zip = zip(
+                        pos_list.tolist(),
+                        feat_list.tolist(),
+                        inter_attr[pos_list, feat_list].tolist(),
+                        strict=True,
+                    )
+
+                for pos_n, feat_n_id, val in loop_zip:
+                    if pos_n < start_pos:
+                        continue
+                    node_n = graph.get_node(f"feature_L{layer_n}_P{pos_n}_F{feat_n_id}")
+                    if node_n:
+                        graph.add_edge(Edge(source=node_n, target=node_m, attribution_score=val))
+
+    del mlp_activations
     print(f"\nGraph construction complete: {graph}")
-
     return graph

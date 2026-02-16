@@ -95,9 +95,20 @@ def main() -> None:
         default=0.98,
         help="Pruning: keep fewest edges covering this fraction of total attribution",
     )
+
+    def str2bool(v):
+        if isinstance(v, bool):
+            return v
+        if v.lower() in ("yes", "true", "t", "y", "1"):
+            return True
+        elif v.lower() in ("no", "false", "f", "n", "0"):
+            return False
+        else:
+            raise argparse.ArgumentTypeError("Boolean value expected.")
+
     ap.add_argument(
         "--use_patching",
-        type=bool,
+        type=str2bool,
         default=True,
         help="Whether to patch MLP outputs with SAE reconstructions to enable gradients",
     )
