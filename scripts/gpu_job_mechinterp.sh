@@ -36,4 +36,8 @@ miq-build-graph \
   --slug gt_864_394 \
   --layers 4,12,20 \
   --graph_file_dir graphs \
+  --max_n_logits 10 \
+  --use_patching True \
+  --node_threshold 0.8 \
+  --edge_threshold 0.85 \
   2>&1 | tee logs/job_1gpu_$(date +%s).log
