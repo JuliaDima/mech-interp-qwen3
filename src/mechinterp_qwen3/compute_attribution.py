@@ -149,6 +149,9 @@ def compute_attribution_graph(
     # Phase 4: Build graph
     graph = AttributionGraph()
 
+    # Start attribution from position 1 to ignore BOS/system tokens which often cause artifacts
+    start_pos = 1
+
     # Add input token nodes
     for pos, token_str in enumerate(tokens):
         graph.add_node(
@@ -181,8 +184,9 @@ def compute_attribution_graph(
             # Flatten in case of batch dim [1, seq]
             # This ensures pos corresponds to token pos in sequence
             for pos in range(tok_attr.view(-1).shape[0]):
+                if pos < start_pos:
+                    continue
                 val = tok_attr.view(-1)[pos].item()
-                print(f"Token {pos}: {val}")
                 if abs(val) > 1e-6:  # Using small epsilon for float comparison
                     token_node = graph.get_node(f"token_{pos}")
                     if token_node:
@@ -196,9 +200,6 @@ def compute_attribution_graph(
     print("Computing attributions...")
     edge_count = 0
     feature_count = 0
-
-    # Start attribution from position 1 to ignore BOS/system tokens which often cause artifacts
-    start_pos = 1
 
     for layer_idx, layer_id in enumerate(layers_to_analyze):
         features = sae_features[layer_id]  # [seq_len, n_features] (should be sparse)

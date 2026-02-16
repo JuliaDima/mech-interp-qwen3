@@ -87,21 +87,25 @@ class AttributionGraph:
         Returns:
             Pruned attribution graph
         """
-        # Sort nodes by total attribution (descending)
-        sorted_nodes = sorted(self.nodes.values(), key=lambda n: n.total_attribution, reverse=True)
+        # Sort nodes by total attribution (descending), excluding logits from budget
+        budget_nodes = [n for n in self.nodes.values() if n.node_type != "logit"]
+        logit_nodes = [n for n in self.nodes.values() if n.node_type == "logit"]
 
-        # Calculate cumulative attribution
-        total_attr = sum(n.total_attribution for n in sorted_nodes)
+        sorted_budget_nodes = sorted(budget_nodes, key=lambda n: n.total_attribution, reverse=True)
+
+        # Calculate cumulative attribution for budget nodes
+        total_attr = sum(n.total_attribution for n in sorted_budget_nodes)
+
+        # Always keep logit nodes
+        nodes_to_keep = set(n.node_id for n in logit_nodes)
 
         # Handle case where no attributions exist
         if total_attr == 0:
             # Keep all nodes if there are no attributions
-            nodes_to_keep = set(n.node_id for n in sorted_nodes)
+            nodes_to_keep.update(n.node_id for n in sorted_budget_nodes)
         else:
             cumulative = 0.0
-            nodes_to_keep = set()
-
-            for node in sorted_nodes:
+            for node in sorted_budget_nodes:
                 cumulative += node.total_attribution
                 nodes_to_keep.add(node.node_id)
                 if cumulative / total_attr >= node_threshold:
