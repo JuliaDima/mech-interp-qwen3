@@ -347,30 +347,6 @@ def compute_attribution_graph(
                 b_dec = transcoder.b_dec.detach().float()  # [d_model]
                 bias_attr = (b_dec * dlogit_dmlp.float()).sum(dim=-1)  # [seq]
 
-                for pos, attr_val in enumerate(bias_attr.view(-1).tolist()):
-                    if pos < start_pos:
-                        continue
-                    if abs(attr_val) > 1e-7:
-                        bias_node_id = f"bias_L{layer_id}_P{pos}"
-                        if graph.get_node(bias_node_id) is None:
-                            graph.add_node(
-                                Node(
-                                    node_id=bias_node_id,
-                                    node_type="bias",
-                                    layer=layer_id,
-                                    token_pos=pos,
-                                    activation=1.0,  # Bias is constant
-                                    feature_id=-2,  # Marker for bias
-                                )
-                            )
-
-                        graph.add_edge(
-                            Edge(
-                                source=graph.get_node(bias_node_id),
-                                target=logit_nodes[j],
-                                attribution_score=attr_val,
-                            )
-                        )
             else:
                 bias_attr = torch.zeros_like(error_attr)
 
