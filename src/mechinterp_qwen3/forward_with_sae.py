@@ -11,7 +11,7 @@ from typing import Any
 import torch
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
-from .hooks import LayerActs, LinearizedHookManager, MLPHookManager
+from .hooks import LayerActs, LinearizedHookManager, MLPHookManager, ReconstructivePatchingManager
 from .transcoder import SingleLayerTranscoder as Transcoder
 
 
@@ -103,6 +103,8 @@ def forward_linearized_with_sae_features(
     transcoders: dict[int, Transcoder],
     prompt: str,
     layers_to_analyze: list[int],
+    *,
+    use_patching: bool = False,
 ) -> dict[str, Any]:
     """Forward pass with linearized gradient flow and SAE feature extraction.
 
@@ -118,6 +120,8 @@ def forward_linearized_with_sae_features(
         transcoders: Dictionary mapping layer_id -> Transcoder
         prompt: Input prompt text
         layers_to_analyze: List of layer IDs to extract features from
+        use_patching: If True, replaces MLP output with SAE reconstruction
+                      to enable inter-layer feature connectivity.
 
     Returns:
         Dict with: tokens, logits, sae_features, mlp_activations, pre_logit_hidden
@@ -163,8 +167,15 @@ def forward_linearized_with_sae_features(
     lin_hooks.install()
 
     # Install MLP hooks (with gradients preserved)
-    mlp_hooks = MLPHookManager(model, layer_ids=layers_to_analyze, detach=False)
-    mlp_hooks.install()
+    # If using patching, we use ReconstructivePatchingManager instead of MLPHookManager
+    if use_patching:
+        patcher = ReconstructivePatchingManager(model, transcoders)
+        patcher.install()
+        mlp_hooks = None
+    else:
+        patcher = None
+        mlp_hooks = MLPHookManager(model, layer_ids=layers_to_analyze, detach=False)
+        mlp_hooks.install()
 
     # Hook on final norm to capture pre-logit hidden state
     pre_logit_hidden = {}
@@ -262,10 +273,16 @@ def forward_linearized_with_sae_features(
     # Extract MLP activations
     mlp_activations = {}
     for layer_id in layers_to_analyze:
-        layer_acts: LayerActs = mlp_hooks.cache[layer_id]
-        if layer_acts.mlp_out is None:
+        if use_patching:
+            # When patching, we use the SAE reconstruction
+            mlp_out = patcher.reconstructions[layer_id]
+        else:
+            layer_acts: LayerActs = mlp_hooks.cache[layer_id]
+            mlp_out = layer_acts.mlp_out
+
+        if mlp_out is None:
             raise RuntimeError(f"No MLP activations captured for layer {layer_id}")
-        mlp_activations[layer_id] = layer_acts.mlp_out  # dict of [1, seq_len, d_model] per key
+        mlp_activations[layer_id] = mlp_out  # dict of [1, seq_len, d_model] per key
         mlp_activations[layer_id].retain_grad()
 
     # Get pre-logit hidden state and retain grad
@@ -279,25 +296,37 @@ def forward_linearized_with_sae_features(
     # Remove all hooks
     final_norm_handle.remove()
     embed_handle.remove()
-    mlp_hooks.remove()
+    if patcher:
+        patcher.remove()
+    if mlp_hooks:
+        mlp_hooks.remove()
     lin_hooks.remove()
 
     # Extract SAE features using transcoders
     sae_features = {}
     for layer_id in layers_to_analyze:
         transcoder = transcoders[layer_id]
-        # Use MLP Input for encoding!
-        mlp_in = mlp_hooks.cache[layer_id].mlp_in
+        if use_patching:
+            # Features are already computed and patched into the graph
+            features = patcher.sae_features[layer_id]
+            # [batch, seq, d_model] -> [seq, d_model]
+            features = features.squeeze(0)
+        else:
+            # Use MLP Input for encoding!
+            mlp_in = mlp_hooks.cache[layer_id].mlp_in
 
-        if mlp_in is None:
-            raise RuntimeError(f"No MLP input captured for layer {layer_id}")
+            if mlp_in is None:
+                raise RuntimeError(f"No MLP input captured for layer {layer_id}")
 
-        features = transcoder.encode(mlp_in.unsqueeze(0))  # [1, seq_len, transcoder hidden size]
-        features = features.squeeze(0)  # [seq_len, transcoder hidden size]
+            features = transcoder.encode(
+                mlp_in.unsqueeze(0)
+            )  # [1, seq_len, transcoder hidden size]
+            features = features.squeeze(0)  # [seq_len, transcoder hidden size]
 
         # Convert to sparse if highly sparse (>80% zeros) for memory efficiency
         sparsity = 1.0 - (features.count_nonzero().item() / features.numel())
         if sparsity > 0.8:
+            # Ensure it is still on device and has grad
             features = features.to_sparse()
 
         features.retain_grad()

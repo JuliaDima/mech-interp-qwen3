@@ -60,9 +60,9 @@ class AttributionGraph:
     def add_edge(self, edge: Edge) -> None:
         """Add an edge to the graph."""
         self.edges.append(edge)
-        # Update total attribution for nodes
+        # Update total attribution for the source node (outgoing influence)
+        # We only count outgoing attribution to avoid "relay inflation" in intermediate features.
         edge.source.total_attribution += abs(edge.attribution_score)
-        edge.target.total_attribution += abs(edge.attribution_score)
 
     def get_node(self, node_id: str) -> Node | None:
         """Get a node by ID."""

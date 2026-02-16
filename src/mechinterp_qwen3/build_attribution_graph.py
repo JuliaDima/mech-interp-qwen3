@@ -95,6 +95,12 @@ def main() -> None:
         default=0.98,
         help="Pruning: keep fewest edges covering this fraction of total attribution",
     )
+    ap.add_argument(
+        "--use_patching",
+        type=bool,
+        default=True,
+        help="Whether to patch MLP outputs with SAE reconstructions to enable gradients",
+    )
     args = ap.parse_args()
 
     # Parse layers
@@ -148,6 +154,7 @@ def main() -> None:
         transcoder_repo=args.transcoder_repo,
         max_n_logits=args.max_n_logits,
         desired_logit_prob=args.desired_logit_prob,
+        use_patching=args.use_patching,
     )
 
     # Save raw graph

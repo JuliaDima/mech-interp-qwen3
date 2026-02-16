@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import torch
 import torch.nn as nn
@@ -129,6 +130,61 @@ class LinearizedHookManager:
                 return module.weight * (x.float() * rms_scale).to(x.dtype)
 
             self.handles.append(norm.register_forward_hook(norm_hook))
+
+    def remove(self) -> None:
+        for h in self.handles:
+            h.remove()
+        self.handles = []
+
+
+class ReconstructivePatchingManager:
+    """Replaces MLP outputs with SAE reconstructions during forward pass.
+
+    This enables gradients between features across different layers.
+    """
+
+    def __init__(self, model: nn.Module, transcoders: dict[int, Any]):
+        self.model = model
+        self.transcoders = transcoders
+        self.handles: list[torch.utils.hooks.RemovableHandle] = []
+        self.sae_features: dict[int, torch.Tensor] = {}
+        self.reconstructions: dict[int, torch.Tensor] = {}
+
+    def _get_layers(self) -> list[nn.Module]:
+        if hasattr(self.model, "model") and hasattr(self.model.model, "layers"):
+            return list(self.model.model.layers)
+        raise RuntimeError("Unsupported model layout: expected model.model.layers")
+
+    def install(self) -> None:
+        layers = self._get_layers()
+
+        for lid, transcoder in self.transcoders.items():
+            block = layers[lid]
+            mlp = block.mlp
+
+            def patching_hook(module, inputs, output, lid=lid, transcoder=transcoder):
+                # output is [batch, seq, d_model]
+                # inputs[0] is mlp_input [batch, seq, d_model]
+                mlp_in = inputs[0]
+
+                # Perform SAE reconstruction
+                # encode expects [batch, seq, d_model]
+                features = transcoder.encode(mlp_in)
+
+                # We save features for later attribution analysis
+                # (but they are also part of the graph now!)
+                self.sae_features[lid] = features
+
+                # Decode to get reconstruction
+                reconstruction = transcoder.decode(features, mlp_in)
+
+                # Cache reconstruction
+                self.reconstructions[lid] = reconstruction
+
+                # Return reconstruction instead of original MLP output
+                return reconstruction
+
+            self.handles.append(mlp.register_forward_hook(patching_hook))
 
     def remove(self) -> None:
         for h in self.handles:
