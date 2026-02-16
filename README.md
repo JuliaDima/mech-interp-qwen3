@@ -45,7 +45,7 @@ conda create -n p28_py311_env python=3.11 -y
 conda activate p28_py311_env
 
 pip install -U pip
-pip install "transformers>=4.45" "huggingface_hub>=0.23" accelerate safetensors torch
+pip install -e ".[docs]"
 ```
 ## Build attribution graph
 

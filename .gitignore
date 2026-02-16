@@ -5,3 +5,8 @@ src/mechinterp_qwen3/prompts
 .coverage
 graphs
 builds
+useful_docs
+*logs*
+project_instructions.md
+scripts/inspect_transcoder.py
+docs/_build

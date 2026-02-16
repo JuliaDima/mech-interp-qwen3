@@ -23,6 +23,11 @@ dev = [
   "pre-commit>=3.0",
   "ruff>=0.8",
 ]
+docs = [
+  "sphinx>=7.0",
+  "sphinx-rtd-theme>=2.0",
+  "myst-parser>=2.0",
+]
 
 [project.scripts]
 miq-build-prompts = "mechinterp_qwen3.build_prompts:main"
