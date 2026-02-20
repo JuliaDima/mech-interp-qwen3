@@ -9,9 +9,10 @@ from __future__ import annotations
 from typing import Any
 
 import torch
+from nnsight import LanguageModel
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
-from .hooks import LayerActs, LinearizedHookManager, MLPHookManager, ReconstructivePatchingManager
+from .hooks import LinearizedHookManager
 from .transcoder import SingleLayerTranscoder as Transcoder
 
 
@@ -42,36 +43,49 @@ def forward_with_sae_features_grad(
     input_ids = inputs["input_ids"]
     tokens = [tokenizer.decode([tok_id]) for tok_id in input_ids[0]]
 
-    # Install hooks to capture MLP activations (with gradients!)
-    hooker = MLPHookManager(model, layer_ids=layers_to_analyze, detach=False)
-    hooker.install()
+    nn_model = LanguageModel(model, dispatch=True)
 
-    # Forward pass with gradients explicitly enabled
-    # This ensures intermediate activations have requires_grad=True
-    with torch.set_grad_enabled(True):
-        outputs = model(**inputs)
-        logits = outputs.logits[0]  # [seq_len, vocab_size]
+    with torch.set_grad_enabled(True), nn_model.trace(input_ids):
+        # Extract MLP activations from hooks
+        mlp_activations_proxy = {}
+        for layer_id in layers_to_analyze:
+            layer_module = nn_model.model.layers[layer_id]
+            # Save mlp input proxy (we need this for the encoder)
+            mlp_in_proxy = layer_module.mlp.input[0][0].save()
+            # Save mlp output proxy (for manual dictionary)
+            mlp_out_proxy = layer_module.mlp.output.save()
+
+            mlp_activations_proxy[layer_id] = (mlp_in_proxy, mlp_out_proxy)
+
+        # Output logits
+        logits_proxy = nn_model.lm_head.output.save()
+
+    logits = logits_proxy.value[0]  # [seq_len, vocab_size]
 
     # Extract MLP activations from hooks
     mlp_activations = {}
+    mlp_in_saved = {}
     for layer_id in layers_to_analyze:
-        layer_acts: LayerActs = hooker.cache[layer_id]
-        if layer_acts.mlp_out is None or layer_acts.mlp_in is None:
-            raise RuntimeError(f"No MLP activations captured for layer {layer_id}")
-        mlp_activations[layer_id] = layer_acts.mlp_out
+        mlp_in_proxy, mlp_out_proxy = mlp_activations_proxy[layer_id]
 
-        # We need mlp_in for the transcoder encoder
-        # layer_acts.mlp_in is [seq, d_model]
+        # Unpack tuple if NNSight returned it
+        val_out = mlp_out_proxy.value
+        mlp_out = val_out[0] if isinstance(val_out, tuple) else val_out
+
+        val_in = mlp_in_proxy.value
+        mlp_in = val_in[0] if isinstance(val_in, tuple) else val_in
+
+        mlp_activations[layer_id] = mlp_out
+        mlp_in_saved[layer_id] = mlp_in
+
         mlp_activations[layer_id].retain_grad()
-
-    hooker.remove()
 
     # Extract SAE features using transcoders
     sae_features = {}
     for layer_id in layers_to_analyze:
         transcoder = transcoders[layer_id]
         # Use MLP Input for encoding!
-        mlp_in = hooker.cache[layer_id].mlp_in
+        mlp_in = mlp_in_saved[layer_id]
 
         # Already batched [1, seq_len, d_model]?
         # MLPHookManager saves [seq, d_model] usually (x[0]).
@@ -166,33 +180,7 @@ def forward_linearized_with_sae_features(
     lin_hooks = LinearizedHookManager(model)
     lin_hooks.install()
 
-    # Install MLP hooks (with gradients preserved)
-    # If using patching, we use ReconstructivePatchingManager instead of MLPHookManager
-    if use_patching:
-        patcher = ReconstructivePatchingManager(model, transcoders)
-        patcher.install()
-        mlp_hooks = None
-    else:
-        patcher = None
-        mlp_hooks = MLPHookManager(model, layer_ids=layers_to_analyze, detach=False)
-        mlp_hooks.install()
-
-    # Hook on final norm to capture pre-logit hidden state
-    pre_logit_hidden = {}
-
-    def final_norm_hook(module, input, output):
-        pre_logit_hidden["value"] = output
-
-    final_norm_handle = model.model.norm.register_forward_hook(final_norm_hook)
-
-    # Hook on embeddings to capture them
-    embedding_captured = {}
-
-    def embed_hook(module, input, output):
-        embedding_captured["value"] = output
-
-    embed_module = model.get_input_embeddings()
-    embed_handle = embed_module.register_forward_hook(embed_hook)
+    nn_model = LanguageModel(model, dispatch=True)
 
     # --- MONKEY PATCHING ATTENTION ---
     # We need to freeze attention patterns (QK) but allow gradient flow through values (OV).
@@ -265,72 +253,86 @@ def forward_linearized_with_sae_features(
                     layer.self_attn.config._attn_implementation = original_attn_implementation
 
     # Forward pass with gradients AND monkey-patched attention
-    with torch.set_grad_enabled(True), patch_attention():
-        # Ensure model uses the new config
-        outputs = model(**inputs)
-        logits = outputs.logits[0]  # [seq_len, vocab_size]
+    with (
+        torch.set_grad_enabled(True),
+        patch_attention(),
+        nn_model.trace(inputs["input_ids"]),
+    ):
+        sae_features_proxy = {}
+        mlp_activations_proxy = {}
 
-    # Extract MLP activations
+        for layer_id in layers_to_analyze:
+            layer_module = nn_model.model.layers[layer_id]
+            transcoder = transcoders[layer_id]
+
+            # mlp.input is a tuple of (hidden_states, ...), we want the first element
+            mlp_in = layer_module.mlp.input[0][0]
+
+            # Encode features natively in the NNSight graph
+            features = transcoder.encode(mlp_in.unsqueeze(0)).squeeze(0)
+
+            if use_patching:
+                reconstruction = transcoder.decode(
+                    features.unsqueeze(0), mlp_in.unsqueeze(0)
+                ).squeeze(0)
+                # Patch the MLP output directly!
+                layer_module.mlp.output = reconstruction
+
+            # Save the node proxies for later extraction
+            sae_features_proxy[layer_id] = features.save()
+            mlp_activations_proxy[layer_id] = (mlp_in.save(), layer_module.mlp.output.save())
+
+        embed_proxy = nn_model.model.embed_tokens.output.save()
+        pre_logit_proxy = nn_model.model.norm.output.save()
+        logits_proxy = nn_model.lm_head.output.save()
+
+    logits = logits_proxy.value[0]
+
+    # Extract real tensors from NNSight proxies
     mlp_activations = {}
-    for layer_id in layers_to_analyze:
-        if use_patching:
-            # When patching, we use the SAE reconstruction
-            mlp_out = patcher.reconstructions[layer_id]
-        else:
-            layer_acts: LayerActs = mlp_hooks.cache[layer_id]
-            mlp_out = layer_acts.mlp_out
-
-        if mlp_out is None:
-            raise RuntimeError(f"No MLP activations captured for layer {layer_id}")
-        mlp_activations[layer_id] = mlp_out  # dict of [1, seq_len, d_model] per key
-        mlp_activations[layer_id].retain_grad()
-
-    # Get pre-logit hidden state and retain grad
-    pre_logit = pre_logit_hidden["value"]  # [1, seq_len, d_model]
-    pre_logit.retain_grad()
-
-    if "value" not in embedding_captured:
-        raise RuntimeError("No embedding activations captured.")
-    embedding_captured["value"].retain_grad()
-
-    # Remove all hooks
-    final_norm_handle.remove()
-    embed_handle.remove()
-    if patcher:
-        patcher.remove()
-    if mlp_hooks:
-        mlp_hooks.remove()
-    lin_hooks.remove()
-
-    # Extract SAE features using transcoders
     sae_features = {}
+    mlp_in_saved = {}
+
     for layer_id in layers_to_analyze:
-        transcoder = transcoders[layer_id]
-        if use_patching:
-            # Features are already computed and patched into the graph
-            features = patcher.sae_features[layer_id]
-            # [batch, seq, d_model] -> [seq, d_model]
-            features = features.squeeze(0)
-        else:
-            # Use MLP Input for encoding!
-            mlp_in = mlp_hooks.cache[layer_id].mlp_in
+        mlp_in_proxy, mlp_out_proxy = mlp_activations_proxy[layer_id]
 
-            if mlp_in is None:
-                raise RuntimeError(f"No MLP input captured for layer {layer_id}")
+        # Unpack values
+        val_out = mlp_out_proxy.value
+        mlp_out = val_out[0] if isinstance(val_out, tuple) else val_out
+        val_in = mlp_in_proxy.value
+        mlp_in = val_in[0] if isinstance(val_in, tuple) else val_in
 
-            features = transcoder.encode(
-                mlp_in.unsqueeze(0)
-            )  # [1, seq_len, transcoder hidden size]
-            features = features.squeeze(0)  # [seq_len, transcoder hidden size]
+        # NNSight retains grad natively into these tensors
+        mlp_activations[layer_id] = mlp_out.unsqueeze(
+            0
+        )  # Make it [1, seq_len, d_model] for compute_attribution
+        mlp_activations[layer_id].retain_grad()
+        mlp_in_saved[layer_id] = mlp_in
+
+        # Process SAE Features
+        features = sae_features_proxy[layer_id].value
+        if isinstance(features, tuple):
+            features = features[0]
 
         # Convert to sparse if highly sparse (>80% zeros) for memory efficiency
         sparsity = 1.0 - (features.count_nonzero().item() / features.numel())
         if sparsity > 0.8:
-            # Ensure it is still on device and has grad
             features = features.to_sparse()
 
         features.retain_grad()
         sae_features[layer_id] = features
+
+    # Get pre-logit hidden state and retain grad
+    val_pre_logit = pre_logit_proxy.value
+    pre_logit = val_pre_logit[0] if isinstance(val_pre_logit, tuple) else val_pre_logit
+    pre_logit = pre_logit.unsqueeze(0)
+    pre_logit.retain_grad()
+
+    val_embed = embed_proxy.value
+    embed_act = val_embed[0] if isinstance(val_embed, tuple) else val_embed
+    embed_act.retain_grad()
+
+    lin_hooks.remove()
 
     return {
         "input_ids": input_ids[0],
@@ -339,5 +341,5 @@ def forward_linearized_with_sae_features(
         "sae_features": sae_features,
         "mlp_activations": mlp_activations,
         "pre_logit_hidden": pre_logit,
-        "embedding_activations": embedding_captured["value"],
+        "embedding_activations": embed_act,
     }
