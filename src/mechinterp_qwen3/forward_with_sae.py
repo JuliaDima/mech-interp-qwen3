@@ -252,14 +252,22 @@ def forward_linearized_with_sae_features(
                 if hasattr(layer.self_attn, "config"):
                     layer.self_attn.config._attn_implementation = original_attn_implementation
 
+    # Declare before `with` to avoid Python's UnboundLocalError if the block raises.
+    sae_features_proxy: dict = {}
+    mlp_activations_proxy: dict = {}
+    embed_proxy = None
+    pre_logit_proxy = None
+    logits_proxy = None
+
     # Forward pass with gradients AND monkey-patched attention
     with (
         torch.set_grad_enabled(True),
         patch_attention(),
         nn_model.trace(inputs["input_ids"]),
     ):
-        sae_features_proxy = {}
-        mlp_activations_proxy = {}
+        # NNSight requires saves to be registered in execution order.
+        # embed_tokens runs first, layers run next, then norm/lm_head.
+        embed_proxy = nn_model.model.embed_tokens.output.save()
 
         for layer_id in layers_to_analyze:
             layer_module = nn_model.model.layers[layer_id]
@@ -282,11 +290,15 @@ def forward_linearized_with_sae_features(
             sae_features_proxy[layer_id] = features.save()
             mlp_activations_proxy[layer_id] = (mlp_in.save(), layer_module.mlp.output.save())
 
-        embed_proxy = nn_model.model.embed_tokens.output.save()
         pre_logit_proxy = nn_model.model.norm.output.save()
         logits_proxy = nn_model.lm_head.output.save()
 
-    logits = logits_proxy.value[0]
+    def _unpack_proxy(proxy):
+        """Unpack an NNSight SaveProxy or a plain tensor."""
+        val = proxy.value if hasattr(proxy, "value") else proxy
+        return val[0] if isinstance(val, tuple) else val
+
+    logits = _unpack_proxy(logits_proxy)
 
     # Extract real tensors from NNSight proxies
     mlp_activations = {}
@@ -296,11 +308,8 @@ def forward_linearized_with_sae_features(
     for layer_id in layers_to_analyze:
         mlp_in_proxy, mlp_out_proxy = mlp_activations_proxy[layer_id]
 
-        # Unpack values
-        val_out = mlp_out_proxy.value
-        mlp_out = val_out[0] if isinstance(val_out, tuple) else val_out
-        val_in = mlp_in_proxy.value
-        mlp_in = val_in[0] if isinstance(val_in, tuple) else val_in
+        mlp_out = _unpack_proxy(mlp_out_proxy)
+        mlp_in = _unpack_proxy(mlp_in_proxy)
 
         # NNSight retains grad natively into these tensors
         mlp_activations[layer_id] = mlp_out.unsqueeze(
@@ -310,9 +319,7 @@ def forward_linearized_with_sae_features(
         mlp_in_saved[layer_id] = mlp_in
 
         # Process SAE Features
-        features = sae_features_proxy[layer_id].value
-        if isinstance(features, tuple):
-            features = features[0]
+        features = _unpack_proxy(sae_features_proxy[layer_id])
 
         # Convert to sparse if highly sparse (>80% zeros) for memory efficiency
         sparsity = 1.0 - (features.count_nonzero().item() / features.numel())
@@ -323,13 +330,11 @@ def forward_linearized_with_sae_features(
         sae_features[layer_id] = features
 
     # Get pre-logit hidden state and retain grad
-    val_pre_logit = pre_logit_proxy.value
-    pre_logit = val_pre_logit[0] if isinstance(val_pre_logit, tuple) else val_pre_logit
-    pre_logit = pre_logit.unsqueeze(0)
+    val_pre_logit = _unpack_proxy(pre_logit_proxy)
+    pre_logit = val_pre_logit.unsqueeze(0)
     pre_logit.retain_grad()
 
-    val_embed = embed_proxy.value
-    embed_act = val_embed[0] if isinstance(val_embed, tuple) else val_embed
+    embed_act = _unpack_proxy(embed_proxy)
     embed_act.retain_grad()
 
     lin_hooks.remove()

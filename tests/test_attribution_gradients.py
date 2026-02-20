@@ -23,6 +23,9 @@ class MockTranscoder:
         # Identity-ish projection that preserves gradients
         return x  # Just pass through for simplicity, maybe scale
 
+    def decode(self, f, x=None):
+        return f
+
 
 @pytest.fixture
 def real_structure_model():

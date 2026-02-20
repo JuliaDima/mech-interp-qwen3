@@ -5,7 +5,6 @@ from __future__ import annotations
 import torch
 
 from mechinterp_qwen3.build_prompts import generate_examples
-from mechinterp_qwen3.hooks import MLPHookManager
 from mechinterp_qwen3.io import read_jsonl, write_jsonl
 from mechinterp_qwen3.utils_seed import SeedConfig, set_all_seeds
 
@@ -67,10 +66,7 @@ class TestActivationCaptureWorkflow:
 
     def test_capture_activations_for_prompts(self, mock_model, temp_dir):
         """Test capturing activations for a set of prompts."""
-        # Setup
         layer_ids = [0, 1, 2]
-        hooker = MLPHookManager(mock_model, layer_ids)
-        hooker.install()
 
         # Generate some prompts
         examples = generate_examples(n=3, seed=0, low=0, high=999)
@@ -78,33 +74,42 @@ class TestActivationCaptureWorkflow:
         activations_data = []
 
         for ex in examples:
-            hooker.clear_cache()
-
-            # Simulate tokenization and forward pass
-            # In real scenario, this would use a tokenizer
             seq_len = len(ex.prompt) // 10 + 5  # Mock sequence length
             input_ids = torch.randint(0, 100, (1, seq_len))
 
-            with torch.no_grad():
-                _ = mock_model(input_ids)
+            # Capture mlp outputs via simple hooks
+            captured: dict[int, torch.Tensor] = {}
+            hooks = []
+            for lid in layer_ids:
 
-            # Collect activations
+                def make_hook(layer_id, cache):
+                    def hook_fn(module, inp, activation):
+                        cache[layer_id] = activation.detach()
+
+                    return hook_fn
+
+                h = mock_model.model.layers[lid].mlp.register_forward_hook(make_hook(lid, captured))
+                hooks.append(h)
+
+            with torch.no_grad():
+                mock_model(input_ids)
+
+            for h in hooks:
+                h.remove()
+
             acts_record = {
                 "prompt_id": ex.prompt_id,
                 "seq_len": seq_len,
                 "layers": {},
             }
-
             for lid in layer_ids:
-                acts = hooker.cache[lid]
+                out = captured[lid]
                 acts_record["layers"][lid] = {
-                    "mlp_in_shape": list(acts.mlp_in.shape),
-                    "mlp_out_shape": list(acts.mlp_out.shape),
+                    "mlp_in_shape": list(out.shape),
+                    "mlp_out_shape": list(out.shape),
                 }
 
             activations_data.append(acts_record)
-
-        hooker.remove()
 
         # Verify we captured activations for all prompts
         assert len(activations_data) == 3
@@ -115,29 +120,32 @@ class TestActivationCaptureWorkflow:
             assert len(record["layers"]) == len(layer_ids)
 
             for lid in layer_ids:
-                assert record["layers"][lid]["mlp_in_shape"][1] == mock_model.d_model
-                assert record["layers"][lid]["mlp_out_shape"][1] == mock_model.d_model
+                assert record["layers"][lid]["mlp_in_shape"][-1] == mock_model.d_model
+                assert record["layers"][lid]["mlp_out_shape"][-1] == mock_model.d_model
 
     def test_activation_capture_with_different_sequence_lengths(self, mock_model):
         """Test that activation capture handles variable sequence lengths."""
-        layer_ids = [0]
-        hooker = MLPHookManager(mock_model, layer_ids)
-        hooker.install()
-
         seq_lengths = [5, 10, 15, 20]
 
         for seq_len in seq_lengths:
-            hooker.clear_cache()
             input_ids = torch.randint(0, 100, (1, seq_len))
 
+            captured: list[torch.Tensor] = []
+
+            def make_seq_hook(cache: list) -> torch.nn.modules.module._Hook:
+                def hook(module, inp, out):
+                    cache.append(out.detach())
+
+                return hook
+
+            h = mock_model.model.layers[0].mlp.register_forward_hook(make_seq_hook(captured))
+
             with torch.no_grad():
-                _ = mock_model(input_ids)
+                mock_model(input_ids)
 
-            acts = hooker.cache[0]
-            assert acts.mlp_in.shape[0] == seq_len
-            assert acts.mlp_out.shape[0] == seq_len
+            h.remove()
 
-        hooker.remove()
+            assert captured[0].shape[1] == seq_len
 
 
 class TestModelArchitectureCompliance:
@@ -180,7 +188,6 @@ class TestEndToEndDeterminism:
     def test_full_pipeline_determinism(self, mock_model, temp_dir):
         """Test that entire pipeline is deterministic with same seed."""
         seed = 42
-        layer_ids = [0, 1]
 
         def run_pipeline():
             set_all_seeds(SeedConfig(seed=seed))
@@ -188,30 +195,40 @@ class TestEndToEndDeterminism:
             # Generate prompts
             examples = generate_examples(n=5, seed=seed, low=0, high=999)
 
-            # Capture activations
-            hooker = MLPHookManager(mock_model, layer_ids)
-            hooker.install()
-
             results = []
             for ex in examples:
-                hooker.clear_cache()
-
                 seq_len = 10
                 input_ids = torch.randint(0, 100, (1, seq_len))
 
+                # Capture MLP output via simple hook
+                captured_out: list[torch.Tensor] = []
+
+                def make_det_hook(cache: list) -> torch.nn.modules.module._Hook:
+                    def hook_fn(module, inp, out):
+                        cache.append(out.detach())
+
+                    return hook_fn
+
+                h = mock_model.model.layers[0].mlp.register_forward_hook(
+                    make_det_hook(captured_out)
+                )
+
                 with torch.no_grad():
-                    _ = mock_model(input_ids)
+                    mock_model(input_ids)
+
+                h.remove()
+
+                out_val = captured_out[0]
 
                 # Store activation checksums
                 result = {
                     "prompt_id": ex.prompt_id,
                     "a": ex.a,
                     "b": ex.b,
-                    "mlp_in_sum": hooker.cache[0].mlp_in.sum().item(),
+                    "mlp_in_sum": out_val.sum().item(),
                 }
                 results.append(result)
 
-            hooker.remove()
             return results
 
         # Run pipeline twice

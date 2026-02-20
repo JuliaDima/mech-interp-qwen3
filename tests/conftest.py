@@ -83,7 +83,7 @@ class MockModel(nn.Module):
         self.device = torch.device("cpu")
 
     def forward(
-        self, input_ids: torch.Tensor, attention_mask: torch.Tensor | None = None
+        self, input_ids: torch.Tensor, attention_mask: torch.Tensor | None = None, **kwargs
     ) -> torch.Tensor:
         """Simple forward pass through all layers."""
         # input_ids: [batch, seq]
@@ -212,7 +212,7 @@ class EnhancedMockModel(nn.Module):
         self.device = torch.device("cpu")
 
     def forward(
-        self, input_ids: torch.Tensor, attention_mask: torch.Tensor | None = None
+        self, input_ids: torch.Tensor, attention_mask: torch.Tensor | None = None, **kwargs
     ) -> nn.Module:
         """Forward pass through complete transformer."""
         # Get embeddings
