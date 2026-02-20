@@ -16,101 +16,6 @@ from .hooks import LinearizedHookManager
 from .transcoder import SingleLayerTranscoder as Transcoder
 
 
-def forward_with_sae_features_grad(
-    model: PreTrainedModel,
-    tokenizer: PreTrainedTokenizer,
-    transcoders: dict[int, Transcoder],
-    prompt: str,
-    layers_to_analyze: list[int],
-) -> dict[str, Any]:
-    """
-    Forward pass with SAE features, keeping gradients enabled.
-
-    Same as forward_with_sae_features but with gradients enabled for attribution.
-
-    Args:
-        model: The language model
-        tokenizer: Tokenizer for the model
-        transcoders: Dictionary mapping layer_id -> Transcoder
-        prompt: Input prompt text
-        layers_to_analyze: List of layer IDs to extract features from
-
-    Returns:
-        Same as forward_with_sae_features, but tensors have gradients
-    """
-    # Tokenize input
-    inputs = tokenizer(prompt, return_tensors="pt", add_special_tokens=False).to(model.device)
-    input_ids = inputs["input_ids"]
-    tokens = [tokenizer.decode([tok_id]) for tok_id in input_ids[0]]
-
-    nn_model = LanguageModel(model, dispatch=True)
-
-    with torch.set_grad_enabled(True), nn_model.trace(input_ids):
-        # Extract MLP activations from hooks
-        mlp_activations_proxy = {}
-        for layer_id in layers_to_analyze:
-            layer_module = nn_model.model.layers[layer_id]
-            # Save mlp input proxy (we need this for the encoder)
-            mlp_in_proxy = layer_module.mlp.input[0][0].save()
-            # Save mlp output proxy (for manual dictionary)
-            mlp_out_proxy = layer_module.mlp.output.save()
-
-            mlp_activations_proxy[layer_id] = (mlp_in_proxy, mlp_out_proxy)
-
-        # Output logits
-        logits_proxy = nn_model.lm_head.output.save()
-
-    logits = logits_proxy.value[0]  # [seq_len, vocab_size]
-
-    # Extract MLP activations from hooks
-    mlp_activations = {}
-    mlp_in_saved = {}
-    for layer_id in layers_to_analyze:
-        mlp_in_proxy, mlp_out_proxy = mlp_activations_proxy[layer_id]
-
-        # Unpack tuple if NNSight returned it
-        val_out = mlp_out_proxy.value
-        mlp_out = val_out[0] if isinstance(val_out, tuple) else val_out
-
-        val_in = mlp_in_proxy.value
-        mlp_in = val_in[0] if isinstance(val_in, tuple) else val_in
-
-        mlp_activations[layer_id] = mlp_out
-        mlp_in_saved[layer_id] = mlp_in
-
-        mlp_activations[layer_id].retain_grad()
-
-    # Extract SAE features using transcoders
-    sae_features = {}
-    for layer_id in layers_to_analyze:
-        transcoder = transcoders[layer_id]
-        # Use MLP Input for encoding!
-        mlp_in = mlp_in_saved[layer_id]
-
-        # Already batched [1, seq_len, d_model]?
-        # MLPHookManager saves [seq, d_model] usually (x[0]).
-        # Let's check hooks.py: `self.cache[lid].mlp_in = x[0]`.
-        # So it is [seq, d_model].
-
-        # Encode to get SAE features (with gradients)
-        features = transcoder.encode(mlp_in.unsqueeze(0))  # Expects [batch, seq, d_model] usually?
-
-        features = features.squeeze(0)
-
-        # Retain gradients for non-leaf tensors (critical for attribution!)
-        features.retain_grad()
-
-        sae_features[layer_id] = features
-
-    return {
-        "input_ids": input_ids[0],
-        "tokens": tokens,
-        "logits": logits,
-        "sae_features": sae_features,
-        "mlp_activations": mlp_activations,
-    }
-
-
 def forward_linearized_with_sae_features(
     model: PreTrainedModel,
     tokenizer: PreTrainedTokenizer,
@@ -122,10 +27,10 @@ def forward_linearized_with_sae_features(
 ) -> dict[str, Any]:
     """Forward pass with linearized gradient flow and SAE feature extraction.
 
-    Uses LinearizedHookManager for proper gradient flow matching the
-    Attribution Graphs paper methodology:
-    - Embedding gradients enabled
-    - Attention outputs detached (gradients flow through residual skip only)
+    Implements the local replacement model for the Attribution Graphs paper:
+    - Embedding gradients enabled (gradients can flow back to token positions)
+    - Attention weights detached inside the NNSight trace (gradients flow
+      through the residual stream and the OV circuit, but NOT through QK)
     - RMSNorm scale factors treated as constant in backward pass
 
     Args:
@@ -138,7 +43,8 @@ def forward_linearized_with_sae_features(
                       to enable inter-layer feature connectivity.
 
     Returns:
-        Dict with: tokens, logits, sae_features, mlp_activations, pre_logit_hidden
+        Dict with: tokens, logits, sae_features, mlp_activations, pre_logit_hidden,
+                   embedding_activations
     """
     # Tokenize input
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
@@ -146,7 +52,7 @@ def forward_linearized_with_sae_features(
     tokens = [tokenizer.decode([tok_id]) for tok_id in input_ids]  # [seq_len]
 
     # Defensively ensure a "dummy" token exists at position 0 to absorb artifacts. (aka "sink token")
-    if tokens[0] not in tokenizer.all_special_ids:
+    if input_ids[0].item() not in tokenizer.all_special_ids:
         candidate_bos_token_ids = [
             tokenizer.bos_token_id,
             tokenizer.pad_token_id,
@@ -174,83 +80,22 @@ def forward_linearized_with_sae_features(
                 ones = torch.ones((mask.shape[0], 1), device=mask.device, dtype=mask.dtype)
                 inputs["attention_mask"] = torch.cat([ones, mask], dim=1)
 
-    input_ids = input_ids.unsqueeze(0)  # just to match dimensions
-    inputs["input_ids"] = input_ids  # [1, seq_len]
-    # Install linearized gradient hooks (embed grad, attn detach, LN freeze)
+    input_ids = input_ids.unsqueeze(0)  # [1, seq_len]
+    inputs["input_ids"] = input_ids
+
+    # Install RMSNorm linearization hooks (treat scale denominator as constant).
+    # These use PyTorch forward hooks to recompute norm output with a frozen scale,
+    # which is mathematically more precise than detaching the full norm output.
     lin_hooks = LinearizedHookManager(model)
     lin_hooks.install()
 
+    # Force eager attention so NNSight can trace internal sub-nodes
+    # (attention_interface_0.source.nn_functional_dropout_0).  Flash/SDPA
+    # kernels don't expose those nodes. We restore the original impl after.
+    original_attn_impl = model.config._attn_implementation
+    model.config._attn_implementation = "eager"
+
     nn_model = LanguageModel(model, dispatch=True)
-
-    # --- MONKEY PATCHING ATTENTION ---
-    # We need to freeze attention patterns (QK) but allow gradient flow through values (OV).
-    # The only way to do this strictly is to patch the attention forward pass.
-
-    import contextlib
-
-    from transformers.models.qwen2 import modeling_qwen2
-
-    # 1. Save original eager attention function
-    original_eager_forward = modeling_qwen2.eager_attention_forward
-
-    # 2. Define patched function that detaches attn_weights
-    def patched_eager_attention_forward(
-        module, query, key, value, attention_mask, scaling, dropout=0.0, **kwargs
-    ):
-        # Call the ORIGINAL logic up to weight computation, but we have to replicate it
-        # because the original function does everything in one go.
-        # We'll rely on the source code of eager_attention_forward from transformers.
-
-        # Re-implementation of eager_attention_forward with DETACH
-        # Source: https://github.com/huggingface/transformers/blob/main/src/transformers/models/qwen2/modeling_qwen2.py
-
-        key_states = modeling_qwen2.repeat_kv(key, module.num_key_value_groups)
-        value_states = modeling_qwen2.repeat_kv(value, module.num_key_value_groups)
-
-        attn_weights = torch.matmul(query, key_states.transpose(2, 3)) * scaling
-        if attention_mask is not None:
-            causal_mask = attention_mask[:, :, :, : key_states.shape[-2]]
-            attn_weights = attn_weights + causal_mask
-
-        attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(
-            query.dtype
-        )
-        attn_weights = torch.nn.functional.dropout(
-            attn_weights, p=dropout, training=module.training
-        )
-
-        # --- CRITICAL CHANGE: DETACH ATTENTION WEIGHTS ---
-        attn_weights = attn_weights.detach()
-        # -------------------------------------------------
-
-        attn_output = torch.matmul(attn_weights, value_states)
-        attn_output = attn_output.transpose(1, 2).contiguous()
-
-        return attn_output, attn_weights
-
-    # Context manager to apply checks
-    @contextlib.contextmanager
-    def patch_attention():
-        # Force eager implementation
-        original_attn_implementation = model.config._attn_implementation
-        model.config._attn_implementation = "eager"
-
-        # Try to update all layer configs as well, just in case
-        for layer in model.model.layers:
-            if hasattr(layer.self_attn, "config"):
-                layer.self_attn.config._attn_implementation = "eager"
-
-        # Apply patch
-        modeling_qwen2.eager_attention_forward = patched_eager_attention_forward
-        try:
-            yield
-        finally:
-            # Restore
-            modeling_qwen2.eager_attention_forward = original_eager_forward
-            model.config._attn_implementation = original_attn_implementation
-            for layer in model.model.layers:
-                if hasattr(layer.self_attn, "config"):
-                    layer.self_attn.config._attn_implementation = original_attn_implementation
 
     # Declare before `with` to avoid Python's UnboundLocalError if the block raises.
     sae_features_proxy: dict = {}
@@ -259,38 +104,56 @@ def forward_linearized_with_sae_features(
     pre_logit_proxy = None
     logits_proxy = None
 
-    # Forward pass with gradients AND monkey-patched attention
-    with (
-        torch.set_grad_enabled(True),
-        patch_attention(),
-        nn_model.trace(inputs["input_ids"]),
-    ):
-        # NNSight requires saves to be registered in execution order.
-        # embed_tokens runs first, layers run next, then norm/lm_head.
-        embed_proxy = nn_model.model.embed_tokens.output.save()
+    with torch.set_grad_enabled(True), nn_model.trace(inputs["input_ids"]):
+        # ── Linearization 1: Enable gradients on the embedding output ──────────
+        embed_out = nn_model.model.embed_tokens.output
+        embed_out.requires_grad_(True)
+        embed_proxy = embed_out.save()
 
-        for layer_id in layers_to_analyze:
+        # ── Linearization 2 & Feature extraction (single pass per layer) ──────
+        # NNSight requires interventions in model-execution order. Merging the
+        # attention detach and feature extraction into a single sorted loop prevents
+        # OutOfOrderError on mlp.input.
+        #
+        # Detaching the post-softmax attention here (not self_attn.output) preserves OV-circuit gradients
+        # while severing QK, making the model linear in the residual stream.
+        analyze_set = set(layers_to_analyze)
+        for layer_id in range(len(nn_model.model.layers)):
             layer_module = nn_model.model.layers[layer_id]
-            transcoder = transcoders[layer_id]
 
-            # mlp.input is a tuple of (hidden_states, ...), we want the first element
-            mlp_in = layer_module.mlp.input[0][0]
+            # Detach post-softmax attention weights
+            attn_weights_node = (
+                layer_module.self_attn.source.attention_interface_0.source.nn_functional_dropout_0
+            )
+            attn_weights_node.output = attn_weights_node.output.detach()
 
-            # Encode features natively in the NNSight graph
-            features = transcoder.encode(mlp_in.unsqueeze(0)).squeeze(0)
+            if layer_id in analyze_set:
+                transcoder = transcoders[layer_id]
 
-            if use_patching:
-                reconstruction = transcoder.decode(
-                    features.unsqueeze(0), mlp_in.unsqueeze(0)
-                ).squeeze(0)
-                # Patch the MLP output directly!
-                layer_module.mlp.output = reconstruction
+                # mlp.input[0] is hidden_states: [1, seq_len, d_model]
+                mlp_in = layer_module.mlp.input[0]
 
-            # Save the node proxies for later extraction
-            sae_features_proxy[layer_id] = features.save()
-            mlp_activations_proxy[layer_id] = (mlp_in.save(), layer_module.mlp.output.save())
+                # Encode features natively in the NNSight graph.
+                features = transcoder.encode(mlp_in)
 
-        pre_logit_proxy = nn_model.model.norm.output.save()
+                # Retain grads BEFORE .save() — after the trace, .value returns
+                # the same tensor object so autograd can still flow back through it.
+                mlp_out = layer_module.mlp.output
+                mlp_out.retain_grad()
+                features.retain_grad()
+
+                if use_patching:
+                    reconstruction = transcoder.decode(features, mlp_in)
+                    layer_module.mlp.output = reconstruction
+                    mlp_out = reconstruction
+                    mlp_out.retain_grad()
+
+                sae_features_proxy[layer_id] = features.save()
+                mlp_activations_proxy[layer_id] = (mlp_in.save(), mlp_out.save())
+
+        pre_logit_out = nn_model.model.norm.output
+        pre_logit_out.retain_grad()
+        pre_logit_proxy = pre_logit_out.save()
         logits_proxy = nn_model.lm_head.output.save()
 
     def _unpack_proxy(proxy):
@@ -299,11 +162,12 @@ def forward_linearized_with_sae_features(
         return val[0] if isinstance(val, tuple) else val
 
     logits = _unpack_proxy(logits_proxy)
+    if logits.dim() == 3:  # [batch, seq_len, vocab_size] -> [seq_len, vocab_size]
+        logits = logits.squeeze(0)
 
     # Extract real tensors from NNSight proxies
     mlp_activations = {}
     sae_features = {}
-    mlp_in_saved = {}
 
     for layer_id in layers_to_analyze:
         mlp_in_proxy, mlp_out_proxy = mlp_activations_proxy[layer_id]
@@ -311,15 +175,24 @@ def forward_linearized_with_sae_features(
         mlp_out = _unpack_proxy(mlp_out_proxy)
         mlp_in = _unpack_proxy(mlp_in_proxy)
 
-        # NNSight retains grad natively into these tensors
-        mlp_activations[layer_id] = mlp_out.unsqueeze(
-            0
-        )  # Make it [1, seq_len, d_model] for compute_attribution
+        # NNSight proxies already include the batch dim -> only unsqueeze if 2D
+        if mlp_out.dim() == 2:  # [seq_len, d_model] -> [1, seq_len, d_model]
+            mlp_out = mlp_out.unsqueeze(0)
+        mlp_activations[layer_id] = mlp_out  # [1, seq_len, d_model]
         mlp_activations[layer_id].retain_grad()
-        mlp_in_saved[layer_id] = mlp_in
 
         # Process SAE Features
         features = _unpack_proxy(sae_features_proxy[layer_id])
+
+        # NNSight proxy ops (e.g. squeeze) may not fire identically in the
+        # trace graph, leaving an extra batch dim.  Normalise to [seq_len, n_features].
+        if features.dim() == 3 and features.shape[0] == 1:
+            features = features.squeeze(0)  # [1, seq_len, n_features] -> [seq_len, n_features]
+        elif features.dim() == 1:
+            raise RuntimeError(
+                f"SAE features for layer {layer_id} are unexpectedly 1D "
+                f"(shape={tuple(features.shape)}). This is a proxy extraction bug."
+            )
 
         # Convert to sparse if highly sparse (>80% zeros) for memory efficiency
         sparsity = 1.0 - (features.count_nonzero().item() / features.numel())
@@ -331,13 +204,15 @@ def forward_linearized_with_sae_features(
 
     # Get pre-logit hidden state and retain grad
     val_pre_logit = _unpack_proxy(pre_logit_proxy)
-    pre_logit = val_pre_logit.unsqueeze(0)
+    # NNSight proxy already has batch dim; only unsqueeze if 2D
+    pre_logit = val_pre_logit.unsqueeze(0) if val_pre_logit.dim() == 2 else val_pre_logit
     pre_logit.retain_grad()
 
     embed_act = _unpack_proxy(embed_proxy)
     embed_act.retain_grad()
 
     lin_hooks.remove()
+    model.config._attn_implementation = original_attn_impl
 
     return {
         "input_ids": input_ids[0],
