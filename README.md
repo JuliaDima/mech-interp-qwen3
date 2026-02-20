@@ -45,7 +45,7 @@ conda create -n p28_py311_env python=3.11 -y
 conda activate p28_py311_env
 
 pip install -U pip
-pip install -e ".[docs]"
+pip install -e ".[docs,test]"
 ```
 ## Build attribution graph
 

@@ -19,6 +19,18 @@ class MLPHookManager:
     """
     Collects MLP input/output activations for a small list of layers.
     Intended for *prompt-only* forward passes (no autoregressive loop).
+
+    Tensor Definitions:
+    - mlp_in: The activation immediately preceding the MLP block.
+      For Qwen3, this is technically the output of `post_attention_layernorm`.
+      Shape: `[batch_size, seq_len, d_model]`, usually with batch_size=1.
+      Location: `model.model.layers[{lid}].mlp.input` (conceptually), or
+      the output of `model.model.layers[{lid}].post_attention_layernorm`.
+    - mlp_out: The activation immediately after the MLP block finishes.
+      This corresponds to the residual contribution of the MLP before being added
+      to the residual stream.
+      Shape: `[batch_size, seq_len, d_model]`, usually with batch_size=1.
+      Location: `model.model.layers[{lid}].mlp.output`.
     """
 
     def __init__(self, model: nn.Module, layer_ids: list[int], detach: bool = True):
@@ -85,10 +97,15 @@ class LinearizedHookManager:
     """Linearized gradient flow hooks matching the Attribution Graphs paper.
 
     Installs three types of hooks:
-    1. Embedding hook: enables gradients on embedding output
+    1. Embedding hook: enables gradients on embedding output.
+       Tensor: `model.model.embed_tokens.output`.
+       Shape: `[batch_size, seq_len, d_model]`.
     2. Attention detach hooks: detach attention outputs so gradients only flow
-       through the residual skip connections
-    3. RMSNorm linearize hooks: treat normalization scale as constant in backward
+       through the residual skip connections (currently patched externally).
+    3. RMSNorm linearize hooks: treat normalization scale as constant in backward.
+       Tensors: `input_layernorm.output`, `post_attention_layernorm.output`,
+       and `model.model.norm.output`.
+       Shape: `[batch_size, seq_len, d_model]`.
     """
 
     def __init__(self, model: nn.Module):
@@ -141,6 +158,15 @@ class ReconstructivePatchingManager:
     """Replaces MLP outputs with SAE reconstructions during forward pass.
 
     This enables gradients between features across different layers.
+
+    Tensor Definitions:
+    - Features: The sparse activations `f(x)` produced by the SAE encoder.
+      Shape: `[batch_size, seq_len, d_sae]`.
+      Mathematically: `f(x) = ReLU(W_enc(x - b_dec) + b_enc)`.
+    - Reconstruction: The reconstructed MLP input `x_hat` produced by the SAE
+      decoder, which is patched in place of the true MLP output.
+      Shape: `[batch_size, seq_len, d_model]`.
+      Mathematically: `x_hat = W_dec(f(x)) + b_dec`.
     """
 
     def __init__(self, model: nn.Module, transcoders: dict[int, Any]):
