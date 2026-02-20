@@ -40,4 +40,4 @@ miq-build-graph \
   --use_patching 0 \
   --node_threshold 0.8 \
   --edge_threshold 0.85 \
-  2>&1 | tee logs/job_1gpu_$(date +%s).log
+  2>&1 | tee logs/job_1gpu_$(date +%Y-%m-%d_%H-%M-%S).log
