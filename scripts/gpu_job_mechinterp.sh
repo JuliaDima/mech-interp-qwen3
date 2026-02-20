@@ -35,9 +35,9 @@ miq-build-graph \
   --prompt "You are solving a simple comparison task. Two numbers are given: A and B. Answer with a single character: 'A' if A is larger, otherwise 'B'. A = 864, B = 394, Answer: " \
   --slug gt_864_394 \
   --layers 4,12,20 \
-  --graph_file_dir graphs \
-  --max_n_logits 10 \
-  --use_patching True \
+  --graph_dir graphs \
+  --max_n_logits 2 \
+  --use_patching 0 \
   --node_threshold 0.8 \
   --edge_threshold 0.85 \
   2>&1 | tee logs/job_1gpu_$(date +%s).log

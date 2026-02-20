@@ -2,7 +2,7 @@
 
 [![pipeline status](https://gitlab.developers.cam.ac.uk/phy/data-intensive-science-mphil/assessments/projects/eid23/badges/main/pipeline.svg)](https://gitlab.developers.cam.ac.uk/phy/data-intensive-science-mphil/assessments/projects/eid23/-/pipelines) [![coverage report](https://gitlab.developers.cam.ac.uk/phy/data-intensive-science-mphil/assessments/projects/eid23/badges/main/coverage.svg)](https://gitlab.developers.cam.ac.uk/phy/data-intensive-science-mphil/assessments/projects/eid23/-/jobs)
 
-This repository contains the code for the paper "Mechanistic Interpretability of Qwen3-4B-Instruct". The code is written in Python and is based on the Hugging Face transformers library.
+This repository contains the code for the paper "Mechanistic Interpretability of Qwen3-4B-Instruct". The code is written in Python and is based on the Hugging Face transformers library. The attribution graph can be visualized at [https://mechinterp-viz-94c364.uniofcam.dev/](https://mechinterp-viz-94c364.uniofcam.dev/).
 
 ## Project goals
 
@@ -58,8 +58,12 @@ We implement attribution graph construction ourselves rather than using circuit-
 ```bash
 # Build attribution graph for a specific example
 miq-build-graph \
-  --prompt "You are solving a simple comparison task. Two numbers are given: A and B. Answer with a single character: 'A' if A is larger, otherwise 'B'. A = 864, B = 394. Answer: " \
+  --prompt "You are solving a simple comparison task. Two numbers are given: A and B. Answer with a single character: 'A' if A is larger, otherwise 'B'. A = 864, B = 394, Answer: " \
   --slug gt_864_394 \
   --layers 4,12,20 \
-  --graph_dir graphs
+  --graph_dir graphs \
+  --max_n_logits 2 \
+  --use_patching 0 \
+  --node_threshold 0.8 \
+  --edge_threshold 0.85
 ```
