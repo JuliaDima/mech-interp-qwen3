@@ -23,7 +23,7 @@ def forward_linearized_with_sae_features(
     prompt: str,
     layers_to_analyze: list[int],
     *,
-    use_patching: bool = False,
+    feature_to_feature_edges: bool = False,
 ) -> dict[str, Any]:
     """Forward pass with linearized gradient flow and SAE feature extraction.
 
@@ -39,7 +39,7 @@ def forward_linearized_with_sae_features(
         transcoders: Dictionary mapping layer_id -> Transcoder
         prompt: Input prompt text
         layers_to_analyze: List of layer IDs to extract features from
-        use_patching: If True, replaces MLP output with SAE reconstruction
+        feature_to_feature_edges: If True, replaces MLP output with SAE reconstruction
                       to enable inter-layer feature connectivity.
 
     Returns:
@@ -142,7 +142,7 @@ def forward_linearized_with_sae_features(
                 mlp_out.retain_grad()
                 features.retain_grad()
 
-                if use_patching:
+                if feature_to_feature_edges:
                     reconstruction = transcoder.decode(features, mlp_in)
                     layer_module.mlp.output = reconstruction
                     mlp_out = reconstruction
@@ -168,6 +168,7 @@ def forward_linearized_with_sae_features(
     # Extract real tensors from NNSight proxies
     mlp_activations = {}
     sae_features = {}
+    sae_features_dense: dict = {}  # dense (grad-preserving) copy for token→feature attribution
 
     for layer_id in layers_to_analyze:
         mlp_in_proxy, mlp_out_proxy = mlp_activations_proxy[layer_id]
@@ -194,12 +195,16 @@ def forward_linearized_with_sae_features(
                 f"(shape={tuple(features.shape)}). This is a proxy extraction bug."
             )
 
+        # Keep a dense copy BEFORE sparsification so gradients can flow back through
+        # it to the embedding (to_sparse() breaks the grad graph).
+        # This is used in compute_attribution for token→feature backward passes.
+        sae_features_dense[layer_id] = features  # [seq_len, n_features], grad-connected
+
         # Convert to sparse if highly sparse (>80% zeros) for memory efficiency
         sparsity = 1.0 - (features.count_nonzero().item() / features.numel())
         if sparsity > 0.8:
             features = features.to_sparse()
 
-        features.retain_grad()
         sae_features[layer_id] = features
 
     # Get pre-logit hidden state and retain grad
@@ -219,6 +224,7 @@ def forward_linearized_with_sae_features(
         "tokens": tokens,
         "logits": logits,
         "sae_features": sae_features,
+        "sae_features_dense": sae_features_dense,  # dense, grad-connected, for token→feature
         "mlp_activations": mlp_activations,
         "pre_logit_hidden": pre_logit,
         "embedding_activations": embed_act,
