@@ -14,7 +14,7 @@ To ensure that gradients accurately reflect the flow of information through the 
 2. Reconstructive Patching
 --------------------------
 
-One of the most powerful features of this pipeline is the ability to discover **Inter-Layer Circuits** (connections between features in different layers). This is enabled by the ``--use_patching`` flag.
+One of the most powerful features of this pipeline is the ability to discover **Inter-Layer Circuits** (connections between features in different layers). This is enabled by the ``--feature_to_feature_edges`` flag.
 
 *   **How it works**: The output of an MLP layer is intercepted and replaced with its SAE reconstruction.
 *   **Feature-to-Feature Edges**: Because the reconstruction is now part of the computational graph, we can calculate the gradient of a feature in Layer 12 with respect to a feature in Layer 4.

@@ -15,7 +15,7 @@ A typical analysis job is configured as follows (e.g., in a SLURM script like ``
      --slug gt_864_394 \
      --layers 4,12,20 \
      --max_n_logits 10 \
-     --use_patching True \
+     --feature_to_feature_edges True \
      --node_threshold 0.8 \
      --edge_threshold 0.85
 
@@ -25,7 +25,7 @@ Key Parameters
 *   **--prompt**: The full text input for the model.
 *   **--slug**: A unique identifier for the run. Results will be saved in ``graphs/<slug>/``.
 *   **--layers**: Comma-separated list of layer IDs to include in the analysis (e.g., ``4,12,20``).
-*   **--use_patching**: Set to ``True`` to enable inter-layer feature connectivity (see :doc:`methodology` for details).
+*   **--feature_to_feature_edges**: Set to ``True`` to enable inter-layer feature connectivity (see :doc:`methodology` for details).
 *   **--node_threshold**: (0.0 to 1.0) The fraction of total attribution to keep when pruning nodes. Higher means a more dense graph.
 *   **--edge_threshold**: (0.0 to 1.0) The fraction of total attribution to keep when pruning edges.
 
