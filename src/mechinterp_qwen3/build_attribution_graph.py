@@ -107,7 +107,7 @@ def main() -> None:
             raise argparse.ArgumentTypeError("Boolean value expected.")
 
     ap.add_argument(
-        "--use_patching",
+        "--feature_to_feature_edges",
         type=str2bool,
         default=True,
         help="Whether to patch MLP outputs with SAE reconstructions to enable gradients",
@@ -165,7 +165,7 @@ def main() -> None:
         transcoder_repo=args.transcoder_repo,
         max_n_logits=args.max_n_logits,
         desired_logit_prob=args.desired_logit_prob,
-        use_patching=args.use_patching,
+        feature_to_feature_edges=args.feature_to_feature_edges,
     )
 
     # Save raw graph
