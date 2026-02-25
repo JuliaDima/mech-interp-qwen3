@@ -23,7 +23,7 @@ def forward_linearized_with_sae_features(
     prompt: str,
     layers_to_analyze: list[int],
     *,
-    feature_to_feature_edges: bool = False,
+    batch_size: int = 1,
 ) -> dict[str, Any]:
     """Forward pass with linearized gradient flow and SAE feature extraction.
 
@@ -103,21 +103,51 @@ def forward_linearized_with_sae_features(
     embed_proxy = None
     pre_logit_proxy = None
     logits_proxy = None
+    analyze_set = set(layers_to_analyze)
 
-    with torch.set_grad_enabled(True), nn_model.trace(inputs["input_ids"]):
-        # ── Linearization 1: Enable gradients on the embedding output ──────────
+    with torch.no_grad(), nn_model.trace(inputs["input_ids"]):
+        for layer_id in sorted(analyze_set):
+            layer_module = nn_model.model.layers[layer_id]
+            mlp_in = layer_module.mlp.input[0]
+            features = transcoders[layer_id].encode(mlp_in)
+            sae_features_proxy[layer_id] = features.save()
+
+        logits_proxy = nn_model.lm_head.output.save()
+
+    def _unpack_proxy(proxy):
+        """Unpack an NNSight SaveProxy or a plain tensor."""
+        val = proxy.value if hasattr(proxy, "value") else proxy
+        return val[0] if isinstance(val, tuple) else val
+
+    # Extract and sparsify features
+    sae_features = {}
+    sae_features_dense = {}
+    for layer_id in layers_to_analyze:
+        features = _unpack_proxy(sae_features_proxy[layer_id])
+        if features.dim() == 3 and features.shape[0] == 1:
+            features = features.squeeze(0)
+        elif features.dim() == 1:
+            raise RuntimeError(f"SAE features for layer {layer_id} are unexpectedly 1D")
+
+        sae_features_dense[layer_id] = features.clone()
+
+        sparsity = 1.0 - (features.count_nonzero().item() / features.numel())
+        if sparsity > 0.8:
+            features = features.to_sparse()
+        sae_features[layer_id] = features
+
+    # ── Trace 2: Gradient Flow (batch_size = N) ──
+    batched_input_ids = inputs["input_ids"].expand(batch_size, -1)
+
+    mlp_inputs_proxy: dict = {}
+
+    with torch.set_grad_enabled(True), nn_model.trace(batched_input_ids):
+        # Linearization 1: Enable gradients on the embedding output
         embed_out = nn_model.model.embed_tokens.output
         embed_out.requires_grad_(True)
         embed_proxy = embed_out.save()
 
-        # ── Linearization 2 & Feature extraction (single pass per layer) ──────
-        # NNSight requires interventions in model-execution order. Merging the
-        # attention detach and feature extraction into a single sorted loop prevents
-        # OutOfOrderError on mlp.input.
-        #
-        # Detaching the post-softmax attention here (not self_attn.output) preserves OV-circuit gradients
-        # while severing QK, making the model linear in the residual stream.
-        analyze_set = set(layers_to_analyze)
+        # Linearization 2: Detach QK and MLPs, retain grad on mlp_in and mlp_out
         for layer_id in range(len(nn_model.model.layers)):
             layer_module = nn_model.model.layers[layer_id]
 
@@ -128,92 +158,60 @@ def forward_linearized_with_sae_features(
             attn_weights_node.output = attn_weights_node.output.detach()
 
             if layer_id in analyze_set:
-                transcoder = transcoders[layer_id]
+                mlp_in_node = layer_module.mlp.input[0]
+                mlp_in_node.retain_grad()
+                mlp_inputs_proxy[layer_id] = mlp_in_node.save()
 
-                # mlp.input[0] is hidden_states: [1, seq_len, d_model]
-                mlp_in = layer_module.mlp.input[0]
+            # Detach MLP output so gradients don't flow through MLP weights
+            mlp_out_node = layer_module.mlp.output
+            detached_out = mlp_out_node.detach().requires_grad_(True)
+            layer_module.mlp.output = detached_out
 
-                # Encode features natively in the NNSight graph.
-                features = transcoder.encode(mlp_in)
-
-                # Retain grads BEFORE .save() — after the trace, .value returns
-                # the same tensor object so autograd can still flow back through it.
-                mlp_out = layer_module.mlp.output
-                mlp_out.retain_grad()
-                features.retain_grad()
-
-                if feature_to_feature_edges:
-                    reconstruction = transcoder.decode(features, mlp_in)
-                    layer_module.mlp.output = reconstruction
-                    mlp_out = reconstruction
-                    mlp_out.retain_grad()
-
-                sae_features_proxy[layer_id] = features.save()
-                mlp_activations_proxy[layer_id] = (mlp_in.save(), mlp_out.save())
+            if layer_id in analyze_set:
+                detached_out.retain_grad()
+                mlp_activations_proxy[layer_id] = detached_out.save()
 
         pre_logit_out = nn_model.model.norm.output
         pre_logit_out.retain_grad()
         pre_logit_proxy = pre_logit_out.save()
-        logits_proxy = nn_model.lm_head.output.save()
 
     def _unpack_proxy(proxy):
         """Unpack an NNSight SaveProxy or a plain tensor."""
         val = proxy.value if hasattr(proxy, "value") else proxy
-        return val[0] if isinstance(val, tuple) else val
+        res = val[0] if isinstance(val, tuple) else val
+        return res
 
     logits = _unpack_proxy(logits_proxy)
-    if logits.dim() == 3:  # [batch, seq_len, vocab_size] -> [seq_len, vocab_size]
+    if logits.dim() == 3 and logits.shape[0] == 1:
         logits = logits.squeeze(0)
 
     # Extract real tensors from NNSight proxies
     mlp_activations = {}
-    sae_features = {}
-    sae_features_dense: dict = {}  # dense (grad-preserving) copy for token→feature attribution
+    mlp_inputs = {}
 
     for layer_id in layers_to_analyze:
-        mlp_in_proxy, mlp_out_proxy = mlp_activations_proxy[layer_id]
+        m_in = _unpack_proxy(mlp_inputs_proxy[layer_id])
+        m_out = _unpack_proxy(mlp_activations_proxy[layer_id])
 
-        mlp_out = _unpack_proxy(mlp_out_proxy)
-        mlp_in = _unpack_proxy(mlp_in_proxy)
+        # Ensure batch dim
+        if m_in.dim() == 2:
+            m_in = m_in.unsqueeze(0)
+        if m_out.dim() == 2:
+            m_out = m_out.unsqueeze(0)
 
-        # NNSight proxies already include the batch dim -> only unsqueeze if 2D
-        if mlp_out.dim() == 2:  # [seq_len, d_model] -> [1, seq_len, d_model]
-            mlp_out = mlp_out.unsqueeze(0)
-        mlp_activations[layer_id] = mlp_out  # [1, seq_len, d_model]
-        mlp_activations[layer_id].retain_grad()
-
-        # Process SAE Features
-        features = _unpack_proxy(sae_features_proxy[layer_id])
-
-        # NNSight proxy ops (e.g. squeeze) may not fire identically in the
-        # trace graph, leaving an extra batch dim.  Normalise to [seq_len, n_features].
-        if features.dim() == 3 and features.shape[0] == 1:
-            features = features.squeeze(0)  # [1, seq_len, n_features] -> [seq_len, n_features]
-        elif features.dim() == 1:
-            raise RuntimeError(
-                f"SAE features for layer {layer_id} are unexpectedly 1D "
-                f"(shape={tuple(features.shape)}). This is a proxy extraction bug."
-            )
-
-        # Keep a dense copy BEFORE sparsification so gradients can flow back through
-        # it to the embedding (to_sparse() breaks the grad graph).
-        # This is used in compute_attribution for token→feature backward passes.
-        sae_features_dense[layer_id] = features  # [seq_len, n_features], grad-connected
-
-        # Convert to sparse if highly sparse (>80% zeros) for memory efficiency
-        sparsity = 1.0 - (features.count_nonzero().item() / features.numel())
-        if sparsity > 0.8:
-            features = features.to_sparse()
-
-        sae_features[layer_id] = features
+        m_in.retain_grad()
+        m_out.retain_grad()
+        mlp_inputs[layer_id] = m_in
+        mlp_activations[layer_id] = m_out
 
     # Get pre-logit hidden state and retain grad
     val_pre_logit = _unpack_proxy(pre_logit_proxy)
-    # NNSight proxy already has batch dim; only unsqueeze if 2D
     pre_logit = val_pre_logit.unsqueeze(0) if val_pre_logit.dim() == 2 else val_pre_logit
     pre_logit.retain_grad()
 
     embed_act = _unpack_proxy(embed_proxy)
+    if embed_act.dim() == 2:
+        embed_act = embed_act.unsqueeze(0)
     embed_act.retain_grad()
 
     lin_hooks.remove()
@@ -224,7 +222,7 @@ def forward_linearized_with_sae_features(
         "tokens": tokens,
         "logits": logits,
         "sae_features": sae_features,
-        "sae_features_dense": sae_features_dense,  # dense, grad-connected, for token→feature
+        "mlp_inputs": mlp_inputs,
         "mlp_activations": mlp_activations,
         "pre_logit_hidden": pre_logit,
         "embedding_activations": embed_act,

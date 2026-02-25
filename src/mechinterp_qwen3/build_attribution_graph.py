@@ -95,6 +95,12 @@ def main() -> None:
         default=0.98,
         help="Pruning: keep fewest edges covering this fraction of total attribution",
     )
+    ap.add_argument(
+        "--batch_size",
+        type=int,
+        default=16,
+        help="Batch size for generating the attribution graph gradients",
+    )
 
     def str2bool(v):
         if isinstance(v, bool):
@@ -166,6 +172,7 @@ def main() -> None:
         max_n_logits=args.max_n_logits,
         desired_logit_prob=args.desired_logit_prob,
         feature_to_feature_edges=args.feature_to_feature_edges,
+        batch_size=args.batch_size,
     )
 
     # Save raw graph

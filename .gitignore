@@ -10,3 +10,4 @@ useful_docs
 project_instructions.md
 scripts/inspect_transcoder.py
 docs/_build
+scripts/test_prune.py

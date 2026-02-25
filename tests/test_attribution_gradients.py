@@ -109,15 +109,23 @@ def test_gradient_flow_to_previous_tokens(real_structure_model, mock_tokenizer_q
     except Exception as e:
         pytest.fail(f"Forward pass failed: {e}")
 
-    logits = results["logits"]  # [seq, vocab]
+    pre_logit = results["pre_logit_hidden"]  # [1, seq, d_model]
     embeddings = results["embedding_activations"]  # [1, seq, d_model]
 
     assert (
         embeddings.grad_fn is not None or embeddings.requires_grad
     ), "Embeddings should track gradients"
 
-    # Target: Sum of last token logits
-    target = logits[-1, :].sum()
+    print(
+        f"pre_logit shape: {pre_logit.shape}, requires_grad: {pre_logit.requires_grad}, grad_fn: {pre_logit.grad_fn}"
+    )
+
+    # Target: Sum of last token pre-logit hidden state
+    target = pre_logit[0, -1, :].sum()
+
+    print(
+        f"target shape: {target.shape}, requires_grad: {target.requires_grad}, grad_fn: {target.grad_fn}"
+    )
 
     # Backward
     target.backward()

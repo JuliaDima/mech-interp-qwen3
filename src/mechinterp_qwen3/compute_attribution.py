@@ -5,13 +5,14 @@ Implements the Attribution Graphs paper methodology:
 - Cumulative-probability logit selection with demeaned unembedding vectors
 - Vectorized attribution computation
 - Inter-layer connectivity via reconstructive patching and salient feature backprop.
-TODO: This implementation assumes batch_size 1 and Per-Layer Transcoder (SingleLayerTranscoder). Should extend to batch_size > 1 and Cross-Layer Transcoder.
-TODO: Maybe use thresholding instead of 0 for masking of feat * attr_vals ?
 """
 
 from __future__ import annotations
 
+import math
+
 import torch
+from tqdm import tqdm
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
 from .attribution_graph import AttributionGraph, Edge, Node
@@ -29,7 +30,8 @@ def compute_attribution_graph(
     *,
     max_n_logits: int = 10,
     desired_logit_prob: float = 0.95,
-    use_patching: bool = True,
+    feature_to_feature_edges: bool = True,
+    batch_size: int = 128,
 ) -> AttributionGraph:
     """Compute attribution graph from input tokens through SAE features to output logits.
 
@@ -54,6 +56,10 @@ def compute_attribution_graph(
         device=str(model.device),
     )
 
+    # Hardcoded internal tolerance to prevent saving float-zero edges from batched computation.
+    # The actual network pruning uses the edge_threshold and node_threshold arguments later.
+    min_edge_weight = 1e-4
+
     print("Running linearized forward pass with SAE features...")
     forward_result = forward_linearized_with_sae_features(
         model=model,
@@ -61,12 +67,13 @@ def compute_attribution_graph(
         transcoders=transcoders,
         prompt=prompt,
         layers_to_analyze=layers_to_analyze,
-        use_patching=use_patching,
+        batch_size=batch_size,
     )
 
     tokens = forward_result["tokens"]
     logits = forward_result["logits"]  # [seq_len, vocab_size]
     sae_features = forward_result["sae_features"]  # {layer_id: [seq_len, n_features]}
+    mlp_inputs = forward_result["mlp_inputs"]
     mlp_activations = forward_result["mlp_activations"]
     pre_logit_hidden = forward_result[
         "pre_logit_hidden"
@@ -118,7 +125,7 @@ def compute_attribution_graph(
             target_j,
             inputs_for_grad,
             retain_graph=(
-                j < n_logits - 1 or use_patching
+                j < n_logits - 1 or feature_to_feature_edges
             ),  # keep computational graph until final iteration to free memory
             allow_unused=True,
         )
@@ -142,7 +149,7 @@ def compute_attribution_graph(
     # (We need the values, but not the graph, to compute residuals)
     mlp_acts_detached = {lid: act.detach() for lid, act in mlp_activations.items()}
 
-    del pre_logit_hidden, h, mlp_tensors, logits, embedding_act
+    del pre_logit_hidden, h, mlp_tensors, logits
     del forward_result
 
     # Phase 4: Build nodes and logit-edges
@@ -396,69 +403,160 @@ def compute_attribution_graph(
         layer_salient.sort(key=lambda x: x[2].total_attribution, reverse=True)
         salient_per_layer[layer_id] = layer_salient[:20]
 
-    # Phase 6: Inter-Layer Connectivity
-    if use_patching and len(layers_to_analyze) > 1:
-        print("Computing feature-to-feature connectivity...")
-        for i in range(len(layers_to_analyze) - 1):
-            layer_n = layers_to_analyze[i]
-            layer_m = layers_to_analyze[i + 1]
+    # Phase 5b/6: Batched feature-to-feature and token-to-feature connectivity
+    # Gather everything
+    all_targets = []
 
-            targets_m = salient_per_layer.get(layer_m, [])
-            for pos_m, feat_m_id, node_m in targets_m:
-                target_tensor = sae_features[layer_m][pos_m, feat_m_id]
-                model.zero_grad(set_to_none=True)
-                patch_n = mlp_activations[layer_n]
+    # We always need token-to-feature flow, which means taking gradients from embed_act
 
-                grad_output = torch.autograd.grad(
-                    target_tensor, patch_n, retain_graph=True, allow_unused=True
-                )[0]
-                if grad_output is None:
-                    continue
-                if grad_output.dim() == 3:
-                    grad_output = grad_output[0]
+    for layer_id in layers_to_analyze:
+        for pos, feat_id, node in salient_per_layer.get(layer_id, []):
+            all_targets.append((layer_id, pos, feat_id, node))
 
-                transcoder_n = transcoders[layer_n]
-                W_dec_n = transcoder_n.W_dec.detach().float()
-                feat_n = sae_features[layer_n].float()
-                inter_attr = feat_n * (grad_output.float() @ W_dec_n.t())
+    if len(all_targets) == 0:
+        print("No salient features found, skipping graph edge generation.")
+        del mlp_activations
+        return graph
 
-                if inter_attr.is_sparse:
-                    inter_attr = inter_attr.coalesce()
-                    attr_vals = inter_attr.values()
-                    attr_indices = inter_attr.indices()
+    print(
+        f"Computing token→feature and feature→feature attributions for {len(all_targets)} targets in batches of {batch_size}..."
+    )
 
-                    mask = attr_vals.abs() > 0
-                    valid_indices = torch.nonzero(mask).squeeze(1)
+    inputs_to_grad = [embedding_act]
+    if feature_to_feature_edges:
+        for l_in in mlp_inputs.values():
+            inputs_to_grad.append(l_in)
 
-                    if valid_indices.numel() > 0:
-                        final_attr_vals = attr_vals[valid_indices].tolist()
-                        final_pos_list = attr_indices[0, valid_indices].tolist()
-                        final_feat_list = attr_indices[1, valid_indices].tolist()
+    n_batches = math.ceil(len(all_targets) / batch_size)
+    for b_idx in tqdm(range(n_batches), desc="Batched Graph Edges"):
+        start_idx = b_idx * batch_size
+        batch_targets = all_targets[start_idx : start_idx + batch_size]
 
-                        loop_zip = zip(
-                            final_pos_list,
-                            final_feat_list,
-                            final_attr_vals,
-                            strict=True,
-                        )
-                    else:
-                        loop_zip = []
-                else:
-                    mask = inter_attr.abs() > 0
-                    pos_list, feat_list = mask.nonzero(as_tuple=True)
-                    loop_zip = zip(
-                        pos_list.tolist(),
-                        feat_list.tolist(),
-                        inter_attr[pos_list, feat_list].tolist(),
-                        strict=True,
-                    )
+        layer_to_grad_injection = {}
+        for layer_id in layers_to_analyze:
+            m_in = mlp_inputs[layer_id]
+            if m_in.shape[0] == 1 and batch_size > 1:
+                shape = (batch_size, m_in.shape[1], m_in.shape[2])
+            else:
+                shape = m_in.shape
+            layer_to_grad_injection[layer_id] = torch.zeros(
+                shape, device=model.device, dtype=torch.float
+            )
 
-                for pos_n, feat_n_id, val in loop_zip:
-                    if pos_n < start_pos:
+        m_in_embed = embedding_act
+        if m_in_embed.shape[0] == 1 and batch_size > 1:
+            shape_embed = (batch_size, m_in_embed.shape[1], m_in_embed.shape[2])
+        else:
+            shape_embed = m_in_embed.shape
+
+        grad_injection_embed = torch.zeros(shape_embed, device=model.device, dtype=torch.float)
+
+        for i, (layer_m, pos_m, feat_m_id, _node_m) in enumerate(batch_targets):
+            W_enc_m = transcoders[layer_m].W_enc.detach().float()
+            layer_to_grad_injection[layer_m][i, pos_m, :] = W_enc_m[feat_m_id, :]
+            grad_injection_embed[i, pos_m, :] = W_enc_m[feat_m_id, :]
+
+        grad_outputs = []
+        target_tensors = []
+
+        if grad_injection_embed.abs().sum() > 0:
+            target_tensors.append(embedding_act)
+            if embedding_act.shape[0] == 1 and grad_injection_embed.shape[0] > 1:
+                grad_injection_embed = grad_injection_embed.sum(dim=0, keepdim=True)
+            grad_outputs.append(grad_injection_embed.to(embedding_act.dtype))
+
+        if feature_to_feature_edges:
+            for layer_id, g_inj in layer_to_grad_injection.items():
+                if g_inj.abs().sum() > 0:
+                    m_in = mlp_inputs[layer_id]
+                    target_tensors.append(m_in)
+                    if m_in.shape[0] == 1 and g_inj.shape[0] > 1:
+                        g_inj = g_inj.sum(dim=0, keepdim=True)
+                    grad_outputs.append(g_inj.to(m_in.dtype))
+
+        model.zero_grad(set_to_none=True)
+
+        grads = torch.autograd.grad(
+            outputs=target_tensors,
+            inputs=inputs_to_grad,
+            grad_outputs=grad_outputs,
+            retain_graph=True,
+            allow_unused=True,
+        )
+
+        grad_embed = grads[0]
+        grad_mlps = grads[1:] if feature_to_feature_edges else []
+
+        for i, (layer_m, pos_m, _feat_m_id, node_m) in enumerate(batch_targets):
+            if grad_embed is not None:
+                g_embed_i = grad_embed[i if grad_embed.shape[0] > 1 else 0]
+                for pos_embed in range(start_pos, pos_m + 1):
+                    token_grad = g_embed_i[pos_embed, :]
+                    token_act = embedding_act[0, pos_embed, :].detach().float()
+                    attr_val = (token_act * token_grad).sum().item()
+
+                    if abs(attr_val) >= min_edge_weight:
+                        embed_node = graph.get_node(f"token_{pos_embed}")
+                        if embed_node:
+                            graph.add_edge(
+                                Edge(source=embed_node, target=node_m, attribution_score=attr_val)
+                            )
+
+            if feature_to_feature_edges:
+                idx = 0
+                for layer_n in layers_to_analyze:
+                    # Only map edges from earlier layers
+                    if layer_n >= layer_m:
+                        idx += 1
                         continue
-                    node_n = graph.get_node(f"feature_L{layer_n}_P{pos_n}_F{feat_n_id}")
-                    if node_n:
-                        graph.add_edge(Edge(source=node_n, target=node_m, attribution_score=val))
+
+                    g_mlp_n = grad_mlps[idx]
+                    idx += 1
+
+                    if g_mlp_n is not None:
+                        g_mlp_n_i = g_mlp_n[i if g_mlp_n.shape[0] > 1 else 0]
+                        transcoder_n = transcoders[layer_n]
+                        W_dec_n = transcoder_n.W_dec.detach().float()
+                        feat_n = sae_features[layer_n].float()
+
+                        inter_attr = feat_n * (g_mlp_n_i.float() @ W_dec_n.t())
+
+                        if inter_attr.is_sparse:
+                            inter_attr = inter_attr.coalesce()
+                            attr_vals = inter_attr.values()
+                            attr_indices = inter_attr.indices()
+
+                            mask = attr_vals.abs() > min_edge_weight
+                            valid_indices = torch.nonzero(mask).squeeze(1)
+
+                            if valid_indices.numel() > 0:
+                                final_attr_vals = attr_vals[valid_indices].tolist()
+                                final_pos_list = attr_indices[0, valid_indices].tolist()
+                                final_feat_list = attr_indices[1, valid_indices].tolist()
+
+                                loop_zip = zip(
+                                    final_pos_list, final_feat_list, final_attr_vals, strict=True
+                                )
+                            else:
+                                loop_zip = []
+                        else:
+                            mask = inter_attr.abs() > min_edge_weight
+                            pos_list, feat_list = mask.nonzero(as_tuple=True)
+                            loop_zip = zip(
+                                pos_list.tolist(),
+                                feat_list.tolist(),
+                                inter_attr[pos_list, feat_list].tolist(),
+                                strict=True,
+                            )
+
+                        for pos_n, feat_n_id, val in loop_zip:
+                            if pos_n < start_pos:
+                                continue
+                            node_n = graph.get_node(f"feature_L{layer_n}_P{pos_n}_F{feat_n_id}")
+                            if node_n:
+                                graph.add_edge(
+                                    Edge(source=node_n, target=node_m, attribution_score=val)
+                                )
 
     del mlp_activations
     print(f"\nGraph construction complete: {graph}")
