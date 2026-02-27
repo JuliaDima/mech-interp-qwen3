@@ -14,19 +14,17 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" # this file is in t
 export MIQ_REPO_ROOT="$REPO_ROOT"
 
 # ---- Scratch base on node-local disk (/scratch) ----
-export MIQ_SCRATCH_BASE="/scratch/${USER}/p28"
+export MIQ_SCRATCH_BASE="/rds/user/${USER}/hpc-work/p28"
 export MIQ_CACHE_DIR="${MIQ_SCRATCH_BASE}/cache"
 export MIQ_RUNS_DIR="${MIQ_SCRATCH_BASE}/runs"
 export MIQ_TMP_DIR="${MIQ_SCRATCH_BASE}/tmp"
 
-mkdir -p "$MIQ_CACHE_DIR" "$MIQ_RUNS_DIR" "$MIQ_TMP_DIR"
 
 # ---- Hugging Face / Transformers caches (into /scratch) ----
 export HF_HOME="${MIQ_CACHE_DIR}/hf"
 export HF_DATASETS_CACHE="${MIQ_CACHE_DIR}/hf/datasets"
 export HUGGINGFACE_HUB_CACHE="${MIQ_CACHE_DIR}/hf/hub"
 
-mkdir -p "$HF_HOME" "$HF_DATASETS_CACHE" "$HUGGINGFACE_HUB_CACHE"
 
 # ---- Fix CAS/Xet flakiness ----
 export HF_HUB_DISABLE_XET=1
@@ -37,7 +35,6 @@ export HF_HUB_ETAG_TIMEOUT=300
 # ---- Torch + temp (into /scratch) ----
 export TORCH_HOME="${MIQ_CACHE_DIR}/torch"
 export TMPDIR="$MIQ_TMP_DIR"
-mkdir -p "$TORCH_HOME" "$TMPDIR"
 
 # ---- Tokenizers perf / stability ----
 export TOKENIZERS_PARALLELISM=false

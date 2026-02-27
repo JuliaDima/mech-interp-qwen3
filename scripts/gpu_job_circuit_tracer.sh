@@ -27,7 +27,7 @@ export LD_LIBRARY_PATH=/home/eid23/miniforge3/envs/p28_py311_env/lib
 # Run your program
 # Build attribution graph for a specific example
 
-logfile="logs/job_1gpu_$(date +%Y-%m-%d_%H-%M-%S).log"
+logfile="logs/job_1gpu_ct_$(date +%Y-%m-%d_%H-%M-%S).log"
 
 cmd=(
   python -m circuit_tracer attribute

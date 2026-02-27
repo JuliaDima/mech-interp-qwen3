@@ -31,9 +31,7 @@ docs = [
 ]
 
 [project.scripts]
-miq-build-prompts = "mechinterp_qwen3.build_prompts:main"
-miq-run-baseline  = "mechinterp_qwen3.run_baseline:main"
-miq-build-graph   = "mechinterp_qwen3.build_attribution_graph:main"
+miq = "mechinterp_qwen3.__main__:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
