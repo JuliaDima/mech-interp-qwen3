@@ -83,6 +83,10 @@ ignore = [
 fixable = ["ALL"]
 unfixable = []
 
+[tool.ruff.lint.per-file-ignores]
+"src/mechinterp_qwen3/transcoder/cross_layer_transcoder.py" = ["SIM118"]
+"src/mechinterp_qwen3/transcoder/single_layer_transcoder.py" = ["SIM118"]
+
 [tool.ruff.lint.isort]
 known-first-party = ["mechinterp_qwen3"]
 

@@ -87,7 +87,7 @@ class CrossLayerTranscoder(torch.nn.Module):
         elif activation_function == "relu":
             self.activation_function = F.relu
         else:
-            raise ValueError(f"Unknown activation function: {activation_function}")
+            raise ValueError(f"Invalid activation function: {activation_function}")
 
         if not lazy_encoder:
             self.W_enc = torch.nn.Parameter(

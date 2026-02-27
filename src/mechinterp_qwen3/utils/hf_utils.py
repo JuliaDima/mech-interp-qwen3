@@ -260,7 +260,7 @@ def download_hf_uri(uri: str) -> str:
     )
 
 
-def download_hf_uris(uris: Iterable[str], max_workers: int = 8) -> dict[str, str]:
+def download_hf_uris(uris: Iterable[str], max_workers: int = 16) -> dict[str, str]:
     """Download multiple HuggingFace URIs concurrently with pre-flight auth checks.
 
     Args:
