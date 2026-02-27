@@ -415,7 +415,7 @@ def load_relu_transcoder(
 
     param_dict = {}
     with safe_open(path, framework="pt", device=str(device)) as f:
-        for k in f:
+        for k in f.keys():  # noqa: SIM118 # type: ignore
             if lazy_encoder and k == "W_enc":
                 continue
             if lazy_decoder and k == "W_dec":
