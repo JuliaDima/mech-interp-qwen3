@@ -463,7 +463,7 @@ def _load_state_dict(
     dec_file = "W_enc_0.safetensors"
     with safe_open(os.path.join(clt_path, dec_file), framework="pt", device=str(device)) as f:
         d_transcoder, d_model = f.get_slice("W_enc_0").get_shape()
-        has_threshold = "threshold_0" in f
+        has_threshold = "threshold_0" in f.keys()  # noqa: SIM118 # type: ignore
 
     # Preallocate tensors
     b_dec = torch.zeros(n_layers, d_model, device=device, dtype=dtype)
