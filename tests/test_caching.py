@@ -2,7 +2,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from mechinterp_qwen3.utils.caching import empty_cache, get_cache_dir, get_cached_path, is_cached
+from mechinterp_qwen3.utils.hf_utils import empty_cache, get_cache_dir, get_cached_path, is_cached
 
 
 def test_cache_dir_logic():

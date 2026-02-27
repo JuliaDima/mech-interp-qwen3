@@ -6,8 +6,7 @@ from tqdm import tqdm
 
 from .attribution_model import AttributionModel
 from .graph import Graph, compute_partial_influences
-from .utils.disk_offload import offload_modules
-from .utils.salient_logits import compute_salient_logits
+from .utils.model_utils import compute_salient_logits, offload_modules
 
 
 def attribute(

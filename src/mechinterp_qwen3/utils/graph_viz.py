@@ -1,11 +1,103 @@
+import json
 import os
 import time
+import urllib.parse
+from collections import namedtuple
 
 import torch
 from transformers import AutoTokenizer
 
 from ..graph import Metadata, Model, Node, QParams
-from .general import add_graph_metadata
+
+
+def add_graph_metadata(graph_metadata, path):
+    assert os.path.exists(os.path.dirname(path)), f"Could not find {os.path.dirname(path)}"
+    if os.path.isdir(path):
+        path = os.path.join(path, "graph-metadata.json")
+
+    if os.path.exists(path):
+        with open(path) as f:
+            metadata = json.load(f)
+    else:
+        metadata = {"graphs": []}
+
+    metadata["graphs"] = [g for g in metadata["graphs"] if g["slug"] != graph_metadata["slug"]]
+    metadata["graphs"].append(graph_metadata)
+
+    with open(path, "w") as f:
+        json.dump(metadata, f, indent=2)
+
+
+def process_token(token: str) -> str:
+    return token.replace("\n", "⏎").replace("\t", "→").replace("\r", "↵")
+
+
+Feature = namedtuple("Feature", ["layer", "pos", "feature_idx"])
+
+
+def decode_url_features(url: str) -> tuple[dict[str, list[Feature]], list[Feature]]:
+    """
+    Extract both supernode features and individual singleton features from URL.
+
+    Returns:
+        Tuple of (supernode_features, singleton_features)
+        - supernode_features: Dict mapping supernode names to lists of Features
+        - singleton_features: List of individual Feature objects
+    """
+    decoded = urllib.parse.unquote(url)
+
+    parsed_url = urllib.parse.urlparse(decoded)
+    query_params = urllib.parse.parse_qs(parsed_url.query)
+
+    # Extract supernodes
+    supernodes_json = query_params.get("supernodes", ["[]"])[0]
+    supernodes_data = json.loads(supernodes_json)
+
+    supernode_features = {}
+    name_counts = {}
+
+    for supernode in supernodes_data:
+        name = supernode[0]
+        node_ids = supernode[1:]
+
+        # Handle duplicate names by adding counter
+        if name in name_counts:
+            name_counts[name] += 1
+            unique_name = f"{name} ({name_counts[name]})"
+        else:
+            name_counts[name] = 1
+            unique_name = name
+
+        nodes = []
+        for node_id in node_ids:
+            layer, feature_idx, pos = map(int, node_id.split("_"))
+            nodes.append(Feature(layer, pos, feature_idx))
+
+        supernode_features[unique_name] = nodes
+
+    # Extract individual/singleton features from pinnedIds
+    pinned_ids_str = query_params.get("pinnedIds", [""])[0]
+    singleton_features = []
+
+    if pinned_ids_str:
+        pinned_ids = pinned_ids_str.split(",")
+        for pinned_id in pinned_ids:
+            # Handle both regular format (layer_feature_pos) and E_ format
+            if pinned_id.startswith("E_"):
+                # E_26865_9 format - embedding layer
+                parts = pinned_id[2:].split("_")  # Remove 'E_' prefix
+                if len(parts) == 2:
+                    feature_idx, pos = map(int, parts)
+                    # Use -1 to indicate embedding layer
+                    singleton_features.append(Feature(-1, pos, feature_idx))
+            else:
+                # Regular layer_feature_pos format
+                parts = pinned_id.split("_")
+                if len(parts) == 3:
+                    layer, feature_idx, pos = map(int, parts)
+                    singleton_features.append(Feature(layer, pos, feature_idx))
+
+    return supernode_features, singleton_features
 
 
 def load_graph_data(file_path):
@@ -188,3 +280,51 @@ def create_graph_files(
 
     total_time_ms = (time.time() - total_start_time) * 1000
     print(f"INFO: Total execution time: {total_time_ms=:.2f} ms")
+
+
+def save_graph_stats(graph, path: str):
+    """Save graph statistics to a file (JSON or text).
+
+    Stats include:
+    - Number of layers
+    - Number of input tokens
+    - Number of output (logit) nodes
+    - Number of feature nodes
+    - Total number of nodes
+    - Total number of edges (non-zero entries in adjacency matrix)
+    """
+    n_layers = graph.cfg.n_layers
+    n_tokens = len(graph.input_tokens)
+    n_logits = len(graph.logit_tokens)
+    n_features = len(graph.selected_features)
+
+    total_nodes = graph.adjacency_matrix.shape[0]
+    # Count non-zero edges. Adjacency matrix is [target, source]
+    n_edges = (graph.adjacency_matrix != 0).sum().item()
+
+    stats = {
+        "n_layers": n_layers,
+        "n_tokens": n_tokens,
+        "n_logits": n_logits,
+        "n_features": n_features,
+        "total_nodes": total_nodes,
+        "n_edges": n_edges,
+    }
+
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+
+    if path.endswith(".json"):
+        with open(path, "w") as f:
+            json.dump(stats, f, indent=2)
+    else:
+        with open(path, "w") as f:
+            f.write("Graph Statistics:\n")
+            f.write("-----------------\n")
+            f.write(f"Layers:        {n_layers}\n")
+            f.write(f"Input Tokens:  {n_tokens}\n")
+            f.write(f"Output Nodes:  {n_logits}\n")
+            f.write(f"Feature Nodes: {n_features}\n")
+            f.write(f"Total Nodes:   {total_nodes}\n")
+            f.write(f"Total Edges:   {n_edges}\n")
+
+    print(f"INFO: Graph statistics saved to {path}")

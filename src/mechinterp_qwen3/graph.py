@@ -4,7 +4,7 @@ from typing import Any, NamedTuple
 import torch
 from pydantic import BaseModel
 
-from .utils.general import get_default_device
+from .utils.model_utils import get_default_device
 
 
 @dataclass

@@ -118,6 +118,11 @@ def main():
         action="store_true",
         help="Disable deterministic algorithms (may improve performance).",
     )
+    attr_parser.add_argument(
+        "--stats_file",
+        type=str,
+        help="Path to save graph statistics (nodes, edges, layers, etc.).",
+    )
 
     args = parser.parse_args()
 
@@ -179,7 +184,7 @@ def run_attribution(args, parser):
 
     from .attribution_model import AttributionModel
     from .run_attribution import attribute
-    from .utils.create_graph_files import create_graph_files
+    from .utils.graph_viz import create_graph_files
     from .utils.hf_utils import load_transcoder_from_hub
     from .utils_seed import SeedConfig, set_all_seeds
 
@@ -215,6 +220,12 @@ def run_attribution(args, parser):
     if args.graph_output_path:
         print(f"INFO: Saving graph to {args.graph_output_path}")
         graph.to_pt(args.graph_output_path)
+
+    # Save stats if requested
+    if args.stats_file:
+        from .utils.graph_viz import save_graph_stats
+
+        save_graph_stats(graph, args.stats_file)
 
     # Create graph files if both slug and graph_file_dir are provided
     if create_graph_files_enabled:

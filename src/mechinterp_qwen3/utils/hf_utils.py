@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import glob
 import os
+import shutil
 from collections.abc import Iterable
+from pathlib import Path
 from typing import NamedTuple
 from urllib.parse import parse_qs, urlparse
 
@@ -48,30 +50,9 @@ def load_transcoder_from_hub(
     lazy_encoder: bool = False,
     lazy_decoder: bool = True,
     cache_dir: str | None = None,
-    use_cache: bool = True,
 ):
-    """Load a transcoder from a HuggingFace URI.
-
-    If the transcoder is cached locally (via save_transcoders_to_cache), it will be
-    loaded from cache instead of downloading from HuggingFace.
-
-    Args:
-        hf_ref: HuggingFace reference (e.g., "mwhanna/qwen-2.5-3b-instruct-transcoders")
-        device: Device to load the transcoder to
-        dtype: Data type for transcoder weights
-        lazy_encoder: Whether to lazy load encoder weights
-        lazy_decoder: Whether to lazy load decoder weights
-        cache_dir: Override the cache directory for checking/loading cached transcoders
-        use_cache: Whether to check for and use cached transcoders (default: True)
-
-    Returns:
-        Tuple of (transcoder, config)
-    """
-    from .caching import is_cached, load_transcoders_from_cache
-
-    # Check cache first
-    if use_cache and is_cached(hf_ref, cache_dir):
-        print(f"INFO: Loading transcoders from cache for {hf_ref}")
+    """Load a transcoder set or CLT from HuggingFace, using local cache if available."""
+    if is_cached(hf_ref, cache_dir):
         return load_transcoders_from_cache(
             hf_ref,
             cache_dir=cache_dir,
@@ -82,22 +63,19 @@ def load_transcoder_from_hub(
         )
 
     hf_uri = HfUri.from_str(hf_ref)
-    try:
-        config_path = hf_hub_download(
-            repo_id=hf_uri.repo_id,
-            revision=hf_uri.revision,
-            filename="config.yaml",
-            subfolder=hf_uri.file_path,
-        )
-    except Exception as e:
-        config_file = (
-            f"{hf_uri.file_path}/config.yaml" if hf_uri.file_path is not None else "config.yaml"
-        )
-        raise FileNotFoundError(f"Could not download {config_file} from {hf_uri.repo_id}") from e
+
+    # Download and parse config.yaml
+    config_path = hf_hub_download(
+        repo_id=hf_uri.repo_id,
+        filename="config.yaml",
+        revision=hf_uri.revision,
+        subfolder=hf_uri.file_path,
+    )
 
     with open(config_path) as f:
         config = yaml.safe_load(f)
 
+    # Set some metadata
     config["repo_id"] = hf_uri.repo_id
     config["revision"] = hf_uri.revision
     config["subfolder"] = hf_uri.file_path
@@ -106,41 +84,32 @@ def load_transcoder_from_hub(
     )
     config["scan"] = f"{repo_info}@{hf_uri.revision}" if hf_uri.revision else repo_info
 
-    return load_transcoders(config, device, dtype, lazy_encoder, lazy_decoder), config
-
-
-def load_transcoders(
-    config: dict,
-    device: torch.device | None = None,
-    dtype: torch.dtype = torch.float32,
-    lazy_encoder: bool = False,
-    lazy_decoder: bool = True,
-):
-    """Load a transcoder from a HuggingFace URI."""
-
     model_kind = config["model_kind"]
+
+    from ..transcoder.cross_layer_transcoder import load_clt
+    from ..transcoder.single_layer_transcoder import load_transcoder_set
+
     if model_kind == "transcoder_set":
-        from ..transcoder.single_layer_transcoder import (
-            load_transcoder_set,
-        )
+        # Find path to all layer files
+        transcoder_paths = {}
+        for layer_idx, local_path in iter_transcoder_paths(config):
+            transcoder_paths[layer_idx] = local_path
 
-        transcoder_paths = resolve_transcoder_paths(config)
-
-        return load_transcoder_set(
+        transcoder = load_transcoder_set(
             transcoder_paths,
             scan=config["scan"],
             feature_input_hook=config["feature_input_hook"],
             feature_output_hook=config["feature_output_hook"],
-            dtype=dtype,
             device=device,
+            dtype=dtype,
             lazy_encoder=lazy_encoder,
             lazy_decoder=lazy_decoder,
         )
-    elif model_kind == "cross_layer_transcoder":
-        from ..transcoder.cross_layer_transcoder import (
-            load_clt,
-        )
 
+    elif model_kind == "cross_layer_transcoder":
+        # CLT usually expects a folder with multiple safetensors files
+        # snapshot_download mentioned in iter_transcoder_paths branch, but here we need the folder.
+        # CLT path is determined by downloading the files.
         subfolder = config.get("subfolder")
         allow_patterns = [f"{subfolder}/*.safetensors"] if subfolder else ["*.safetensors"]
 
@@ -153,50 +122,307 @@ def load_transcoders(
         if subfolder:
             local_path = os.path.join(local_path, subfolder)
 
-        load_fn = load_clt
-
-        return load_fn(
-            local_path,  # type:ignore
-            scan=config["scan"],
+        transcoder = load_clt(
+            local_path,
             feature_input_hook=config["feature_input_hook"],
             feature_output_hook=config["feature_output_hook"],
+            scan=config["scan"],
+            device=device,
+            dtype=dtype,
             lazy_decoder=lazy_decoder,
             lazy_encoder=lazy_encoder,
-            dtype=dtype,
+        )
+    else:
+        raise ValueError(f"Unknown model_kind: {model_kind}")
+
+    return transcoder, config
+
+
+def get_cache_dir(cache_dir: str | Path | None = None) -> Path:
+    """Get the cache directory for circuit tracer."""
+    if cache_dir is not None:
+        return Path(cache_dir)
+    env_dir = os.environ.get("CIRCUIT_TRACER_CACHE_DIR")
+    if env_dir:
+        return Path(env_dir)
+    return Path.home() / ".cache" / "mechinterp_qwen3"
+
+
+def _normalize_hf_ref(hf_ref: str) -> str:
+    """Normalize an hf_ref to a filesystem-safe path component."""
+    if hf_ref.startswith("hf://"):
+        uri = parse_hf_uri(hf_ref)
+        normalized = uri.repo_id
+        if uri.file_path:
+            normalized = f"{normalized}/{uri.file_path}"
+        if uri.revision:
+            normalized = f"{normalized}@{uri.revision}"
+        return normalized
+
+    return hf_ref
+
+
+def get_cached_path(hf_ref: str, cache_dir: str | Path | None = None) -> Path:
+    """Get the cached path for an hf_ref."""
+    cache_base = get_cache_dir(cache_dir)
+    normalized = _normalize_hf_ref(hf_ref)
+    return cache_base / normalized
+
+
+def is_cached(hf_ref: str, cache_dir: str | Path | None = None) -> bool:
+    """Check if transcoders for an hf_ref are cached and complete."""
+    cache_path = get_cached_path(hf_ref, cache_dir)
+    config_path = cache_path / "config.yaml"
+    return config_path.exists()
+
+
+def empty_cache(hf_ref: str | None = None, cache_dir: str | Path | None = None):
+    """Delete cached transcoders."""
+    cache_base = get_cache_dir(cache_dir)
+    if hf_ref is not None:
+        cache_path = get_cached_path(hf_ref, cache_dir)
+        if cache_path.exists():
+            shutil.rmtree(cache_path)
+            print(f"INFO: Deleted cache for {hf_ref} at {cache_path}")
+    else:
+        if cache_base.exists():
+            shutil.rmtree(cache_base)
+            print(f"INFO: Deleted entire cache at {cache_base}")
+
+
+def _delete_hf_cache(path: str | Path):
+    """Delete a cached HuggingFace file (handles symlinks to blobs)."""
+    path = Path(path)
+    if path.is_symlink():
+        blob_path = path.resolve()
+        path.unlink()
+        if blob_path.exists():
+            blob_path.unlink()
+    elif path.exists():
+        path.unlink()
+
+
+def save_transcoders_to_cache(
+    hf_ref: str,
+    cache_dir: str | Path | None = None,
+    sequential: bool = True,
+    device: torch.device | None = None,
+    dtype: torch.dtype = torch.float32,
+    delete_hf_cache: bool = True,
+) -> Path:
+    """Download transcoders from HuggingFace and save them to the local cache."""
+    if device is None:
+        device = torch.device("cpu")
+
+    hf_uri = HfUri.from_str(hf_ref)
+
+    config_path = hf_hub_download(
+        repo_id=hf_uri.repo_id,
+        revision=hf_uri.revision,
+        filename="config.yaml",
+        subfolder=hf_uri.file_path,
+    )
+
+    with open(config_path) as f:
+        config = yaml.safe_load(f)
+
+    config["repo_id"] = hf_uri.repo_id
+    config["revision"] = hf_uri.revision
+    config["subfolder"] = hf_uri.file_path
+    repo_info = (
+        hf_uri.repo_id if hf_uri.file_path is None else hf_uri.repo_id + "//" + hf_uri.file_path
+    )
+    config["scan"] = f"{repo_info}@{hf_uri.revision}" if hf_uri.revision else repo_info
+
+    model_kind = config["model_kind"]
+    cache_path = get_cached_path(hf_ref, cache_dir)
+    cache_path.mkdir(parents=True, exist_ok=True)
+
+    if model_kind == "transcoder_set":
+        _save_transcoder_set_to_cache(
+            config=config,
+            cache_path=cache_path,
+            sequential=sequential,
             device=device,
+            dtype=dtype,
+            delete_hf_cache=delete_hf_cache,
+        )
+    elif model_kind == "cross_layer_transcoder":
+        _save_clt_to_cache(
+            config,
+            cache_path,
+            sequential,
+            device,
+            dtype,
+            delete_hf_cache,
         )
     else:
         raise ValueError(f"Unknown model kind: {model_kind}")
 
+    simplified_config = {
+        k: v for k, v in config.items() if k not in ("transcoders", "repo_id", "subfolder")
+    }
+    with open(cache_path / "config.yaml", "w") as f:
+        yaml.dump(simplified_config, f)
 
-def resolve_transcoder_paths(config: dict) -> dict[int, str]:
-    if "transcoders" in config:
-        hf_paths = [path for path in config["transcoders"] if path.startswith("hf://")]
-        local_map = download_hf_uris(hf_paths)
-        transcoder_paths = {
-            i: local_map.get(path, path) for i, path in enumerate(config["transcoders"])
-        }
+    print(f"INFO: Successfully cached transcoders to {cache_path}")
+    return cache_path
+
+
+def _save_transcoder_set_to_cache(
+    config: dict,
+    cache_path: Path,
+    sequential: bool,
+    device: torch.device,
+    dtype: torch.dtype,
+    delete_hf_cache: bool,
+):
+    from ..transcoder.single_layer_transcoder import load_relu_transcoder
+
+    if "transcoders" not in config:
+        for layer_idx, local_path in iter_transcoder_paths(config):
+            transcoder = load_relu_transcoder(
+                local_path,
+                layer_idx,
+                device=device,
+                dtype=dtype,
+                lazy_encoder=False,
+                lazy_decoder=False,
+            )
+            save_path = cache_path / f"layer_{layer_idx}.safetensors"
+            transcoder.to_safetensors(str(save_path))
+            print(f"INFO: Saved layer {layer_idx} to {save_path}")
+        return
+
+    if sequential:
+        for layer_idx, hf_path in enumerate(config["transcoders"]):
+            local_path = download_hf_uri(hf_path) if hf_path.startswith("hf://") else hf_path
+            transcoder = load_relu_transcoder(
+                local_path,
+                layer_idx,
+                device=device,
+                dtype=dtype,
+                lazy_encoder=False,
+                lazy_decoder=False,
+            )
+            save_path = cache_path / f"layer_{layer_idx}.safetensors"
+            transcoder.to_safetensors(str(save_path))
+            print(f"INFO: Saved layer {layer_idx} to {save_path}")
+            if delete_hf_cache and hf_path.startswith("hf://"):
+                _delete_hf_cache(local_path)
     else:
-        subfolder = config.get("subfolder")
-        if subfolder:
-            allow_patterns = [f"{subfolder}/layer_*.safetensors"]
-        else:
-            allow_patterns = ["layer_*.safetensors"]
+        hf_paths = [p for p in config["transcoders"] if p.startswith("hf://")]
+        local_map = download_hf_uris(hf_paths)
+        transcoder_paths: dict[int, str] = {}
+        for i, path in enumerate(config["transcoders"]):
+            transcoder_paths[i] = local_map.get(path) or path
 
-        local_path = snapshot_download(
-            config["repo_id"],
-            revision=config.get("revision", "main"),
-            allow_patterns=allow_patterns,
+        for layer_idx, local_path in transcoder_paths.items():
+            transcoder = load_relu_transcoder(
+                local_path,
+                layer_idx,
+                device=device,
+                dtype=dtype,
+                lazy_encoder=False,
+                lazy_decoder=False,
+            )
+            save_path = cache_path / f"layer_{layer_idx}.safetensors"
+            transcoder.to_safetensors(str(save_path))
+            print(f"INFO: Saved layer {layer_idx} to {save_path}")
+
+        if delete_hf_cache:
+            for i, hf_path in enumerate(config["transcoders"]):
+                if hf_path.startswith("hf://"):
+                    _delete_hf_cache(transcoder_paths[i])
+
+
+def _save_clt_to_cache(
+    config: dict,
+    cache_path: Path,
+    sequential: bool,
+    device: torch.device,
+    dtype: torch.dtype,
+    delete_hf_cache: bool,
+):
+    from ..transcoder.cross_layer_transcoder import load_clt
+
+    subfolder = config.get("subfolder")
+    allow_patterns = [f"{subfolder}/*.safetensors"] if subfolder else ["*.safetensors"]
+
+    local_path = snapshot_download(
+        config["repo_id"],
+        revision=config.get("revision", "main"),
+        allow_patterns=allow_patterns,
+    )
+
+    if subfolder:
+        local_path = os.path.join(local_path, subfolder)
+
+    clt = load_clt(
+        local_path,
+        feature_input_hook=config["feature_input_hook"],
+        feature_output_hook=config["feature_output_hook"],
+        scan=config.get("scan"),
+        device=device,
+        dtype=dtype,
+        lazy_decoder=False,
+        lazy_encoder=False,
+    )
+
+    clt.to_safetensors(str(cache_path))
+
+
+def load_transcoders_from_cache(
+    hf_ref: str,
+    cache_dir: str | Path | None = None,
+    device: torch.device | None = None,
+    dtype: torch.dtype = torch.float32,
+    lazy_encoder: bool = False,
+    lazy_decoder: bool = True,
+):
+    cache_path = get_cached_path(hf_ref, cache_dir)
+    config_path = cache_path / "config.yaml"
+
+    if not config_path.exists():
+        raise FileNotFoundError(f"Cache not found for {hf_ref} at {cache_path}")
+
+    with open(config_path) as f:
+        config = yaml.safe_load(f)
+
+    model_kind = config["model_kind"]
+
+    from ..transcoder.cross_layer_transcoder import load_clt
+    from ..transcoder.single_layer_transcoder import load_transcoder_set
+
+    if model_kind == "transcoder_set":
+        layer_files = sorted(cache_path.glob("layer_*.safetensors"))
+        transcoder_paths = {int(f.stem.split("_")[1]): str(f) for f in layer_files}
+
+        transcoder = load_transcoder_set(
+            transcoder_paths,
+            scan=config.get("scan", str(cache_path)),
+            feature_input_hook=config["feature_input_hook"],
+            feature_output_hook=config["feature_output_hook"],
+            device=device,
+            dtype=dtype,
+            lazy_encoder=lazy_encoder,
+            lazy_decoder=lazy_decoder,
         )
+    elif model_kind == "cross_layer_transcoder":
+        transcoder = load_clt(
+            str(cache_path),
+            feature_input_hook=config["feature_input_hook"],
+            feature_output_hook=config["feature_output_hook"],
+            scan=config.get("scan", str(cache_path)),
+            device=device,
+            dtype=dtype,
+            lazy_decoder=lazy_decoder,
+            lazy_encoder=lazy_encoder,
+        )
+    else:
+        raise ValueError(f"Unknown model kind: {model_kind}")
 
-        if subfolder:
-            local_path = os.path.join(local_path, subfolder)
-
-        layer_files = glob.glob(os.path.join(local_path, "layer_*.safetensors"))
-        transcoder_paths = {
-            i: os.path.join(local_path, f"layer_{i}.safetensors") for i in range(len(layer_files))
-        }
-    return transcoder_paths  # type:ignore
+    return transcoder, config
 
 
 def iter_transcoder_paths(config: dict) -> Iterable[tuple[int, str]]:
@@ -227,14 +453,7 @@ def iter_transcoder_paths(config: dict) -> Iterable[tuple[int, str]]:
 
 
 def parse_hf_uri(uri: str) -> HfUri:
-    """Parse an HF URI into repo id, file path and revision.
-
-    Args:
-        uri: String like ``hf://org/repo/file?revision=main``.
-
-    Returns:
-        ``HfUri`` with repository id, file path and optional revision.
-    """
+    """Parse an HF URI into repo id, file path and revision."""
     parsed = urlparse(uri)
     if parsed.scheme != "hf":
         raise ValueError(f"Not a huggingface URI: {uri}")
@@ -261,15 +480,7 @@ def download_hf_uri(uri: str) -> str:
 
 
 def download_hf_uris(uris: Iterable[str], max_workers: int = 16) -> dict[str, str]:
-    """Download multiple HuggingFace URIs concurrently with pre-flight auth checks.
-
-    Args:
-        uris: Iterable of HF URIs.
-        max_workers: Maximum number of parallel workers.
-
-    Returns:
-        Mapping from input URI to the local file path on disk.
-    """
+    """Download multiple HuggingFace URIs concurrently with pre-flight auth checks."""
     if not uris:
         return {}
 
@@ -278,7 +489,6 @@ def download_hf_uris(uris: Iterable[str], max_workers: int = 16) -> dict[str, st
         return {}
     parsed_map = {uri: parse_hf_uri(uri) for uri in uri_list}
 
-    # ---  Pre-flight Check ---
     print("INFO: Performing pre-flight metadata check...")
     unique_repos = {info.repo_id for info in parsed_map.values()}
     token = get_token()
@@ -302,13 +512,9 @@ def download_hf_uris(uris: Iterable[str], max_workers: int = 16) -> dict[str, st
         )
 
     if HF_HUB_ENABLE_HF_TRANSFER:
-        # Use a simple loop for sequential download if HF_TRANSFER is enabled
         results = [_download(uri) for uri in uri_list]
         return dict(zip(uri_list, results, strict=False))
 
-    # The thread_map will attempt all downloads in parallel. If any worker thread
-    # raises an exception (like GatedRepoError from _download), thread_map
-    # will propagate that first exception, failing the entire process.
     results = thread_map(
         _download,
         uri_list,

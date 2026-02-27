@@ -14,8 +14,8 @@ from transformer_lens.hook_points import HookPoint
 
 from .transcoder import TranscoderSet
 from .transcoder.cross_layer_transcoder import CrossLayerTranscoder
-from .utils.general import get_default_device
 from .utils.hf_utils import load_transcoder_from_hub
+from .utils.model_utils import get_default_device
 
 
 class AttributionMLP(nn.Module):
