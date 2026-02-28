@@ -259,7 +259,7 @@ if __name__ == "__main__":
     if not Path("data/addition_grid.jsonl").exists():
         print("\nERROR: data/addition_grid.jsonl not found!")
         print("Please generate the dataset first:")
-        print("  python -m mechinterp_qwen3.step1_cli \\")
+        print("  python -m mechinterp_qwen3.dataset_generation \\")
         print("    --output_path data/addition_grid.jsonl \\")
         print("    --sampling_strategy grid \\")
         print("    --max_value 20 \\")

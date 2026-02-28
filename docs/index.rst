@@ -10,15 +10,19 @@ This project provides an independent mechanistic interpretability pipeline speci
    :caption: Getting Started:
 
    usage
+   dataset_generation
    methodology
    api/modules
 
 Features
 --------
 
+* **Dataset Generation**: Production-quality tools for generating controlled datasets with teacher-forced statistics and multiple sampling strategies (grid, stratified by carry patterns, random).
+* **Advanced Visualizations**: 6 visualization types for hypothesis generation, including novel entropy maps, carry structure analysis, and positional cascades.
 * **Linearized Gradient Flow**: Attribution matching the *Attribution Graphs* paper methodology.
 * **SAE Integration**: Native support for sparse autoencoders via transcoders.
 * **Inter-Layer Circuits**: Ability to compute feature-to-feature connectivity across different model layers.
+* **Reproducible Workflows**: Deterministic runs with seed control for scientific reproducibility.
 
 Installation
 ------------

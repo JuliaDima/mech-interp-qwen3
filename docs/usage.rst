@@ -41,18 +41,74 @@ After completion, the command produces several files in the output directory:
 Dataset Generation
 ------------------
 
-Before building graphs, you can generate synthetic datasets (e.g., addition problems) using the ``miq generate-dataset`` command. This tool computes teacher-forced statistics (logits and probabilities) for each answer token.
+Before building graphs, you can generate synthetic datasets (e.g., addition problems) using the dataset generation pipeline. This tool computes teacher-forced statistics (logits and probabilities) for each answer token, providing the foundation for mechanistic interpretability analysis.
+
+Basic Usage
+~~~~~~~~~~~
+
+Generate a grid of addition problems:
 
 .. code-block:: bash
 
-   miq generate-dataset \
-     --max_value 20 \
-     --output_path data/addition_20.jsonl \
+   python -m mechinterp_qwen3.dataset_generation \
+     --model_name Qwen/Qwen2.5-3B-Instruct \
+     --output_path data/addition_grid.jsonl \
      --sampling_strategy grid \
-     --templates T0
+     --max_value 20 \
+     --templates T0 T1 T2 \
+     --seed 42
 
-For advanced sampling strategies like stratified sampling (by carry pattern) or random sampling, see the ``--help`` output:
+This creates a JSONL file where each line contains:
+
+- Prompt and answer strings
+- Token IDs and token strings
+- Per-position statistics (logit, probability, top-k predictions)
+- Metadata (model name, seed, timestamp)
+
+Sampling Strategies
+~~~~~~~~~~~~~~~~~~~
+
+**Grid**: All (a,b) pairs from [0..N] × [0..N]
+
+**Stratified**: Balanced by carry patterns (no-carry, single-carry, multi-carry)
 
 .. code-block:: bash
 
-   miq generate-dataset --help
+   python -m mechinterp_qwen3.dataset_generation \
+     --sampling_strategy stratified \
+     --max_value 100 \
+     --stratified_n_per_category 200
+
+**Random**: N random samples from range
+
+.. code-block:: bash
+
+   python -m mechinterp_qwen3.dataset_generation \
+     --sampling_strategy random \
+     --max_value 1000 \
+     --n_samples 500
+
+For complete documentation, see :doc:`dataset_generation`.
+
+Visualizing Results
+~~~~~~~~~~~~~~~~~~~
+
+Generate publication-quality visualizations:
+
+.. code-block:: bash
+
+   python -m mechinterp_qwen3.visualize_dataset \
+     data/addition_grid.jsonl \
+     --output_dir visualizations/grid \
+     --template T0
+
+This creates 6 visualization types:
+
+1. **Probability heatmaps** - Model confidence across (a,b) space
+2. **Carry structure analysis** - Tests explicit carry mechanism
+3. **Diagonal analysis** - Tests sum-based vs digit-based strategies
+4. **Entropy maps** - Distinguishes confident errors from uncertainty
+5. **Error analysis** - Shows systematic biases
+6. **Positional cascade** - Quantifies teacher forcing effect
+
+See :doc:`dataset_generation` for detailed interpretation guide.

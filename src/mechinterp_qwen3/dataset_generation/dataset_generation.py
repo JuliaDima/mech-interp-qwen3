@@ -561,22 +561,20 @@ def write_dataset(
     print("=" * 60)
 
 
-# Allow calling as: python -m mechinterp_qwen3.dataset_generation
-# This redirects to the proper CLI in step1_cli.py
 if __name__ == "__main__":
     import sys
 
     # Import and run the CLI
     try:
-        from ..step1_cli import main
+        from ..dataset_generation import main
 
         main()
     except ImportError:
         # Fallback: provide helpful error message
-        print("ERROR: Could not import step1_cli module.", file=sys.stderr)
+        print("ERROR: Could not import dataset_generation module.", file=sys.stderr)
         print("", file=sys.stderr)
         print("Please use the proper CLI entrypoint instead:", file=sys.stderr)
-        print("  python -m mechinterp_qwen3.step1_cli [options]", file=sys.stderr)
+        print("  python -m mechinterp_qwen3.dataset_generation [options]", file=sys.stderr)
         print("", file=sys.stderr)
         print("Or import from this module in your own code.", file=sys.stderr)
         sys.exit(1)
