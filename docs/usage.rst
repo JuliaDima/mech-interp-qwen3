@@ -37,3 +37,22 @@ After completion, the command produces several files in the output directory:
 *   **raw_graph.json**: The full, un-pruned attribution graph.
 *   **pruned_graph.json**: The simplified graph based on your thresholds.
 *   **metadata.json**: Statistics about the run, including model settings and graph density.
+
+Dataset Generation
+------------------
+
+Before building graphs, you can generate synthetic datasets (e.g., addition problems) using the ``miq generate-dataset`` command. This tool computes teacher-forced statistics (logits and probabilities) for each answer token.
+
+.. code-block:: bash
+
+   miq generate-dataset \
+     --max_value 20 \
+     --output_path data/addition_20.jsonl \
+     --sampling_strategy grid \
+     --templates T0
+
+For advanced sampling strategies like stratified sampling (by carry pattern) or random sampling, see the ``--help`` output:
+
+.. code-block:: bash
+
+   miq generate-dataset --help

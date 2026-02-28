@@ -13,6 +13,111 @@ def main():
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
     subparsers.required = True
 
+    # Dataset generation subcommand
+    gen_parser = subparsers.add_parser(
+        "generate-dataset", help="Generate addition dataset with model stats"
+    )
+    # Model configuration
+    gen_parser.add_argument(
+        "--model_name",
+        type=str,
+        default="Qwen/Qwen2.5-3B-Instruct",
+        help="HuggingFace model name (default: Qwen/Qwen2.5-3B-Instruct)",
+    )
+    gen_parser.add_argument(
+        "--device",
+        type=str,
+        default=None,
+        help="Device to use (cuda/cpu). If not specified, uses CUDA if available.",
+    )
+    gen_parser.add_argument(
+        "--dtype",
+        type=str,
+        default="float32",
+        choices=["float32", "float16", "bfloat16"],
+        help="Model dtype (default: float32)",
+    )
+
+    # Output configuration
+    gen_parser.add_argument(
+        "--output_path",
+        type=str,
+        required=True,
+        help="Path to output JSONL file",
+    )
+
+    # Template configuration
+    gen_parser.add_argument(
+        "--templates",
+        nargs="+",
+        type=str,
+        default=["T0"],
+        choices=["T0", "T1", "T2"],
+        help="Templates to use (default: T0). Can specify multiple.",
+    )
+
+    # Sampling configuration
+    gen_parser.add_argument(
+        "--sampling_strategy",
+        type=str,
+        default="grid",
+        choices=["grid", "stratified", "random"],
+        help="Sampling strategy for (a,b) pairs (default: grid)",
+    )
+    gen_parser.add_argument(
+        "--max_value",
+        type=int,
+        default=20,
+        help="Maximum value for a and b (default: 20)",
+    )
+    gen_parser.add_argument(
+        "--n_samples",
+        type=int,
+        default=None,
+        help="Number of samples (only for random strategy)",
+    )
+    gen_parser.add_argument(
+        "--stratified_n_per_category",
+        type=int,
+        default=100,
+        help="Number of samples per carry category for stratified sampling (default: 100)",
+    )
+    gen_parser.add_argument(
+        "--stratified_uniform_remainder",
+        type=int,
+        default=100,
+        help="Number of uniform random samples for stratified sampling (default: 100)",
+    )
+
+    # Statistics configuration
+    gen_parser.add_argument(
+        "--top_k",
+        type=int,
+        default=10,
+        help="Number of top-k tokens to store per position (default: 10)",
+    )
+
+    # Generation configuration
+    gen_parser.add_argument(
+        "--enable_greedy_generation",
+        action="store_true",
+        help="Enable greedy generation for each prompt",
+    )
+    gen_parser.add_argument(
+        "--max_gen_tokens",
+        type=int,
+        default=10,
+        help="Maximum tokens to generate in greedy mode (default: 10)",
+    )
+
+    # Reproducibility
+    gen_parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for reproducibility (default: 42)",
+    )
+
     # Attribution subcommand
     attr_parser = subparsers.add_parser("attribute", help="Run attribution analysis on a prompt")
 
@@ -128,6 +233,64 @@ def main():
 
     if args.command == "attribute":
         run_attribution(args, attr_parser)
+    elif args.command == "generate-dataset":
+        run_dataset_generation(args)
+
+
+def run_dataset_generation(args):
+    """Bridge function for dataset generation."""
+    from pathlib import Path
+
+    from .dataset_generation import (
+        DatasetConfig,
+        SamplingStrategy,
+        TemplateID,
+        generate_dataset,
+        write_dataset,
+    )
+
+    # Convert template strings to TemplateID enums
+    templates = [TemplateID(t) for t in args.templates]
+
+    # Create configuration
+    config = DatasetConfig(
+        model_name=args.model_name,
+        output_path=Path(args.output_path),
+        templates=templates,
+        sampling_strategy=SamplingStrategy(args.sampling_strategy),
+        max_value=args.max_value,
+        n_samples=args.n_samples,
+        stratified_n_per_category=args.stratified_n_per_category,
+        stratified_uniform_remainder=args.stratified_uniform_remainder,
+        top_k=args.top_k,
+        enable_greedy_generation=args.enable_greedy_generation,
+        max_gen_tokens=args.max_gen_tokens,
+        seed=args.seed,
+        device=args.device,
+        dtype=args.dtype,
+    )
+
+    # Validate configuration
+    if config.sampling_strategy == SamplingStrategy.RANDOM and config.n_samples is None:
+        raise ValueError("--n_samples is required when using random sampling strategy")
+
+    # Generate dataset
+    print("=" * 60)
+    print("ADDITION DATASET GENERATION")
+    print("=" * 60)
+    print(f"Model: {config.model_name}")
+    print(f"Templates: {[t.value for t in config.templates]}")
+    print(f"Sampling: {config.sampling_strategy.value}")
+    print(f"Max value: {config.max_value}")
+    print(f"Seed: {config.seed}")
+    print("=" * 60 + "\n")
+
+    records, summary = generate_dataset(config)
+
+    # Write output
+    write_dataset(records, summary, config.output_path)
+
+    print("\nDataset generation complete!")
 
 
 def run_attribution(args, parser):

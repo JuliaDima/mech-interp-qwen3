@@ -67,3 +67,18 @@ miq-build-graph \
   --node_threshold 0.8 \
   --edge_threshold 0.85
 ```
+
+## Dataset Generation
+
+Before building graphs, you often need a controlled dataset of prompts (e.g., addition problems) with ground-truth model statistics.
+
+```bash
+# Generate a grid of addition problems (0-20)
+miq generate-dataset \
+  --max_value 20 \
+  --output_path data/addition_20.jsonl \
+  --sampling_strategy grid \
+  --templates T0
+```
+
+For more details, see [DATASET_GENERATION_README.md](DATASET_GENERATION_README.md) and [QUICKSTART_DATASET.md](QUICKSTART_DATASET.md).

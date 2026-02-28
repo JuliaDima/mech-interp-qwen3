@@ -12,3 +12,4 @@ scripts/inspect_transcoder.py
 docs/_build
 scripts/test_prune.py
 scripts/salloc_gpu.txt
+src/mechinterp_qwen3/__pycache__

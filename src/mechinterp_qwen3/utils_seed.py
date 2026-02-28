@@ -33,3 +33,14 @@ def set_all_seeds(cfg: SeedConfig) -> None:
         torch.backends.cudnn.allow_tf32 = False
 
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+
+
+def seed_everything(seed: int, deterministic: bool = True) -> None:
+    """Convenience function to set all random seeds.
+
+    Args:
+        seed: Random seed value
+        deterministic: Whether to enable deterministic mode
+    """
+    cfg = SeedConfig(seed=seed, deterministic=deterministic)
+    set_all_seeds(cfg)
