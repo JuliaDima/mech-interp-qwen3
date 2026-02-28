@@ -121,15 +121,9 @@ class Node(BaseModel):
     is_target_logit: bool = False
     run_idx: int = 0
     reverse_ctx_idx: int = 0
-    jsNodeId: str
-    clerp: str = ""
     influence: float | None = None
     activation: float | None = None
-
-    def __init__(self, **data):
-        if "node_id" in data and "jsNodeId" not in data:
-            data["jsNodeId"] = data["node_id"]
-        super().__init__(**data)
+    token_str: str | None = None
 
     @classmethod
     def feature_node(cls, layer, pos, feat_idx, influence=None, activation=None):
@@ -138,14 +132,12 @@ class Node(BaseModel):
         def cantor_pairing(x, y):
             return (x + y) * (x + y + 1) // 2 + y
 
-        reverse_ctx_idx = 0
         return cls(
             node_id=f"{layer}_{feat_idx}_{pos}",
             feature=cantor_pairing(layer, feat_idx),
             layer=str(layer),
             ctx_idx=pos,
-            feature_type="cross layer transcoder",
-            jsNodeId=f"{layer}_{feat_idx}-{reverse_ctx_idx}",
+            feature_type="CLT",
             influence=influence,
             activation=activation,
         )
@@ -153,14 +145,12 @@ class Node(BaseModel):
     @classmethod
     def error_node(cls, layer, pos, influence=None):
         """Create an error node."""
-        reverse_ctx_idx = 0
         return cls(
             node_id=f"0_{layer}_{pos}",
             feature=-1,
             layer=str(layer),
             ctx_idx=pos,
-            feature_type="mlp reconstruction error",
-            jsNodeId=f"{layer}_{pos}-{reverse_ctx_idx}",
+            feature_type="mlp_error",
             influence=influence,
         )
 
@@ -173,7 +163,6 @@ class Node(BaseModel):
             layer="E",
             ctx_idx=pos,
             feature_type="embedding",
-            jsNodeId=f"E_{vocab_idx}-{pos}",
             influence=influence,
         )
 
@@ -182,7 +171,7 @@ class Node(BaseModel):
         cls,
         pos,
         vocab_idx,
-        token,
+        token_str: str,
         num_layers,
         target_logit=False,
         token_prob=0.0,
@@ -197,8 +186,8 @@ class Node(BaseModel):
             feature_type="logit",
             token_prob=token_prob,
             is_target_logit=target_logit,
-            jsNodeId=f"L_{vocab_idx}-{pos}",
-            clerp=f'Output "{token}" (p={token_prob:.3f})',
+            activation=token_prob,
+            token_str=token_str,
         )
 
 

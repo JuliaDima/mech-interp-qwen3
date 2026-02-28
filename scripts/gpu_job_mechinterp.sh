@@ -29,11 +29,11 @@ cmd=(
   --prompt "You are solving a simple comparison task. Two numbers are given: A and B. Answer with a single character: 'A' if A is larger, otherwise 'B'. A = 864, B = 394, Answer: "
   --transcoder_set mwhanna/qwen3-4b-transcoders
   --model Qwen/Qwen3-4B
-  --slug qwen3-4b
+  --slug qwen3-4b_864_greater_than_394
   --graph_file_dir ./graphs
   --verbose
-  --node_threshold 0.8
-  --edge_threshold 0.95
+  --node_threshold 0.75
+  --edge_threshold 0.8
   --lazy-encoder
   --dtype bfloat16
   --offload cpu

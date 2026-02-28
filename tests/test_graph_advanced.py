@@ -61,7 +61,7 @@ def test_prune_graph_basic(sample_graph):
 
 def test_node_factory():
     fn = Node.feature_node(layer=0, pos=1, feat_idx=42, influence=0.5, activation=1.2)
-    assert fn.feature_type == "cross layer transcoder"
+    assert fn.feature_type == "CLT"
     assert fn.layer == "0"
     assert fn.ctx_idx == 1
     assert "0_42_1" in fn.node_id
