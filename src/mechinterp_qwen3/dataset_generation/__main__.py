@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""CLI entrypoint for addition dataset generation.
-
-This script generates a dataset of addition prompts with baseline model statistics
-for mechanistic interpretability experiments.
+"""
 
 Example usage:
     # Grid sampling with all templates
@@ -55,7 +52,6 @@ def parse_args() -> argparse.Namespace:
         epilog=__doc__,
     )
 
-    # Model configuration
     parser.add_argument(
         "--model_name",
         type=str,
@@ -76,7 +72,6 @@ def parse_args() -> argparse.Namespace:
         help="Model dtype (default: float32)",
     )
 
-    # Output configuration
     parser.add_argument(
         "--output_path",
         type=Path,
@@ -84,7 +79,6 @@ def parse_args() -> argparse.Namespace:
         help="Path to output JSONL file",
     )
 
-    # Template configuration
     parser.add_argument(
         "--templates",
         nargs="+",
@@ -94,7 +88,6 @@ def parse_args() -> argparse.Namespace:
         help="Templates to use (default: T0). Can specify multiple.",
     )
 
-    # Sampling configuration
     parser.add_argument(
         "--sampling_strategy",
         type=str,
@@ -127,7 +120,6 @@ def parse_args() -> argparse.Namespace:
         help="Number of uniform random samples for stratified sampling (default: 100)",
     )
 
-    # Statistics configuration
     parser.add_argument(
         "--top_k",
         type=int,
@@ -135,7 +127,6 @@ def parse_args() -> argparse.Namespace:
         help="Number of top-k tokens to store per position (default: 10)",
     )
 
-    # Generation configuration
     parser.add_argument(
         "--enable_greedy_generation",
         action="store_true",
@@ -148,7 +139,6 @@ def parse_args() -> argparse.Namespace:
         help="Maximum tokens to generate in greedy mode (default: 10)",
     )
 
-    # Reproducibility
     parser.add_argument(
         "--seed",
         type=int,
@@ -163,10 +153,8 @@ def main() -> None:
     """Main CLI entrypoint."""
     args = parse_args()
 
-    # Convert template strings to TemplateID enums
     templates = [TemplateID(t) for t in args.templates]
 
-    # Create configuration
     config = DatasetConfig(
         model_name=args.model_name,
         output_path=args.output_path,
@@ -184,11 +172,9 @@ def main() -> None:
         dtype=args.dtype,
     )
 
-    # Validate configuration
     if config.sampling_strategy == SamplingStrategy.RANDOM and config.n_samples is None:
         raise ValueError("--n_samples is required when using random sampling strategy")
 
-    # Generate dataset
     print("=" * 60)
     print("ADDITION DATASET GENERATION")
     print("=" * 60)
@@ -200,8 +186,6 @@ def main() -> None:
     print("=" * 60 + "\n")
 
     records, summary = generate_dataset(config)
-
-    # Write output
     write_dataset(records, summary, config.output_path)
 
     print("\nDataset generation complete!")

@@ -27,7 +27,6 @@ class TemplateID(StrEnum):
     T2 = "T2"
 
 
-# Template definitions
 TEMPLATES = {
     TemplateID.T0: "calc: {a}+{b}=",
     TemplateID.T1: "calc: {a} + {b} =",
@@ -115,17 +114,14 @@ def generate_pairs(config: DatasetConfig) -> list[tuple[int, int]]:
         pairs = [(a, b) for a in range(config.max_value + 1) for b in range(config.max_value + 1)]
 
     elif config.sampling_strategy == SamplingStrategy.STRATIFIED:
-        # Stratified sampling by carry patterns
         pairs = []
         categories = {"no_carry": [], "single_carry": [], "multi_carry": []}
 
-        # First pass: classify all possible pairs
         for a in range(config.max_value + 1):
             for b in range(config.max_value + 1):
                 pattern = classify_carry_pattern(a, b)
                 categories[pattern].append((a, b))
 
-        # Sample from each category
         import random
 
         rng = random.Random(config.seed)
@@ -136,7 +132,6 @@ def generate_pairs(config: DatasetConfig) -> list[tuple[int, int]]:
             else:
                 pairs.extend(rng.sample(category_pairs, config.stratified_n_per_category))
 
-        # Add uniform random remainder
         all_pairs = [
             (a, b) for a in range(config.max_value + 1) for b in range(config.max_value + 1)
         ]
@@ -147,7 +142,6 @@ def generate_pairs(config: DatasetConfig) -> list[tuple[int, int]]:
             pairs.extend(rng.sample(remaining, config.stratified_uniform_remainder))
 
     elif config.sampling_strategy == SamplingStrategy.RANDOM:
-        # Pure random sampling
         import random
 
         rng = random.Random(config.seed)
@@ -273,16 +267,13 @@ def score_teacher_forced(
     full_tokens = torch.cat([prompt_tokens, answer_tokens], dim=0)
     full_tokens = full_tokens.unsqueeze(0).to(model.cfg.device)  # Add batch dimension
 
-    # Forward pass
     with torch.inference_mode():
         logits = model(full_tokens)  # (batch=1, seq_len, vocab_size)
 
     logits = logits.squeeze(0)  # (seq_len, vocab_size)
 
-    # Extract answer token strings
     answer_token_strs = [model.tokenizer.decode([token_id.item()]) for token_id in answer_tokens]
 
-    # Compute per-position statistics for answer tokens
     per_pos_stats = []
     prompt_len = len(prompt_tokens)
 
@@ -293,16 +284,12 @@ def score_teacher_forced(
 
         position_logits = logits[logit_pos]  # (vocab_size,)
 
-        # Compute probabilities
         probs = torch.softmax(position_logits, dim=-1)
 
-        # Get true token stats
         true_id = true_token_id.item()
         true_str = model.tokenizer.decode([true_id])
         logit_true = position_logits[true_id].item()
         prob_true = probs[true_id].item()
-
-        # Get top-k tokens
         topk_probs, topk_ids = torch.topk(probs, min(top_k, len(probs)))
         topk_ids = topk_ids.tolist()
         topk_probs = topk_probs.tolist()
@@ -336,13 +323,16 @@ def greedy_generate(
 ) -> str:
     """Generate completion using greedy decoding (temperature=0).
 
+    For addition tasks, stops early when hitting whitespace or non-digit characters
+    after generating at least one token.
+
     Args:
         model: HookedTransformer model
         prompt_str: Prompt string
         max_tokens: Maximum number of tokens to generate
 
     Returns:
-        Generated completion string
+        Generated completion string (trimmed to just the answer)
     """
     prompt_tokens = model.tokenizer(
         prompt_str, return_tensors="pt", add_special_tokens=False
@@ -350,25 +340,48 @@ def greedy_generate(
 
     with torch.inference_mode():
         generated_tokens = prompt_tokens.clone()
+        generated_ids = []
 
         for _ in range(max_tokens):
             logits = model(generated_tokens)  # (batch=1, seq_len, vocab_size)
             next_token_logits = logits[0, -1, :]  # (vocab_size,)
 
-            # Greedy selection
             next_token_id = torch.argmax(next_token_logits, dim=-1, keepdim=True)
             generated_tokens = torch.cat([generated_tokens, next_token_id.unsqueeze(0)], dim=1)
+            generated_ids.append(next_token_id.item())
 
-            # Check for EOS
+            # Check stopping conditions
             if next_token_id.item() == model.tokenizer.eos_token_id:
                 break
 
-    # Decode only the generated part
-    completion = model.tokenizer.decode(
-        generated_tokens[0, len(prompt_tokens[0]) :].tolist(), skip_special_tokens=True
-    )
+            # Decode current token to check for stopping
+            if len(generated_ids) >= 1:
+                current_text = model.tokenizer.decode(generated_ids, skip_special_tokens=True)
+                # Stop if we hit whitespace, newline, or non-digit after the answer
+                # This prevents generating "68 - Brainly.com" when we just want "68"
+                stripped = current_text.strip()
+                if stripped and not stripped[-1].isdigit():
+                    # We've generated non-digit content, stop and trim
+                    # Decode up to last digit
+                    for i in range(len(generated_ids) - 1, -1, -1):
+                        partial = model.tokenizer.decode(
+                            generated_ids[: i + 1], skip_special_tokens=True
+                        ).strip()
+                        if partial and partial[-1].isdigit():
+                            return partial
+                    break
 
-    return completion
+    # Decode only the generated part and strip whitespace
+    completion = model.tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
+
+    # Additional safety: trim to last digit
+    for i in range(len(completion) - 1, -1, -1):
+        if completion[i].isdigit():
+            return completion[: i + 1]
+
+    # If we get here, no digits were found - return empty string
+    # This happens when model immediately generates non-digit content like "-"
+    return ""
 
 
 def generate_dataset(config: DatasetConfig) -> tuple[list[DatasetRecord], dict]:
@@ -380,10 +393,8 @@ def generate_dataset(config: DatasetConfig) -> tuple[list[DatasetRecord], dict]:
     Returns:
         Tuple of (records, summary_stats)
     """
-    # Set seed for reproducibility
     seed_everything(config.seed)
 
-    # Load model
     print(f"Loading model: {config.model_name}")
     device = config.device or ("cuda" if torch.cuda.is_available() else "cpu")
     dtype_map = {
@@ -402,16 +413,12 @@ def generate_dataset(config: DatasetConfig) -> tuple[list[DatasetRecord], dict]:
         center_unembed=False,
     )
 
-    # Generate pairs
     print(f"Generating pairs using {config.sampling_strategy} strategy...")
     pairs = generate_pairs(config)
     print(f"Generated {len(pairs)} unique pairs")
-
-    # Generate records
     records = []
     prompt_id = 0
 
-    # Metadata (constant across records)
     metadata = {
         "model_name": config.model_name,
         "seed": config.seed,
@@ -426,11 +433,9 @@ def generate_dataset(config: DatasetConfig) -> tuple[list[DatasetRecord], dict]:
     with tqdm(total=total_items) as pbar:
         for template_id in config.templates:
             for a, b in pairs:
-                # Build prompt and answer
                 prompt_str = build_prompt(template_id, a, b)
                 true_answer_str = str(a + b)
 
-                # Score teacher-forced
                 (
                     prompt_token_ids,
                     answer_token_ids,
@@ -438,14 +443,12 @@ def generate_dataset(config: DatasetConfig) -> tuple[list[DatasetRecord], dict]:
                     per_pos_stats,
                 ) = score_teacher_forced(model, prompt_str, true_answer_str, config.top_k)
 
-                # Optional greedy generation
                 greedy_completion_str = None
                 if config.enable_greedy_generation:
                     greedy_completion_str = greedy_generate(
                         model, prompt_str, config.max_gen_tokens
                     )
 
-                # Create record
                 record = DatasetRecord(
                     prompt_id=prompt_id,
                     template_id=template_id.value,
@@ -465,7 +468,6 @@ def generate_dataset(config: DatasetConfig) -> tuple[list[DatasetRecord], dict]:
                 prompt_id += 1
                 pbar.update(1)
 
-    # Compute summary statistics
     print("Computing summary statistics...")
     summary = compute_summary_stats(records, config)
 
@@ -482,14 +484,11 @@ def compute_summary_stats(records: list[DatasetRecord], config: DatasetConfig) -
     Returns:
         Dictionary of summary statistics
     """
-    # Count records
     n_records = len(records)
 
-    # Distribution of answer token lengths
     answer_lengths = [len(r.answer_token_ids) for r in records]
     length_distribution = dict(Counter(answer_lengths))
 
-    # Accuracy of greedy generation per template (if enabled)
     accuracy_per_template = {}
     if config.enable_greedy_generation:
         for template_id in config.templates:
@@ -503,7 +502,6 @@ def compute_summary_stats(records: list[DatasetRecord], config: DatasetConfig) -
             total = len(template_records)
             accuracy_per_template[template_id.value] = correct / total if total > 0 else 0.0
 
-    # Mean prob_true per position
     max_answer_length = max(answer_lengths)
     mean_prob_per_position = []
 
@@ -534,7 +532,6 @@ def write_dataset(
         summary: Summary statistics dictionary
         output_path: Path to output JSONL file
     """
-    # Write JSONL
     print(f"Writing dataset to {output_path}...")
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -544,7 +541,6 @@ def write_dataset(
 
     print(f"Dataset written successfully ({len(records)} records)")
 
-    # Print summary
     print("\n" + "=" * 60)
     print("DATASET SUMMARY")
     print("=" * 60)
@@ -563,3 +559,24 @@ def write_dataset(
         print(f"  Position {pos}: {prob:.4f}")
 
     print("=" * 60)
+
+
+# Allow calling as: python -m mechinterp_qwen3.dataset_generation
+# This redirects to the proper CLI in step1_cli.py
+if __name__ == "__main__":
+    import sys
+
+    # Import and run the CLI
+    try:
+        from ..step1_cli import main
+
+        main()
+    except ImportError:
+        # Fallback: provide helpful error message
+        print("ERROR: Could not import step1_cli module.", file=sys.stderr)
+        print("", file=sys.stderr)
+        print("Please use the proper CLI entrypoint instead:", file=sys.stderr)
+        print("  python -m mechinterp_qwen3.step1_cli [options]", file=sys.stderr)
+        print("", file=sys.stderr)
+        print("Or import from this module in your own code.", file=sys.stderr)
+        sys.exit(1)

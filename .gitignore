@@ -13,3 +13,7 @@ docs/_build
 scripts/test_prune.py
 scripts/salloc_gpu.txt
 src/mechinterp_qwen3/__pycache__
+visualizations
+data
+VISUALIZATION_GUIDE.md
+VISUALIZATION_SUMMARY.md
