@@ -1,6 +1,4 @@
 salloc -p ampere -A MPHIL-DIS-SL2-GPU --nodes=1 --gres=gpu:1 --time=00:05:00
-
-# Inside the salloc session:
 module purge
 module load rhel8/default-amp
 source ~/.bashrc
@@ -20,3 +18,4 @@ python3 -m mechinterp_qwen3 attribute \
   --lazy-encoder \
   --dtype bfloat16 \
   --offload cpu
+  --stats_file stats.json

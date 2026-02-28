@@ -49,13 +49,11 @@ def load_transcoder_from_hub(
     dtype: torch.dtype = torch.float32,
     lazy_encoder: bool = False,
     lazy_decoder: bool = True,
-    cache_dir: str | None = None,
 ):
     """Load a transcoder set or CLT from HuggingFace, using local cache if available."""
-    if is_cached(hf_ref, cache_dir):
+    if is_cached(hf_ref):
         return load_transcoders_from_cache(
             hf_ref,
-            cache_dir=cache_dir,
             device=device,
             dtype=dtype,
             lazy_encoder=lazy_encoder,
@@ -138,13 +136,7 @@ def load_transcoder_from_hub(
     return transcoder, config
 
 
-def get_cache_dir(cache_dir: str | Path | None = None) -> Path:
-    """Get the cache directory for circuit tracer."""
-    if cache_dir is not None:
-        return Path(cache_dir)
-    env_dir = os.environ.get("CIRCUIT_TRACER_CACHE_DIR")
-    if env_dir:
-        return Path(env_dir)
+def get_cache_dir() -> Path:
     return Path.home() / ".cache" / "mechinterp_qwen3"
 
 
@@ -162,25 +154,25 @@ def _normalize_hf_ref(hf_ref: str) -> str:
     return hf_ref
 
 
-def get_cached_path(hf_ref: str, cache_dir: str | Path | None = None) -> Path:
+def get_cached_path(hf_ref: str) -> Path:
     """Get the cached path for an hf_ref."""
-    cache_base = get_cache_dir(cache_dir)
+    cache_base = get_cache_dir()
     normalized = _normalize_hf_ref(hf_ref)
     return cache_base / normalized
 
 
-def is_cached(hf_ref: str, cache_dir: str | Path | None = None) -> bool:
+def is_cached(hf_ref: str) -> bool:
     """Check if transcoders for an hf_ref are cached and complete."""
-    cache_path = get_cached_path(hf_ref, cache_dir)
+    cache_path = get_cached_path(hf_ref)
     config_path = cache_path / "config.yaml"
     return config_path.exists()
 
 
-def empty_cache(hf_ref: str | None = None, cache_dir: str | Path | None = None):
+def empty_cache(hf_ref: str | None = None):
     """Delete cached transcoders."""
-    cache_base = get_cache_dir(cache_dir)
+    cache_base = get_cache_dir()
     if hf_ref is not None:
-        cache_path = get_cached_path(hf_ref, cache_dir)
+        cache_path = get_cached_path(hf_ref)
         if cache_path.exists():
             shutil.rmtree(cache_path)
             print(f"INFO: Deleted cache for {hf_ref} at {cache_path}")
@@ -204,7 +196,6 @@ def _delete_hf_cache(path: str | Path):
 
 def save_transcoders_to_cache(
     hf_ref: str,
-    cache_dir: str | Path | None = None,
     sequential: bool = True,
     device: torch.device | None = None,
     dtype: torch.dtype = torch.float32,
@@ -235,7 +226,7 @@ def save_transcoders_to_cache(
     config["scan"] = f"{repo_info}@{hf_uri.revision}" if hf_uri.revision else repo_info
 
     model_kind = config["model_kind"]
-    cache_path = get_cached_path(hf_ref, cache_dir)
+    cache_path = get_cached_path(hf_ref)
     cache_path.mkdir(parents=True, exist_ok=True)
 
     if model_kind == "transcoder_set":
@@ -374,13 +365,12 @@ def _save_clt_to_cache(
 
 def load_transcoders_from_cache(
     hf_ref: str,
-    cache_dir: str | Path | None = None,
     device: torch.device | None = None,
     dtype: torch.dtype = torch.float32,
     lazy_encoder: bool = False,
     lazy_decoder: bool = True,
 ):
-    cache_path = get_cached_path(hf_ref, cache_dir)
+    cache_path = get_cached_path(hf_ref)
     config_path = cache_path / "config.yaml"
 
     if not config_path.exists():

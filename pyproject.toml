@@ -11,6 +11,7 @@ dependencies = [
   "numpy>=1.26",
   "tqdm>=4.66",
   "circuit-tracer @ git+https://github.com/safety-research/circuit-tracer.git",
+  "transformer-lens>=2.16.0",
 ]
 
 [project.optional-dependencies]
@@ -18,7 +19,6 @@ test = [
   "pytest>=7.0",
   "pytest-cov>=4.0",
   "pytest-mock>=3.10",
-  "nnsight>=0.3",
 ]
 dev = [
   "pre-commit>=3.0",

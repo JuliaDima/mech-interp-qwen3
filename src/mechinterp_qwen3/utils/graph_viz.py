@@ -1,13 +1,9 @@
 import json
 import os
 import time
-import urllib.parse
-from collections import namedtuple
 
 import torch
 from transformers import AutoTokenizer
-
-from ..graph import Metadata, Model, Node, QParams
 
 
 def add_graph_metadata(graph_metadata, path):
@@ -32,74 +28,6 @@ def process_token(token: str) -> str:
     return token.replace("\n", "⏎").replace("\t", "→").replace("\r", "↵")
 
 
-Feature = namedtuple("Feature", ["layer", "pos", "feature_idx"])
-
-
-def decode_url_features(url: str) -> tuple[dict[str, list[Feature]], list[Feature]]:
-    """
-    Extract both supernode features and individual singleton features from URL.
-
-    Returns:
-        Tuple of (supernode_features, singleton_features)
-        - supernode_features: Dict mapping supernode names to lists of Features
-        - singleton_features: List of individual Feature objects
-    """
-    decoded = urllib.parse.unquote(url)
-
-    parsed_url = urllib.parse.urlparse(decoded)
-    query_params = urllib.parse.parse_qs(parsed_url.query)
-
-    # Extract supernodes
-    supernodes_json = query_params.get("supernodes", ["[]"])[0]
-    supernodes_data = json.loads(supernodes_json)
-
-    supernode_features = {}
-    name_counts = {}
-
-    for supernode in supernodes_data:
-        name = supernode[0]
-        node_ids = supernode[1:]
-
-        # Handle duplicate names by adding counter
-        if name in name_counts:
-            name_counts[name] += 1
-            unique_name = f"{name} ({name_counts[name]})"
-        else:
-            name_counts[name] = 1
-            unique_name = name
-
-        nodes = []
-        for node_id in node_ids:
-            layer, feature_idx, pos = map(int, node_id.split("_"))
-            nodes.append(Feature(layer, pos, feature_idx))
-
-        supernode_features[unique_name] = nodes
-
-    # Extract individual/singleton features from pinnedIds
-    pinned_ids_str = query_params.get("pinnedIds", [""])[0]
-    singleton_features = []
-
-    if pinned_ids_str:
-        pinned_ids = pinned_ids_str.split(",")
-        for pinned_id in pinned_ids:
-            # Handle both regular format (layer_feature_pos) and E_ format
-            if pinned_id.startswith("E_"):
-                # E_26865_9 format - embedding layer
-                parts = pinned_id[2:].split("_")  # Remove 'E_' prefix
-                if len(parts) == 2:
-                    feature_idx, pos = map(int, parts)
-                    # Use -1 to indicate embedding layer
-                    singleton_features.append(Feature(-1, pos, feature_idx))
-            else:
-                # Regular layer_feature_pos format
-                parts = pinned_id.split("_")
-                if len(parts) == 3:
-                    layer, feature_idx, pos = map(int, parts)
-                    singleton_features.append(Feature(layer, pos, feature_idx))
-
-    return supernode_features, singleton_features
-
-
 def load_graph_data(file_path):
     """Load graph data from a PyTorch file."""
     from ..graph import Graph
@@ -113,6 +41,8 @@ def load_graph_data(file_path):
 
 def create_nodes(graph, node_mask, tokenizer, cumulative_scores):
     """Create all nodes for the graph."""
+    from ..graph import Node
+
     start_time = time.time()
 
     nodes = {}
@@ -193,6 +123,8 @@ def create_used_nodes_and_edges(graph, nodes, edge_mask):
 
 def build_model(graph, used_nodes, used_edges, slug, scan, node_threshold, tokenizer):
     """Build the full model object."""
+    from ..graph import Metadata, Model, QParams
+
     start_time = time.time()
 
     if isinstance(scan, list):
@@ -286,29 +218,87 @@ def save_graph_stats(graph, path: str):
     """Save graph statistics to a file (JSON or text).
 
     Stats include:
-    - Number of layers
-    - Number of input tokens
-    - Number of output (logit) nodes
-    - Number of feature nodes
-    - Total number of nodes
-    - Total number of edges (non-zero entries in adjacency matrix)
+    - Number of layers, tokens, logits, features
+    - Total nodes and edges
+    - Per-layer statistics for activations and edges (mean, median, min, max, sum)
     """
+    import numpy as np
+
     n_layers = graph.cfg.n_layers
     n_tokens = len(graph.input_tokens)
     n_logits = len(graph.logit_tokens)
     n_features = len(graph.selected_features)
 
-    total_nodes = graph.adjacency_matrix.shape[0]
-    # Count non-zero edges. Adjacency matrix is [target, source]
-    n_edges = (graph.adjacency_matrix != 0).sum().item()
+    adj = graph.adjacency_matrix
+    total_nodes = adj.shape[0]
+    n_edges = (adj != 0).sum().item()
+
+    # Feature node indices: 0 to n_features - 1
+    # Layer for each feature node
+    feat_layers = graph.active_features[graph.selected_features][:, 0].cpu().numpy()
+    feat_activations = (
+        graph.activation_values[graph.selected_features].to(torch.float32).cpu().numpy()
+    )
+
+    def get_summary_stats(data):
+        if len(data) == 0:
+            return {
+                "mean": 0.0,
+                "median": 0.0,
+                "min": 0.0,
+                "max": 0.0,
+                "std": 0.0,
+                "sum": 0.0,
+                "count": 0,
+            }
+        return {
+            "mean": float(np.mean(data)),
+            "median": float(np.median(data)),
+            "min": float(np.min(data)),
+            "max": float(np.max(data)),
+            "std": float(np.std(data)),
+            "sum": float(np.sum(data)),
+            "count": int(len(data)),
+        }
+
+    per_layer = []
+    for layer_idx in range(n_layers):
+        layer_mask = feat_layers == layer_idx
+        layer_feat_indices = np.where(layer_mask)[0]
+        layer_acts = feat_activations[layer_mask]
+
+        # Edges involving these feature nodes
+        # Outgoing edges: from these features to anything
+        if n_edges > 0 and len(layer_feat_indices) > 0:
+            out_adj = adj[:, layer_feat_indices]
+            out_weights = out_adj[out_adj != 0].to(torch.float32).cpu().numpy()
+
+            in_adj = adj[layer_feat_indices, :]
+            in_weights = in_adj[in_adj != 0].to(torch.float32).cpu().numpy()
+        else:
+            out_weights = np.array([])
+            in_weights = np.array([])
+
+        per_layer.append(
+            {
+                "layer": int(layer_idx),
+                "n_features": int(len(layer_feat_indices)),
+                "activations": get_summary_stats(layer_acts),
+                "edge_weights_out": get_summary_stats(out_weights),
+                "edge_weights_in": get_summary_stats(in_weights),
+            }
+        )
 
     stats = {
-        "n_layers": n_layers,
-        "n_tokens": n_tokens,
-        "n_logits": n_logits,
-        "n_features": n_features,
-        "total_nodes": total_nodes,
-        "n_edges": n_edges,
+        "summary": {
+            "n_layers": n_layers,
+            "n_tokens": n_tokens,
+            "n_logits": n_logits,
+            "n_features": n_features,
+            "total_nodes": total_nodes,
+            "n_edges": n_edges,
+        },
+        "per_layer": per_layer,
     }
 
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
@@ -318,13 +308,33 @@ def save_graph_stats(graph, path: str):
             json.dump(stats, f, indent=2)
     else:
         with open(path, "w") as f:
-            f.write("Graph Statistics:\n")
-            f.write("-----------------\n")
+            f.write("Graph Statistics Summary:\n")
+            f.write("-------------------------\n")
             f.write(f"Layers:        {n_layers}\n")
             f.write(f"Input Tokens:  {n_tokens}\n")
             f.write(f"Output Nodes:  {n_logits}\n")
             f.write(f"Feature Nodes: {n_features}\n")
             f.write(f"Total Nodes:   {total_nodes}\n")
-            f.write(f"Total Edges:   {n_edges}\n")
+            f.write(f"Total Edges:   {n_edges}\n\n")
+
+            f.write("Per-Layer Breakdown:\n")
+            f.write("--------------------\n")
+            for layer in per_layer:
+                f.write(f"Layer {layer['layer']} ({layer['n_features']} features):\n")
+                acts = layer["activations"]
+                f.write(
+                    f"  Activations: mean={acts['mean']:.4f}, med={acts['median']:.4f}, "
+                    f"min={acts['min']:.4f}, max={acts['max']:.4f}\n"
+                )
+                e_out = layer["edge_weights_out"]
+                f.write(
+                    f"  Edges Out:   count={e_out['count']}, mean={e_out['mean']:.4f}, "
+                    f"max={e_out['max']:.4f}\n"
+                )
+                e_in = layer["edge_weights_in"]
+                f.write(
+                    f"  Edges In:    count={e_in['count']}, mean={e_in['mean']:.4f}, "
+                    f"max={e_in['max']:.4f}\n\n"
+                )
 
     print(f"INFO: Graph statistics saved to {path}")

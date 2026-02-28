@@ -87,5 +87,11 @@ def test_save_graph_stats_json():
         assert os.path.exists(stats_path)
         with open(stats_path) as f:
             data = json.load(f)
-            assert data["n_layers"] == 2
-            assert data["n_edges"] == 25
+            assert data["summary"]["n_layers"] == 2
+            assert data["summary"]["n_edges"] == 25
+            assert "per_layer" in data
+            assert len(data["per_layer"]) == 2
+            assert data["per_layer"][0]["layer"] == 0
+            assert data["per_layer"][0]["n_features"] == 1
+            assert "activations" in data["per_layer"][0]
+            assert "edge_weights_out" in data["per_layer"][0]

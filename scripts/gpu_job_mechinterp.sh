@@ -37,6 +37,7 @@ cmd=(
   --lazy-encoder
   --dtype bfloat16
   --offload cpu
+  --stats_file stats.json
 )
 
 

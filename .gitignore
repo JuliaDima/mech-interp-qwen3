@@ -11,3 +11,4 @@ project_instructions.md
 scripts/inspect_transcoder.py
 docs/_build
 scripts/test_prune.py
+scripts/salloc_gpu.txt
