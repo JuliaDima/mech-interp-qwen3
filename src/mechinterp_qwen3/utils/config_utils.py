@@ -113,3 +113,18 @@ def set_parser_defaults_from_config(
             defaults[k] = v
 
     parser.set_defaults(**defaults)
+
+
+def print_config(args: argparse.Namespace, title: str = "Effective Run Configuration"):
+    """Print the effective configuration in a standardized format."""
+    print("=" * 60)
+    print(f"{title}:")
+    args_dict = vars(args)
+    # Sort keys for consistent output, excluding internal/redundant ones if needed
+    for key in sorted(args_dict.keys()):
+        # Skip 'command' as it's the subcommand name, not a config param
+        if key == "command":
+            continue
+        value = args_dict[key]
+        print(f"  {key:<25} : {value}")
+    print("=" * 60)

@@ -35,6 +35,7 @@ if str(_REPO_ROOT) not in sys.path:
 from mechinterp_qwen3.utils.config_utils import (  # noqa: E402
     add_config_args,
     load_config,
+    print_config,
     set_parser_defaults_from_config,
 )
 
@@ -380,11 +381,8 @@ def main() -> None:
     if args.config is None and config_path:
         args.config = config_path
 
-    log.info("=" * 60)
-    log.info("Effective Run Configuration:")
-    for k, v in sorted(vars(args).items()):
-        log.info(f"  {k:20}: {v}")
-    log.info("=" * 60)
+    # Standardized configuration printing
+    print_config(args, title="Effective Addition Experiment Configuration")
     # Determine which phases to run
     run_all = args.all
     do_prompts = run_all or args.make_prompts

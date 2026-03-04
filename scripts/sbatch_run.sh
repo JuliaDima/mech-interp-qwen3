@@ -11,6 +11,7 @@
 # Examples:
 #   sbatch scripts/sbatch_run.sh miq generate-dataset --output_path results.jsonl
 #   sbatch scripts/sbatch_run.sh miq attribute -p "calc: 1+1="
+#   sbatch scripts/sbatch_run.sh miq attribute -p "You are solving a simple comparison task. Two numbers are given: A and B. Answer with a single character: 'A' if A is larger, otherwise 'B'. A = 864, B = 394, Answer:"
 #   sbatch scripts/sbatch_run.sh python experiments/addition/run.py --all
 #
 # To use a custom config file:
@@ -21,11 +22,9 @@
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
 #SBATCH --time=04:00:00
-#SBATCH --job-name=job_1gpu_local
+#SBATCH --job-name=miq_run
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
-
-set -euo pipefail
 
 # ---- Repo root ----
 if [ -n "${SLURM_SUBMIT_DIR:-}" ]; then
@@ -36,38 +35,42 @@ else
 fi
 cd "${REPO_ROOT}"
 
-echo "=========================================="
-echo "Job:       ${SLURM_JOB_ID}"
-echo "Node:      $(hostname)"
-echo "GPUs:      ${CUDA_VISIBLE_DEVICES:-unset}"
-echo "Repo root: ${REPO_ROOT}"
-echo "Command:   ${*:-<none — will print help>}"
-echo "=========================================="
-
-mkdir -p logs/slurm
-
 # ---- Environment ----
 module purge || true
 module load rhel8/default-amp || true
+
+# Disable nounset temporarily for system scripts
+set +u
 source ~/.bashrc
+set -u
 conda activate p28_py311_env || true
 
-export PYTHONPATH="${PYTHONPATH:-}:${REPO_ROOT}/src"
+set -euo pipefail
+
+export PYTHONPATH="${PYTHONPATH:-}:${REPO_ROOT}/src:${REPO_ROOT}"
+export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}:/home/eid23/miniforge3/envs/p28_py311_env/lib"
 export OMP_NUM_THREADS=16
+export PYTHONUNBUFFERED=1
+
+mkdir -p logs
 
 # ---- Logging ----
-logfile="logs/slurm/${SLURM_JOB_NAME:-job}_${SLURM_JOB_ID:-manual}_$(date +%Y-%m-%d_%H-%M-%S).log"
-
-echo "Logging to: ${logfile}"
-echo "=========================================="
+logfile="logs/${SLURM_JOB_NAME:-job}_${SLURM_JOB_ID:-manual}_$(date +%Y-%m-%d_%H-%M-%S).log"
 
 {
+  echo "=========================================="
+  echo "Job:       ${SLURM_JOB_ID:-manual}"
+  echo "Node:      $(hostname)"
+  echo "GPUs:      ${CUDA_VISIBLE_DEVICES:-unset}"
+  echo "Repo root: ${REPO_ROOT}"
+  echo "Command:   $@"
+  echo "Logging to: ${logfile}"
   echo "Start Time: $(date)"
-  echo "Command:    $@"
-  echo "------------------------------------------"
+  echo "=========================================="
 
   # ---- Run command ----
-  # All arguments are forwarded verbatim
+  # All arguments are forwarded verbatim.
+  # IMPORTANT: wrap your prompt in quotes when calling sbatch!
   "$@"
 
   echo "------------------------------------------"

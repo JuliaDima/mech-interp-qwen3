@@ -4,13 +4,14 @@ import os
 import sys
 import warnings
 
-log = logging.getLogger(__name__)
-
 from mechinterp_qwen3.utils.config_utils import (  # noqa: E402
     add_config_args,
     load_config,
+    print_config,
     set_parser_defaults_from_config,
 )
+
+log = logging.getLogger(__name__)
 
 
 def main():
@@ -55,8 +56,7 @@ def main():
     gen_parser.add_argument(
         "--output_path",
         type=str,
-        required=True,
-        help="Path to output JSONL file",
+        help="Path to output JSONL file (required if not in config)",
     )
 
     # Template configuration
@@ -144,13 +144,15 @@ def main():
     attr_parser.add_argument(
         "-t",
         "--transcoder_set",
-        required=True,
         help=(
             "HuggingFace repository ID containing transcoders "
-            "(e.g. username/repo-name, username/repo-name@revision)."
+            "(e.g. username/repo-name, username/repo-name@revision). "
+            "Required if not in config."
         ),
     )
-    attr_parser.add_argument("-p", "--prompt", required=True, help="Input prompt text to analyze.")
+    attr_parser.add_argument(
+        "-p", "--prompt", help="Input prompt text to analyze. Required if not in config."
+    )
     attr_parser.add_argument(
         "-o",
         "--graph_output_path",
@@ -243,19 +245,14 @@ def main():
     )
 
     # --- Config Loading ---
-    # We pre-parse to find if the user specified a config file
-    # or if we should use the root project config.
-    # Note: we use parse_known_args to avoid failing on subcommand args
     pre_args, _ = parser.parse_known_args()
-
-    # Support positional config like "miq my_config.yaml attribute ..."
     pos_config = None
     if len(sys.argv) > 1 and sys.argv[1].endswith(".yaml") and not sys.argv[1].startswith("-"):
         pos_config = sys.argv[1]
-        # We don't pop it yet because we need to know the command
 
     config_file = pre_args.config or pos_config
     config = load_config(config_file)
+
     if config:
         log.info(
             "Project configuration loaded (from %s or root config.yaml)", config_file or "root"
@@ -274,11 +271,29 @@ def main():
         )
 
     # Final parse
-    # If we had a positional config, we now need to handle it
     if pos_config and sys.argv[1] == pos_config:
         sys.argv.pop(1)
 
     args = parser.parse_args()
+
+    # --- Post-Parse Validation ---
+    # Since we removed required=True to allow config defaults to work,
+    # we must now verify that essential arguments are present either via CLI or config.
+    if args.command == "attribute":
+        if not args.transcoder_set:
+            attr_parser.error(
+                "the following arguments are required: -t/--transcoder_set (or define in config.yaml)"
+            )
+        if not args.prompt:
+            attr_parser.error("the following arguments are required: -p/--prompt")
+    elif args.command == "generate-dataset":
+        if not args.output_path:
+            gen_parser.error(
+                "the following arguments are required: --output_path (or define in config.yaml)"
+            )
+
+    # Standardized configuration printing
+    print_config(args, title=f"Effective {args.command.title()} Configuration")
 
     if args.command == "attribute":
         run_attribution(args, attr_parser)
@@ -324,16 +339,6 @@ def run_dataset_generation(args):
         raise ValueError("--n_samples is required when using random sampling strategy")
 
     # Generate dataset
-    print("=" * 60)
-    print("ADDITION DATASET GENERATION")
-    print("=" * 60)
-    print(f"Model: {config.model_name}")
-    print(f"Templates: {[t.value for t in config.templates]}")
-    print(f"Sampling: {config.sampling_strategy.value}")
-    print(f"Max value: {config.max_value}")
-    print(f"Seed: {config.seed}")
-    print("=" * 60 + "\n")
-
     records, summary = generate_dataset(config)
 
     # Write output

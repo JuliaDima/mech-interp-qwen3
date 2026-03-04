@@ -35,6 +35,7 @@ Example usage:
 import argparse
 from pathlib import Path
 
+from ..utils.config_utils import print_config
 from .dataset_generation import (
     DatasetConfig,
     SamplingStrategy,
@@ -175,15 +176,8 @@ def main() -> None:
     if config.sampling_strategy == SamplingStrategy.RANDOM and config.n_samples is None:
         raise ValueError("--n_samples is required when using random sampling strategy")
 
-    print("=" * 60)
-    print("ADDITION DATASET GENERATION")
-    print("=" * 60)
-    print(f"Model: {config.model_name}")
-    print(f"Templates: {[t.value for t in config.templates]}")
-    print(f"Sampling: {config.sampling_strategy.value}")
-    print(f"Max value: {config.max_value}")
-    print(f"Seed: {config.seed}")
-    print("=" * 60 + "\n")
+    # Standardized configuration printing
+    print_config(args, title="Effective Dataset Generation Configuration")
 
     records, summary = generate_dataset(config)
     write_dataset(records, summary, config.output_path)
