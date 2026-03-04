@@ -1,5 +1,6 @@
 stages:
   - test
+  - pages
 
 unit-test-job:
   stage: test
@@ -33,3 +34,17 @@ lint-job:
     - echo "Running format checks..."
     - ruff format src/ tests/ --check
   allow_failure: true
+
+pages:
+  stage: pages
+  before_script:
+    - python -V
+    - python -m pip install -U pip
+    - python -m pip install -e ".[docs]" linkify-it-py
+  script:
+    - sphinx-build -b html docs/ public/
+  artifacts:
+    paths:
+      - public
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH

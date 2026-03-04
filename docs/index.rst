@@ -14,6 +14,12 @@ This project provides an independent mechanistic interpretability pipeline speci
    methodology
    api/modules
 
+.. toctree::
+   :maxdepth: 1
+   :caption: Experiments:
+
+   addition_experiment
+
 Features
 --------
 
