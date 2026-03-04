@@ -31,13 +31,13 @@ generate_dataset:
 # Shared between `miq attribute` and `experiments/addition/run.py`
 max_n_logits: 10
 desired_logit_prob: 0.95
-max_feature_nodes: 5000
+max_feature_nodes: 7500
 node_threshold: 0.75
 edge_threshold: 0.8
-offload: null
+offload: "cpu"
 graph_output_path: "graphs/attribution_graph.pt"
-graph_file_dir: "graphs/json/"
-slug: "qwen3"
+graph_file_dir: "./graphs"
+slug: "qwen3-4b_864_greater_than_394"
 
 # --- Addition Experiment Specifics ---
 # Specific to `experiments/addition/run.py`

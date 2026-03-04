@@ -173,11 +173,11 @@ def create_graph_files(
     node_threshold=0.8,
     edge_threshold=0.98,
 ):
-    from ..graph import Graph, prune_graph
+    from ..graph import prune_graph
 
     total_start_time = time.time()
 
-    graph = graph_or_path if isinstance(graph_or_path, Graph) else load_graph_data(graph_or_path)
+    graph = load_graph_data(graph_or_path) if isinstance(graph_or_path, str) else graph_or_path
 
     if os.path.exists(output_path):
         assert os.path.isdir(output_path)

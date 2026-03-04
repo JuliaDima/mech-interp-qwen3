@@ -43,6 +43,7 @@ def test_cli_attribute_with_stats(mocker):
     mock_attr_func.return_value = mock_graph
 
     mock_save_stats = mocker.patch("mechinterp_qwen3.utils.graph_viz.save_graph_stats")
+    mocker.patch("mechinterp_qwen3.utils.graph_viz.create_graph_files")
 
     # Mock the loaders called inside run_attribution - patch the ORIGINAL location
     mocker.patch(
