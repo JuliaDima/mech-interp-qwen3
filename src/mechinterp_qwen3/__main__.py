@@ -33,7 +33,7 @@ def main():
     )
     # Model configuration
     gen_parser.add_argument(
-        "--model_name",
+        "--model",
         type=str,
         default="Qwen/Qwen2.5-3B-Instruct",
         help="HuggingFace model name (default: Qwen/Qwen2.5-3B-Instruct)",
@@ -112,9 +112,10 @@ def main():
 
     # Generation configuration
     gen_parser.add_argument(
-        "--enable_greedy_generation",
-        action="store_true",
-        help="Enable greedy generation for each prompt",
+        "--batch_size",
+        type=int,
+        default=32,
+        help="Batch size for generation (default: 32)",
     )
     gen_parser.add_argument(
         "--max_gen_tokens",
@@ -318,7 +319,7 @@ def run_dataset_generation(args):
 
     # Create configuration
     config = DatasetConfig(
-        model_name=args.model_name,
+        model=args.model,
         output_path=Path(args.output_path),
         templates=templates,
         sampling_strategy=SamplingStrategy(args.sampling_strategy),
@@ -327,7 +328,7 @@ def run_dataset_generation(args):
         stratified_n_per_category=args.stratified_n_per_category,
         stratified_uniform_remainder=args.stratified_uniform_remainder,
         top_k=args.top_k,
-        enable_greedy_generation=args.enable_greedy_generation,
+        batch_size=args.batch_size,
         max_gen_tokens=args.max_gen_tokens,
         seed=args.seed,
         device=args.device,

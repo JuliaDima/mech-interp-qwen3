@@ -10,7 +10,6 @@ dependencies = [
   "safetensors>=0.4",
   "numpy>=1.26",
   "tqdm>=4.66",
-  "circuit-tracer @ git+https://github.com/safety-research/circuit-tracer.git",
   "transformer-lens>=2.16.0",
 ]
 

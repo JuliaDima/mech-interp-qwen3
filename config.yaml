@@ -23,7 +23,7 @@ generate_dataset:
   sampling_strategy: "grid"
   max_value: 20
   top_k: 10
-  enable_greedy_generation: false
+  batch_size: 32
   max_gen_tokens: 10
   output_path: "data/addition_dataset.jsonl"
 
@@ -37,7 +37,7 @@ edge_threshold: 0.8
 offload: "cpu"
 graph_output_path: "graphs/attribution_graph.pt"
 graph_file_dir: "./graphs"
-slug: "qwen3-4b_864_greater_than_394"
+slug: "qwen3-4b"
 
 # --- Addition Experiment Specifics ---
 # Specific to `experiments/addition/run.py`

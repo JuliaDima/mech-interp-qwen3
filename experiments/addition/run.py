@@ -65,7 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
     phases.add_argument("--operand-plots", action="store_true", help="100×100 operand heatmaps")
     phases.add_argument("--graph", action="store_true", help="Attribution graph for 36+59=")
     phases.add_argument("--intervene", action="store_true", help="Intervention / constrained-patch")
-    phases.add_argument("--all", action="store_true", help="Run all phases above")
+    phases.add_argument("--all", action="store_true", help="Run all phases in order")
 
     # Model
     model_args = p.add_argument_group("Model")
@@ -295,7 +295,7 @@ def phase_operand_plots(run_dir: Path, model, args: argparse.Namespace) -> None:
         out_dir=out_dir,
         top_k_global=args.top_k_features,
     )
-    print(f"\n✓  operand-plots complete → {out_dir}  " f"({len(matrices)} feature matrices)")
+    print(f"\n✓  operand-plots complete → {out_dir}  ({len(matrices)} feature matrices)")
 
 
 def phase_graph(run_dir: Path, model, args: argparse.Namespace):
@@ -422,9 +422,9 @@ def main() -> None:
         assert model is not None
         phase_intervene(run_dir, model, args, graph=graph)
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"All requested phases complete.  Outputs in:\n  {run_dir}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
 
 if __name__ == "__main__":

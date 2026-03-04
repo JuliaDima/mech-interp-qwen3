@@ -2,6 +2,9 @@
 
 This module generates addition prompts from configurable templates and computes
 teacher-forced statistics for mechanistic interpretability experiments.
+
+usage: # will take default values from config.yaml, if not provided
+   miq generate-dataset
 """
 
 import json
@@ -16,6 +19,7 @@ import torch
 from tqdm import tqdm
 from transformer_lens import HookedTransformer
 
+from ..utils.inference_utils import batched_greedy_generate
 from ..utils_seed import seed_everything
 
 
@@ -46,16 +50,16 @@ class SamplingStrategy(StrEnum):
 class DatasetConfig:
     """Configuration for dataset generation."""
 
-    model_name: str
+    model: str
     output_path: Path
     templates: list[TemplateID]
     sampling_strategy: SamplingStrategy
     max_value: int
     n_samples: int | None = None
+    batch_size: int = 32
     stratified_n_per_category: int = 100
     stratified_uniform_remainder: int = 100
     top_k: int = 10
-    enable_greedy_generation: bool = False
     max_gen_tokens: int = 10
     seed: int = 42
     device: str | None = None
@@ -321,67 +325,8 @@ def greedy_generate(
     prompt_str: str,
     max_tokens: int = 10,
 ) -> str:
-    """Generate completion using greedy decoding (temperature=0).
-
-    For addition tasks, stops early when hitting whitespace or non-digit characters
-    after generating at least one token.
-
-    Args:
-        model: HookedTransformer model
-        prompt_str: Prompt string
-        max_tokens: Maximum number of tokens to generate
-
-    Returns:
-        Generated completion string (trimmed to just the answer)
-    """
-    prompt_tokens = model.tokenizer(
-        prompt_str, return_tensors="pt", add_special_tokens=False
-    ).input_ids.to(model.cfg.device)
-
-    with torch.inference_mode():
-        generated_tokens = prompt_tokens.clone()
-        generated_ids = []
-
-        for _ in range(max_tokens):
-            logits = model(generated_tokens)  # (batch=1, seq_len, vocab_size)
-            next_token_logits = logits[0, -1, :]  # (vocab_size,)
-
-            next_token_id = torch.argmax(next_token_logits, dim=-1, keepdim=True)
-            generated_tokens = torch.cat([generated_tokens, next_token_id.unsqueeze(0)], dim=1)
-            generated_ids.append(next_token_id.item())
-
-            # Check stopping conditions
-            if next_token_id.item() == model.tokenizer.eos_token_id:
-                break
-
-            # Decode current token to check for stopping
-            if len(generated_ids) >= 1:
-                current_text = model.tokenizer.decode(generated_ids, skip_special_tokens=True)
-                # Stop if we hit whitespace, newline, or non-digit after the answer
-                # This prevents generating "68 - Brainly.com" when we just want "68"
-                stripped = current_text.strip()
-                if stripped and not stripped[-1].isdigit():
-                    # We've generated non-digit content, stop and trim
-                    # Decode up to last digit
-                    for i in range(len(generated_ids) - 1, -1, -1):
-                        partial = model.tokenizer.decode(
-                            generated_ids[: i + 1], skip_special_tokens=True
-                        ).strip()
-                        if partial and partial[-1].isdigit():
-                            return partial
-                    break
-
-    # Decode only the generated part and strip whitespace
-    completion = model.tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
-
-    # Additional safety: trim to last digit
-    for i in range(len(completion) - 1, -1, -1):
-        if completion[i].isdigit():
-            return completion[: i + 1]
-
-    # If we get here, no digits were found - return empty string
-    # This happens when model immediately generates non-digit content like "-"
-    return ""
+    """Wrapper for batched_greedy_generate for a single prompt."""
+    return batched_greedy_generate(model, [prompt_str], max_tokens, batch_size=1)[0]
 
 
 def generate_dataset(config: DatasetConfig) -> tuple[list[DatasetRecord], dict]:
@@ -395,7 +340,7 @@ def generate_dataset(config: DatasetConfig) -> tuple[list[DatasetRecord], dict]:
     """
     seed_everything(config.seed)
 
-    print(f"Loading model: {config.model_name}")
+    print(f"Loading model: {config.model}")
     device = config.device or ("cuda" if torch.cuda.is_available() else "cpu")
     dtype_map = {
         "float32": torch.float32,
@@ -405,7 +350,7 @@ def generate_dataset(config: DatasetConfig) -> tuple[list[DatasetRecord], dict]:
     dtype = dtype_map[config.dtype]
 
     model = HookedTransformer.from_pretrained(
-        config.model_name,
+        config.model,
         device=device,
         dtype=dtype,
         fold_ln=False,
@@ -420,21 +365,42 @@ def generate_dataset(config: DatasetConfig) -> tuple[list[DatasetRecord], dict]:
     prompt_id = 0
 
     metadata = {
-        "model_name": config.model_name,
+        "model": config.model,
         "seed": config.seed,
         "dtype": config.dtype,
         "device": str(device),
         "timestamp": datetime.now().isoformat(),
     }
 
-    total_items = len(pairs) * len(config.templates)
-    print(f"Processing {total_items} prompt-template combinations...")
+    all_combinations = []
+    for template_id in config.templates:
+        for a, b in pairs:
+            all_combinations.append((template_id, a, b))
+
+    total_items = len(all_combinations)
+    print(
+        f"Processing {total_items} prompt-template combinations with batch_size={config.batch_size}..."
+    )
 
     with tqdm(total=total_items) as pbar:
-        for template_id in config.templates:
-            for a, b in pairs:
-                prompt_str = build_prompt(template_id, a, b)
-                true_answer_str = str(a + b)
+        for i in range(0, total_items, config.batch_size):
+            batch_items = all_combinations[i : i + config.batch_size]
+            batch_prompts = [build_prompt(t_id, a, b) for t_id, a, b in batch_items]
+            batch_true_answers = [str(a + b) for _, a, b in batch_items]
+
+            # 1. Batched Greedy Generation
+            # This is much faster than the old sequential loop
+            batch_greedy_completions = batched_greedy_generate(
+                model, batch_prompts, config.max_gen_tokens
+            )
+
+            # 2. Sequential Stats (for now, but we can batch this later if needed)
+            # score_teacher_forced is still sequential because of handling varied output lengths
+            # but it is only one forward pass per prompt, so the bottleneck was actually greedy gen.
+            for j, (t_id, a, b) in enumerate(batch_items):
+                prompt_str = batch_prompts[j]
+                true_answer_str = batch_true_answers[j]
+                greedy_completion_str = batch_greedy_completions[j]
 
                 (
                     prompt_token_ids,
@@ -443,15 +409,9 @@ def generate_dataset(config: DatasetConfig) -> tuple[list[DatasetRecord], dict]:
                     per_pos_stats,
                 ) = score_teacher_forced(model, prompt_str, true_answer_str, config.top_k)
 
-                greedy_completion_str = None
-                if config.enable_greedy_generation:
-                    greedy_completion_str = greedy_generate(
-                        model, prompt_str, config.max_gen_tokens
-                    )
-
                 record = DatasetRecord(
                     prompt_id=prompt_id,
-                    template_id=template_id.value,
+                    template_id=t_id.value,
                     a=a,
                     b=b,
                     prompt_str=prompt_str,
@@ -466,7 +426,8 @@ def generate_dataset(config: DatasetConfig) -> tuple[list[DatasetRecord], dict]:
 
                 records.append(record)
                 prompt_id += 1
-                pbar.update(1)
+
+            pbar.update(len(batch_items))
 
     print("Computing summary statistics...")
     summary = compute_summary_stats(records, config)
@@ -490,17 +451,16 @@ def compute_summary_stats(records: list[DatasetRecord], config: DatasetConfig) -
     length_distribution = dict(Counter(answer_lengths))
 
     accuracy_per_template = {}
-    if config.enable_greedy_generation:
-        for template_id in config.templates:
-            template_records = [r for r in records if r.template_id == template_id.value]
-            correct = sum(
-                1
-                for r in template_records
-                if r.greedy_completion_str is not None
-                and r.greedy_completion_str.strip() == r.true_answer_str
-            )
-            total = len(template_records)
-            accuracy_per_template[template_id.value] = correct / total if total > 0 else 0.0
+    for template_id in config.templates:
+        template_records = [r for r in records if r.template_id == template_id.value]
+        correct = sum(
+            1
+            for r in template_records
+            if r.greedy_completion_str is not None
+            and r.greedy_completion_str.strip() == r.true_answer_str
+        )
+        total = len(template_records)
+        accuracy_per_template[template_id.value] = correct / total if total > 0 else 0.0
 
     max_answer_length = max(answer_lengths)
     mean_prob_per_position = []

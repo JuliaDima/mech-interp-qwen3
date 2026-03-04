@@ -2,6 +2,13 @@
 
 Provides multiple visualization types inspired by Anthropic's mechanistic interpretability
 work, with additional scientific insights for understanding model arithmetic capabilities.
+
+usage: # will take default values from config.yaml, if not provided
+
+   python -m src.mechinterp_qwen3.dataset_generation.visualize_dataset \
+     data/addition_dataset.jsonl \
+     --output_dir visualizations/grid \
+     --template T0
 """
 
 import json

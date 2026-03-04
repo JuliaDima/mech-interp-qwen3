@@ -189,7 +189,7 @@ def plot_operand_matrix(
         import matplotlib.pyplot as plt
     except ImportError as e:
         raise ImportError(
-            "matplotlib is required for operand plots. " "Install it with: pip install matplotlib"
+            "matplotlib is required for operand plots. Install it with: pip install matplotlib"
         ) from e
 
     layer, feat_idx = feature_id

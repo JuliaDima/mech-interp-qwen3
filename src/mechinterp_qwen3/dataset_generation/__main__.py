@@ -1,41 +1,24 @@
 #!/usr/bin/env python3
 """
+CLI entrypoint for dataset generation.
 
 Example usage:
-    # Grid sampling with all templates
-    python -m mechinterp_qwen3.dataset_generation \
-        --model_name Qwen/Qwen2.5-3B-Instruct \
-        --output_path data/addition_dataset.jsonl \
-        --sampling_strategy grid \
-        --max_value 20 \
-        --templates T0 T1 T2
+    # Grid sampling with all templates (loads defaults from config.yaml automatically)
+    python -m mechinterp_qwen3.dataset_generation
 
-    # Stratified sampling with greedy generation
-    python -m mechinterp_qwen3.dataset_generation \
-        --model_name Qwen/Qwen2.5-3B-Instruct \
-        --output_path data/addition_stratified.jsonl \
-        --sampling_strategy stratified \
-        --max_value 100 \
-        --templates T0 \
-        --stratified_n_per_category 50 \
-        --stratified_uniform_remainder 100 \
-        --enable_greedy_generation \
-        --seed 42
-
-    # Random sampling
-    python -m mechinterp_qwen3.dataset_generation \
-        --model_name Qwen/Qwen2.5-3B-Instruct \
-        --output_path data/addition_random.jsonl \
-        --sampling_strategy random \
-        --max_value 1000 \
-        --n_samples 500 \
-        --templates T1
+    # Override defaults:
+    python -m mechinterp_qwen3.dataset_generation --model Qwen/Qwen2.5-3B-Instruct --max_value 100
 """
 
 import argparse
 from pathlib import Path
 
-from ..utils.config_utils import print_config
+from ..utils.config_utils import (
+    add_config_args,
+    load_config,
+    print_config,
+    set_parser_defaults_from_config,
+)
 from .generate_add_dataset import (
     DatasetConfig,
     SamplingStrategy,
@@ -45,8 +28,8 @@ from .generate_add_dataset import (
 )
 
 
-def parse_args() -> argparse.Namespace:
-    """Parse command line arguments."""
+def build_parser() -> argparse.ArgumentParser:
+    """Build the argument parser."""
     parser = argparse.ArgumentParser(
         description="Generate addition dataset with baseline model statistics",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -54,7 +37,7 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--model_name",
+        "--model",
         type=str,
         default="Qwen/Qwen2.5-3B-Instruct",
         help="HuggingFace model name (default: Qwen/Qwen2.5-3B-Instruct)",
@@ -76,7 +59,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output_path",
         type=Path,
-        required=True,
+        default=None,
         help="Path to output JSONL file",
     )
 
@@ -129,16 +112,20 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--enable_greedy_generation",
-        action="store_true",
-        help="Enable greedy generation for each prompt",
-    )
-    parser.add_argument(
         "--max_gen_tokens",
         type=int,
         default=10,
         help="Maximum tokens to generate in greedy mode (default: 10)",
     )
+
+    parser.add_argument(
+        "--batch_size",
+        type=int,
+        default=32,
+        help="Batch size for generation (default: 32)",
+    )
+
+    add_config_args(parser)
 
     parser.add_argument(
         "--seed",
@@ -147,26 +134,41 @@ def parse_args() -> argparse.Namespace:
         help="Random seed for reproducibility (default: 42)",
     )
 
-    return parser.parse_args()
+    return parser
 
 
 def main() -> None:
     """Main CLI entrypoint."""
-    args = parse_args()
+    parser = build_parser()
+
+    # Pre-parse to get config path
+    pre, _ = parser.parse_known_args()
+    config_dict = load_config(pre.config)
+
+    # Apply defaults from config.yaml
+    set_parser_defaults_from_config(parser, config_dict, section="generate_dataset")
+
+    args = parser.parse_args()
+
+    # Shared validation
+    if not args.output_path:
+        parser.error(
+            "the following arguments are required: --output_path (or define in config.yaml)"
+        )
 
     templates = [TemplateID(t) for t in args.templates]
 
     config = DatasetConfig(
-        model_name=args.model_name,
+        model=args.model,
         output_path=args.output_path,
         templates=templates,
         sampling_strategy=SamplingStrategy(args.sampling_strategy),
         max_value=args.max_value,
         n_samples=args.n_samples,
+        batch_size=args.batch_size,
         stratified_n_per_category=args.stratified_n_per_category,
         stratified_uniform_remainder=args.stratified_uniform_remainder,
         top_k=args.top_k,
-        enable_greedy_generation=args.enable_greedy_generation,
         max_gen_tokens=args.max_gen_tokens,
         seed=args.seed,
         device=args.device,

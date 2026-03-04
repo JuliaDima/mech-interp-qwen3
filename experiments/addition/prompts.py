@@ -45,7 +45,7 @@ def _build_calc_grid() -> list[CalcEntry]:
     """Build all 10,000 calc: a+b= prompts for a,b in {0,...,99} using shared logic."""
     # We use a dummy config to get the grid pairs
     config = DatasetConfig(
-        model_name="dummy",
+        model="dummy",
         output_path=Path("dummy.jsonl"),
         templates=[TemplateID.T0],
         sampling_strategy=SamplingStrategy.GRID,
@@ -101,7 +101,7 @@ NL_FOLLOWUP: str = (
 # The plain NL_VARIANT is fine for most experiments; use this when you need the
 # model to "see" a proper chat boundary.
 NL_VARIANT_CHAT: str = (
-    "<|im_start|>user\nAnswer in one word. What is 36+59?<|im_end|>\n" "<|im_start|>assistant\n"
+    "<|im_start|>user\nAnswer in one word. What is 36+59?<|im_end|>\n<|im_start|>assistant\n"
 )
 
 NL_FOLLOWUP_CHAT: str = (

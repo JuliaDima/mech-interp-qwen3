@@ -21,6 +21,7 @@ pip install -e ".[docs,test]"
 ### 1. Dataset Generation
 Generate controlled datasets (e.g., addition) with model statistics.
 ```bash
+# Example generating 441 addition prompts (loads defaults from config.yaml)
 miq generate-dataset --max_value 20 --output_path data/addition_20.jsonl
 ```
 

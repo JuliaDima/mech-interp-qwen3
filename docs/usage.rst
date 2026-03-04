@@ -47,7 +47,7 @@ The ``miq generate-dataset`` command is used to generate synthetic datasets (e.g
 .. code-block:: bash
 
    miq generate-dataset \
-     --model_name Qwen/Qwen2.5-3B-Instruct \
+     --model Qwen/Qwen2.5-3B-Instruct \
      --output_path data/addition_grid.jsonl \
      --sampling_strategy grid \
      --max_value 20 \

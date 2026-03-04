@@ -8,10 +8,57 @@ Scientific Context
 
 Anthropic's research found that while models can explain human-like carry addition in natural language, their internal circuits often resemble **modular arithmetic lookup tables**. This case study reproduction provides the tools to verify these findings on the Qwen3-4B model.
 
+.. important::
+   **Teacher Forcing is NOT Used in Circuit Discovery**
+
+   The carry discovery experiments use:
+
+   - **Gradient-based attribution**: Computing which features contribute to the output logit
+   - **Causal interventions**: Activation patching and feature inhibition to test causality
+
+   Neither technique requires teacher forcing. All forward passes use only the prompt
+   (e.g., ``"calc: 36+59="``) without ground-truth answer tokens. Attribution is computed
+   from the logit of the correct answer token, not from generating multiple tokens.
+
+   Teacher forcing is available separately in the ``dataset_generation`` module for
+   exploratory behavioral analysis only.
+
 Experimental Protocol
 ---------------------
 
-The reproduction consists of four distinct phases, orchestrated by the ``experiments/addition/run.py`` script.
+The reproduction consists of five distinct phases, orchestrated by the ``experiments/addition/run.py`` script.
+
+**Best Practice**: Always run the accuracy sweep first to verify the model actually solves the task!
+
+0. Accuracy Sweep (RECOMMENDED FIRST)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Before attempting circuit discovery, verify that the model genuinely solves addition on your
+chosen prompt format. This phase:
+
+1. **Checks tokenization**: Verifies how answers split into tokens (e.g., "95" → ["9","5"] or ["95"])
+2. **Runs accuracy sweep**: Tests greedy decoding on all ``calc: a+b=`` prompts for a,b ∈ [0,99]
+3. **Filters verified prompts**: Selects only prompts where model's argmax matches ground truth
+
+.. code-block:: bash
+
+   python experiments/addition/accuracy_sweep.py --all --quick
+
+**What to look for**:
+
+- **High accuracy (>80%)**: Model solves the task, proceed with circuit discovery
+- **Low accuracy (<80%)**: Change prompt format (spacing, few-shot, "Answer:", etc.) before analyzing circuits
+- **Tokenization issues**: Multi-token answers may require special handling
+
+**Output**:
+- ``tokenization.json``: How each answer tokenizes
+- ``accuracy_sweep.json``: Detailed results for all prompts
+- ``verified_prompts.txt``: List of prompts where model is correct (use for downstream analysis)
+
+.. important::
+   **Why this matters**: If the model doesn't perform carry addition, there's no carry circuit
+   to discover. You should only analyze circuits on prompts where the model actually solves
+   the task (conditioning on correct cases).
 
 1. Prompt Suite Generation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -43,6 +90,13 @@ For every feature $f$ in a transcoder, we generate a 100×100 heatmap where the 
 
 We build a pruned computational graph for a specific focus case (default: ``36+59=95``). The graph attributes influence from the output logit back through transcoder features to the input.
 
+**How it works (without teacher forcing)**:
+
+1. Run a single forward pass on ``"calc: 36+59="`` (prompt only, no answer)
+2. Compute gradients with respect to ``logits[-1, token_id_for_"9"]`` (the correct first digit)
+3. Trace attributions backward through transcoder features to identify which features contribute to the output
+4. Build a graph showing feature-to-feature influence
+
 **Supernode Proposal**: The system automatically groups features into "supernodes" based on their activation patterns and attribution scores, matching the "ones digit lookup", "tens carry", etc., labels from Anthropic's work.
 
 .. code-block:: bash
@@ -53,6 +107,16 @@ We build a pruned computational graph for a specific focus case (default: ``36+5
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 To prove a feature is truly part of a circuit, we perform **constrained patching**. We clamp the activations to a "perturbed" run (e.g., ``36+60=``) up to an intervention layer, then inhibit specific features and measure the effect on the final logit.
+
+**Causal intervention methodology (not teacher forcing)**:
+
+1. Run perturbed prompt ``"calc: 36+60="`` and cache activations at each layer
+2. Run clean prompt ``"calc: 36+59="`` but replace activations at early layers with those from the perturbed run
+3. Inhibit (zero out) specific features at the intervention layer
+4. Measure change in the output logit for token ``"9"``
+
+This tests **causality**: if inhibiting a feature changes the output, that feature is causally important.
+No ground-truth answer tokens are provided to the model—we only measure changes in logits.
 
 .. code-block:: bash
 
@@ -83,6 +147,34 @@ Faithfulness across Formats
 ---------------------------
 
 The module compares the "structured" circuit (``calc: 36+59=``) with "natural language" variants (``What is 36+59? Answer:``). This tests whether the same internal circuit is reused regardless of the input surface format.
+
+Recommended Workflow
+--------------------
+
+Follow these steps for robust circuit discovery:
+
+.. code-block:: bash
+
+   # Step 0: ALWAYS start with accuracy sweep
+   python experiments/addition/accuracy_sweep.py --all --quick
+
+   # Check the results:
+   # - If accuracy > 80%: proceed to next steps
+   # - If accuracy < 80%: modify prompt format and re-run accuracy sweep
+
+   # Step 1-4: Run full circuit discovery pipeline
+   python experiments/addition/run.py --all
+
+   # Or run individual phases:
+   python experiments/addition/run.py --make-prompts
+   python experiments/addition/run.py --operand-plots
+   python experiments/addition/run.py --graph
+   python experiments/addition/run.py --intervene
+
+**Filtering to verified prompts**: After running the accuracy sweep, you can use the
+``verified_prompts.txt`` file to restrict your analysis to only prompts where the model
+is correct. This ensures you're discovering circuits for successful computation, not
+error modes.
 
 Usage Guide
 -----------

@@ -17,3 +17,6 @@ visualizations
 data
 VISUALIZATION_GUIDE.md
 VISUALIZATION_SUMMARY.md
+experiments/addition/PERFORMANCE_NOTES.md
+experiments/addition/README_ACCURACY_SWEEP.md
+experiments/addition/USAGE_GUIDE.md

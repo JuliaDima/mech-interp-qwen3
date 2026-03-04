@@ -17,8 +17,22 @@ The dataset generation pipeline is a production-quality tool for generating cont
     - Per-token logits and probabilities.
     - Top-k predictions (defaults to k=10).
     - Proper position alignment for causal decoding models.
-4. **Accuracy Validation**: Optional greedy generation to verify model performance on the task.
-5. **Advanced Visualizations**: 6 publication-quality figures for behavioral analysis.
+4. **Accuracy Validation**: Mandatory greedy generation to verify model performance on the task.
+5. **Batched Processing**: High-throughput generation using optimized batches.
+
+.. important::
+   **Teacher forcing is used ONLY for preliminary behavioral analysis and visualization, NOT for circuit discovery.**
+
+   The actual carry discovery experiments (in ``experiments/addition/``) use **causal interventions**
+   (activation patching) and **gradient-based attribution**, neither of which require teacher forcing.
+
+   Teacher forcing helps you:
+
+   - Understand which examples are difficult for the model
+   - Visualize behavioral patterns across carry types
+   - Generate hypotheses before diving into circuit analysis
+
+   But all circuit discovery work uses standard forward passes with attribution/intervention techniques.
 
 Architecture
 ------------
@@ -41,11 +55,12 @@ Generate a basic addition dataset:
 .. code-block:: bash
 
    python -m mechinterp_qwen3.dataset_generation \
-     --model_name Qwen/Qwen2.5-3B-Instruct \
+     --model Qwen/Qwen2.5-3B-Instruct \
      --output_path data/addition_grid.jsonl \
      --sampling_strategy grid \
      --max_value 20 \
      --templates T0 T1 T2 \
+     --batch_size 32 \
      --seed 42
 
 Visualize the results:
@@ -86,7 +101,7 @@ Generates all possible (a, b) pairs over [0..N] × [0..N].
 .. code-block:: bash
 
    python -m mechinterp_qwen3.dataset_generation \
-     --model_name Qwen/Qwen2.5-3B-Instruct \
+     --model Qwen/Qwen2.5-3B-Instruct \
      --output_path data/addition_grid_20.jsonl \
      --sampling_strategy grid \
      --max_value 20 \
@@ -109,13 +124,14 @@ Samples by carry patterns to ensure balanced representation:
 .. code-block:: bash
 
    python -m mechinterp_qwen3.dataset_generation \
-     --model_name Qwen/Qwen2.5-3B-Instruct \
+     --model Qwen/Qwen2.5-3B-Instruct \
      --output_path data/addition_stratified.jsonl \
      --sampling_strategy stratified \
      --max_value 100 \
      --templates T0 \
      --stratified_n_per_category 200 \
      --stratified_uniform_remainder 100 \
+     --batch_size 32 \
      --seed 42
 
 **Output**: ~700 unique pairs (200 per carry category + 100 random)
@@ -130,18 +146,27 @@ Pure random sampling with specified sample count.
 .. code-block:: bash
 
    python -m mechinterp_qwen3.dataset_generation \
-     --model_name Qwen/Qwen2.5-3B-Instruct \
+     --model Qwen/Qwen2.5-3B-Instruct \
      --output_path data/addition_random.jsonl \
      --sampling_strategy random \
      --max_value 1000 \
      --n_samples 500 \
      --templates T1 \
+     --batch_size 64 \
      --seed 42
 
 **Output**: 500 random pairs from [0..1000] × [0..1000]
 
 Teacher-Forced Statistics
 -------------------------
+
+.. note::
+   **Purpose of Teacher Forcing**: This section describes teacher-forced statistics used
+   for **exploratory data analysis only**. These statistics help identify interesting examples
+   and behavioral patterns but are **not used in circuit discovery**.
+
+   The circuit discovery experiments (``experiments/addition/``) use gradient-based attribution
+   and causal interventions, which do not require teacher forcing.
 
 For each prompt-answer pair, the system computes per-position statistics using a single forward pass:
 
@@ -153,6 +178,10 @@ Process
 3. Run single forward pass (no autoregressive generation)
 4. Extract logits at each position
 5. Compute statistics for correct token at each position
+
+**Why teacher forcing for visualization?** Teacher forcing allows you to measure the difficulty
+of each output position *independently*, isolating whether errors come from a specific digit
+position (e.g., tens vs. ones) rather than error accumulation from previous tokens.
 
 Output Format
 ~~~~~~~~~~~~~
@@ -440,13 +469,13 @@ Complete options for dataset generation:
 .. code-block:: bash
 
    python -m mechinterp_qwen3.dataset_generation \
-     --model_name Qwen/Qwen2.5-3B-Instruct \
+     --model Qwen/Qwen2.5-3B-Instruct \
      --output_path data/dataset.jsonl \
      --sampling_strategy {grid,stratified,random} \
      --max_value 100 \
      --templates T0 T1 T2 \
      --top_k 10 \
-     --enable_greedy_generation \
+     --batch_size 32 \
      --seed 42 \
      --dtype {float32,float16,bfloat16} \
      --device {cuda,cpu}
@@ -455,7 +484,7 @@ Key Parameters
 ~~~~~~~~~~~~~~
 
 **Model Configuration**:
-  - ``--model_name``: HuggingFace model name (default: Qwen/Qwen2.5-3B-Instruct)
+  - ``--model``: HuggingFace model name (default: Qwen/Qwen2.5-3B-Instruct)
   - ``--device``: Device (cuda/cpu, auto-detects if not specified)
   - ``--dtype``: Model precision (float32/float16/bfloat16)
 
@@ -468,7 +497,7 @@ Key Parameters
 
 **Statistics**:
   - ``--top_k``: Number of top-k tokens to store (default: 10)
-  - ``--enable_greedy_generation``: Enable greedy decoding
+  - ``--batch_size``: Batch size for generation (default: 32)
   - ``--max_gen_tokens``: Max tokens for greedy generation
 
 **Reproducibility**:
@@ -487,11 +516,11 @@ Memory
 Throughput
 ~~~~~~~~~~
 
-Approximate on A100 GPU:
+The system uses batched generation for high throughput. Approximate on A100 GPU:
 
-- Small grid (N=20): 1-2 minutes for 441 pairs × 3 templates
-- Medium grid (N=100): 30-60 minutes for 10,201 pairs
-- Stratified (1000 pairs): 5-10 minutes
+- Small grid (N=20): <1 minute for 441 pairs × 3 templates
+- Medium grid (N=100): 5-10 minutes for 10,201 pairs (with ``batch_size=128``)
+- Stratified (1000 pairs): 1-2 minutes
 
 Deterministic Runs
 ------------------
