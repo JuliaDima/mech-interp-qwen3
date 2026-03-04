@@ -10,7 +10,7 @@
 #
 # Examples:
 #   sbatch scripts/sbatch_run.sh miq generate-dataset --output_path results.jsonl
-#   sbatch scripts/sbatch_run.sh miq attribute -t mwhanna/qwen3-4b-transcoders -p "calc: 1+1="
+#   sbatch scripts/sbatch_run.sh miq attribute -p "calc: 1+1="
 #   sbatch scripts/sbatch_run.sh python experiments/addition/run.py --all
 #
 # To use a custom config file:
@@ -27,9 +27,13 @@
 
 set -euo pipefail
 
-# ---- Repo root (directory containing this script's parent) ----
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# ---- Repo root ----
+if [ -n "${SLURM_SUBMIT_DIR:-}" ]; then
+  REPO_ROOT="${SLURM_SUBMIT_DIR}"
+else
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+fi
 cd "${REPO_ROOT}"
 
 echo "=========================================="

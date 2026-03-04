@@ -1,5 +1,5 @@
-API Reference
-=============
+mechinterp_qwen3
+================
 
 .. toctree::
    :maxdepth: 4

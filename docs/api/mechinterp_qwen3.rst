@@ -7,87 +7,33 @@ Subpackages
 .. toctree::
    :maxdepth: 4
 
+   mechinterp_qwen3.dataset_generation
    mechinterp_qwen3.transcoder
+   mechinterp_qwen3.utils
 
 Submodules
 ----------
 
-mechinterp\_qwen3.attribution\_graph module
+mechinterp\_qwen3.attribution\_model module
 -------------------------------------------
 
-.. automodule:: mechinterp_qwen3.attribution_graph
+.. automodule:: mechinterp_qwen3.attribution_model
    :members:
    :show-inheritance:
    :undoc-members:
 
-mechinterp\_qwen3.build\_attribution\_graph module
---------------------------------------------------
-
-.. automodule:: mechinterp_qwen3.build_attribution_graph
-   :members:
-   :show-inheritance:
-   :undoc-members:
-
-mechinterp\_qwen3.build\_prompts module
----------------------------------------
-
-.. automodule:: mechinterp_qwen3.build_prompts
-   :members:
-   :show-inheritance:
-   :undoc-members:
-
-mechinterp\_qwen3.compute\_attribution module
----------------------------------------------
-
-.. automodule:: mechinterp_qwen3.compute_attribution
-   :members:
-   :show-inheritance:
-   :undoc-members:
-
-mechinterp\_qwen3.forward\_with\_sae module
--------------------------------------------
-
-.. automodule:: mechinterp_qwen3.forward_with_sae
-   :members:
-   :show-inheritance:
-   :undoc-members:
-
-mechinterp\_qwen3.hooks module
+mechinterp\_qwen3.graph module
 ------------------------------
 
-.. automodule:: mechinterp_qwen3.hooks
+.. automodule:: mechinterp_qwen3.graph
    :members:
    :show-inheritance:
    :undoc-members:
 
-mechinterp\_qwen3.io module
----------------------------
-
-.. automodule:: mechinterp_qwen3.io
-   :members:
-   :show-inheritance:
-   :undoc-members:
-
-mechinterp\_qwen3.load\_transcoder module
+mechinterp\_qwen3.run\_attribution module
 -----------------------------------------
 
-.. automodule:: mechinterp_qwen3.load_transcoder
-   :members:
-   :show-inheritance:
-   :undoc-members:
-
-mechinterp\_qwen3.run\_baseline module
---------------------------------------
-
-.. automodule:: mechinterp_qwen3.run_baseline
-   :members:
-   :show-inheritance:
-   :undoc-members:
-
-mechinterp\_qwen3.salient\_logits module
-----------------------------------------
-
-.. automodule:: mechinterp_qwen3.salient_logits
+.. automodule:: mechinterp_qwen3.run_attribution
    :members:
    :show-inheritance:
    :undoc-members:
