@@ -354,9 +354,9 @@ class AttributionModel(HookedTransformer):
             return tokens.to(self.cfg.device)
 
         candidate_bos_token_ids = [
-            self.tokenizer.bos_token_id,  # type: ignore
-            self.tokenizer.pad_token_id,  # type: ignore
-            self.tokenizer.eos_token_id,  # type: ignore
+            self.tokenizer.pad_token_id,  # Prefer PAD as it's the standard attention sink for Qwen
+            self.tokenizer.bos_token_id,
+            self.tokenizer.eos_token_id,
         ]
         candidate_bos_token_ids += self.tokenizer.all_special_ids  # type: ignore
 
