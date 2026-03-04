@@ -74,7 +74,7 @@ def _run_attribution(
     if verbose:
         print("Phase 0: Precomputing activations and vectors")
     phase_start = time.time()
-    input_ids = model.ensure_tokenized(prompt)
+    input_ids = model.tokenize_qwen_input(prompt)
 
     ctx = model.setup_attribution(input_ids)
     activation_matrix = ctx.activation_matrix

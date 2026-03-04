@@ -333,7 +333,7 @@ class AttributionModel(HookedTransformer):
         finally:
             self.cfg.output_logits_soft_cap = current_softcap
 
-    def ensure_tokenized(self, prompt: str | torch.Tensor | list[int]) -> torch.Tensor:
+    def tokenize_qwen_input(self, prompt: str | torch.Tensor | list[int]) -> torch.Tensor:
         """Convert prompt to 1-D tensor of token ids with proper special token handling."""
 
         if isinstance(prompt, str):
@@ -373,7 +373,7 @@ class AttributionModel(HookedTransformer):
 
     @torch.no_grad()
     def setup_attribution(self, inputs: str | torch.Tensor):
-        tokens = self.ensure_tokenized(inputs) if isinstance(inputs, str) else inputs.squeeze()
+        tokens = self.tokenize_qwen_input(inputs) if isinstance(inputs, str) else inputs.squeeze()
 
         assert isinstance(tokens, torch.Tensor), "Tokens must be a tensor"
         assert tokens.ndim == 1, "Tokens must be a 1D tensor"

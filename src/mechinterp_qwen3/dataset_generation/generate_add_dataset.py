@@ -19,8 +19,11 @@ import torch
 from tqdm import tqdm
 from transformer_lens import HookedTransformer
 
-from ..utils.inference_utils import batched_greedy_generate
+from ..utils.inference_utils import batched_greedy_generate, silence_libraries
 from ..utils_seed import seed_everything
+
+# Silence Hugging Face Hub downloads and Transformers loading progress
+silence_libraries()
 
 
 class TemplateID(StrEnum):
@@ -29,12 +32,20 @@ class TemplateID(StrEnum):
     T0 = "T0"
     T1 = "T1"
     T2 = "T2"
+    T3 = "T3"
+    T4 = "T4"
+    T5 = "T5"
+    T6 = "T6"
 
 
 TEMPLATES = {
     TemplateID.T0: "calc: {a}+{b}=",
     TemplateID.T1: "calc: {a} + {b} =",
     TemplateID.T2: "What is {a}+{b}? Answer:",
+    TemplateID.T3: "calc: {a}+{b}=\n",
+    TemplateID.T4: "calc: {a}+{b}=\nAnswer:",
+    TemplateID.T5: "<|im_start|>user\nCalculate {a}+{b}<|im_end|>\n<|im_start|>assistant\n",
+    TemplateID.T6: "Answer the following addition problem: {a} + {b} =",
 }
 
 
@@ -258,10 +269,14 @@ def score_teacher_forced(
     Returns:
         Tuple of (prompt_token_ids, answer_token_ids, answer_token_strs, per_pos_stats)
     """
-    # Tokenize prompt and answer separately
-    prompt_tokens = model.tokenizer(
-        prompt_str, return_tensors="pt", add_special_tokens=False
-    ).input_ids.squeeze(0)
+    # Tokenize prompt and answer
+    if hasattr(model, "tokenize_qwen_input"):
+        # tokenize_qwen_input adds the sink token
+        prompt_tokens = model.tokenize_qwen_input(prompt_str).cpu()
+    else:
+        prompt_tokens = model.tokenizer(
+            prompt_str, return_tensors="pt", add_special_tokens=False
+        ).input_ids.squeeze(0)
 
     answer_tokens = model.tokenizer(
         true_answer_str, return_tensors="pt", add_special_tokens=False

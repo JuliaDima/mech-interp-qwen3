@@ -1,7 +1,28 @@
 """Utilities for batched inference, tokenization, and generation."""
 
+from dataclasses import dataclass
+
 import torch
+from huggingface_hub.utils import disable_progress_bars as disable_hf_progress_bars
 from transformer_lens import HookedTransformer
+from transformers.utils.logging import disable_progress_bar as disable_transformers_progress_bars
+
+
+@dataclass
+class TokenizationInfo:
+    """Information about how an answer tokenizes."""
+
+    answer_str: str
+    token_ids: list[int]
+    token_strs: list[str]
+    n_tokens: int
+    is_single_token: bool
+
+
+def silence_libraries():
+    """Disable noisy progress bars from Hugging Face and Transformers."""
+    disable_hf_progress_bars()
+    disable_transformers_progress_bars()
 
 
 def tokenize_and_pad(
@@ -22,7 +43,10 @@ def tokenize_and_pad(
     if device is None:
         device = model.cfg.device
 
-    tokens_list = [model.to_tokens(p, prepend_bos=True).squeeze(0) for p in prompts]
+    if hasattr(model, "tokenize_qwen_input"):
+        tokens_list = [model.tokenize_qwen_input(p).squeeze(0) for p in prompts]
+    else:
+        tokens_list = [model.to_tokens(p, prepend_bos=True).squeeze(0) for p in prompts]
     lengths = [len(t) for t in tokens_list]
     max_len = max(lengths)
 

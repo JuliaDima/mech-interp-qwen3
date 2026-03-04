@@ -35,6 +35,15 @@ from typing import TYPE_CHECKING
 import torch
 from tqdm import tqdm
 
+from mechinterp_qwen3.utils.inference_utils import (
+    TokenizationInfo,
+    silence_libraries,
+    tokenize_and_pad,
+)
+
+# Silence Hugging Face Hub downloads and Transformers loading progress
+silence_libraries()
+
 # Ensure repo root is on sys.path so relative imports work when run as script
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_REPO_ROOT) not in sys.path:
@@ -48,7 +57,6 @@ from mechinterp_qwen3.utils.config_utils import (  # noqa: E402
     print_config,
     set_parser_defaults_from_config,
 )
-from mechinterp_qwen3.utils.inference_utils import tokenize_and_pad  # noqa: E402
 
 if TYPE_CHECKING:
     from mechinterp_qwen3.attribution_model import AttributionModel
@@ -64,17 +72,6 @@ log = logging.getLogger("addition.accuracy_sweep")
 # ---------------------------------------------------------------------------
 # Data structures
 # ---------------------------------------------------------------------------
-
-
-@dataclass
-class TokenizationInfo:
-    """Information about how an answer tokenizes."""
-
-    answer_str: str
-    token_ids: list[int]
-    token_strs: list[str]
-    n_tokens: int
-    is_single_token: bool
 
 
 @dataclass
@@ -277,6 +274,10 @@ def run_accuracy_sweep(
     n_correct = sum(1 for r in results if r.is_correct)
     accuracy = n_correct / len(results) if results else 0.0
 
+    # Failure mode analysis
+    incorrect = [r for r in results if not r.is_correct]
+    failure_modes = Counter(r.predicted_str for r in incorrect)
+
     log.info(
         "Accuracy sweep complete: %d/%d correct (%.2f%%)",
         n_correct,
@@ -292,6 +293,11 @@ def run_accuracy_sweep(
     print(f"Correct predictions:  {n_correct} ({accuracy:.2%})")
     print(f"Incorrect predictions: {len(results) - n_correct}")
 
+    if incorrect:
+        print("\nFailure mode breakdown (top 10):")
+        for mode, count in failure_modes.most_common(10):
+            print(f"  {mode!r:15s}: {count:5d} ({count/len(results):.2%})")
+
     if n_correct > 0:
         correct_margins = [r.margin for r in results if r.is_correct]
         print("\nMargin statistics (correct cases):")
@@ -302,9 +308,7 @@ def run_accuracy_sweep(
 
     # Show failure cases
     if n_correct < len(results):
-        incorrect = [r for r in results if not r.is_correct]
-        print(f"\nFailure analysis ({len(incorrect)} cases):")
-        print("  Sample failures:")
+        print(f"\nSample failures ({len(incorrect)} total):")
         for r in incorrect[:10]:
             print(
                 f"    {r.prompt:20s} → expected '{r.answer_str}', "
@@ -320,6 +324,7 @@ def run_accuracy_sweep(
                     "n_prompts": len(results),
                     "n_correct": n_correct,
                     "accuracy": accuracy,
+                    "failure_modes": {k: v for k, v in failure_modes.items()},
                 },
                 "results": [
                     {

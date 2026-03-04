@@ -12,6 +12,7 @@ This project provides an independent mechanistic interpretability pipeline speci
    usage
    configuration
    dataset_generation
+   observations
    methodology
    api/modules
 
