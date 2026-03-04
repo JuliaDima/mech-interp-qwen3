@@ -6,15 +6,32 @@ This guide covers the complete workflow for generating addition datasets and vis
 Overview
 --------
 
-The dataset generation pipeline provides:
+The dataset generation pipeline is a production-quality tool for generating controlled datasets for mechanistic interpretability. It allows researchers to:
 
-1. **Configurable prompt templates** for arithmetic tasks
-2. **Multiple sampling strategies** (grid, stratified by carry patterns, random)
-3. **Teacher-forced statistics** (per-token logits, probabilities, top-k predictions)
-4. **Optional greedy generation** for accuracy validation
-5. **Advanced visualizations** for hypothesis generation
+1. **Configurable prompt templates** for arithmetic tasks (T0, T1, T2).
+2. **Multiple sampling strategies**:
+    - **Grid Sampling**: Complete coverage for small ranges (N ≤ 100).
+    - **Stratified Sampling**: Balanced representation of carry patterns (no-carry, single-carry, multi-carry).
+    - **Random Sampling**: Quick experiments for large ranges.
+3. **Teacher-forced statistics**:
+    - Per-token logits and probabilities.
+    - Top-k predictions (defaults to k=10).
+    - Proper position alignment for causal decoding models.
+4. **Accuracy Validation**: Optional greedy generation to verify model performance on the task.
+5. **Advanced Visualizations**: 6 publication-quality figures for behavioral analysis.
 
-This workflow follows Anthropic's mechanistic interpretability methodology, adapted for the Qwen3-4B-Instruct model.
+Architecture
+------------
+
+The system is split into two core modules:
+
+*   **`mechinterp_qwen3.dataset_generation.dataset_generation`**: Contains the core logic for sampling, prompt building, and scoring.
+*   **`mechinterp_qwen3.dataset_generation.__main__`**: The CLI entrypoint utilizing `argparse`.
+
+Key functions include:
+    - ``generate_pairs()``: Samples (a, b) pairs.
+    - ``score_teacher_forced()``: Computes per-token statistics.
+    - ``greedy_generate()``: Validates model output.
 
 Quick Start
 -----------

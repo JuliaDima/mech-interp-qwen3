@@ -2,9 +2,10 @@
 """CLI entrypoint for the Anthropic addition case study reproduction.
 
 Run end-to-end:
-  python experiments/addition/run.py --all \\
-      --model Qwen/Qwen3-4B \\
-      --transcoder_set mwhanna/qwen3-4b-transcoders
+  python experiments/addition/run.py --config experiments/addition/config.yaml --all
+
+  # Or override individual values:
+  python experiments/addition/run.py --config experiments/addition/config.yaml --all --dtype float32
 
 Or run individual phases:
   --make-prompts   Write prompt catalogue to run dir (no model needed)
@@ -30,6 +31,12 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
+
+from mechinterp_qwen3.utils.config_utils import (  # noqa: E402
+    add_config_args,
+    load_config,
+    set_parser_defaults_from_config,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -151,6 +158,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Backward-pass batch size for attribution",
     )
 
+    # Config file
+    add_config_args(p)
+
     return p
 
 
@@ -189,6 +199,7 @@ def _write_metadata(run_dir: Path, args: argparse.Namespace) -> None:
         "model_id": args.model,
         "transcoder_id": args.transcoder_set,
         "dtype": args.dtype,
+        "config_file": args.config,
         "timestamp": datetime.utcnow().isoformat() + "Z",
         "config": vars(args),
     }
@@ -349,8 +360,31 @@ def phase_intervene(run_dir: Path, model, args: argparse.Namespace, graph=None) 
 
 def main() -> None:
     parser = build_parser()
-    args = parser.parse_args()
 
+    pre, _ = parser.parse_known_args()
+
+    # Check for positional config (e.g. "python run.py config.yaml --all")
+    pos_config = None
+    if len(sys.argv) > 1 and sys.argv[1].endswith(".yaml") and not sys.argv[1].startswith("-"):
+        pos_config = sys.argv[1]
+        sys.argv.pop(1)
+
+    config_path = pre.config or pos_config
+    config = load_config(config_path)
+
+    # Apply config defaults, prioritizing addition_experiment section
+    set_parser_defaults_from_config(parser, config, section="addition_experiment")
+
+    args = parser.parse_args()
+    # Store the resolved config path so metadata.json captures it
+    if args.config is None and config_path:
+        args.config = config_path
+
+    log.info("=" * 60)
+    log.info("Effective Run Configuration:")
+    for k, v in sorted(vars(args).items()):
+        log.info(f"  {k:20}: {v}")
+    log.info("=" * 60)
     # Determine which phases to run
     run_all = args.all
     do_prompts = run_all or args.make_prompts

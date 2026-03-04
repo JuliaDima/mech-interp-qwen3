@@ -10,6 +10,7 @@ This project provides an independent mechanistic interpretability pipeline speci
    :caption: Getting Started:
 
    usage
+   configuration
    dataset_generation
    methodology
    api/modules
@@ -19,6 +20,7 @@ This project provides an independent mechanistic interpretability pipeline speci
    :caption: Experiments:
 
    addition_experiment
+   carry_discovery
 
 Features
 --------

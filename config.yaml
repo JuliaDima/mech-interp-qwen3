@@ -1,0 +1,48 @@
+# Project-wide configuration for mechinterp-qwen3.
+#
+# This file provides global defaults for all scripts and CLI entry points.
+# Priority: Hardcoded Fallback < config.yaml < CLI Flags
+
+# --- Shared Defaults ---
+seed: 42
+dtype: "bfloat16"
+device: null
+batch_size: 256
+verbose: false
+
+# --- Model & Transcoder ---
+model: "Qwen/Qwen3-4B"
+transcoder_set: "mwhanna/qwen3-4b-transcoders"
+lazy_encoder: false
+lazy_decoder: true
+
+# --- Dataset Generation ---
+# Specific to `miq generate-dataset`
+generate_dataset:
+  templates: ["T0"]
+  sampling_strategy: "grid"
+  max_value: 20
+  top_k: 10
+  enable_greedy_generation: false
+  max_gen_tokens: 10
+  output_path: "data/addition_dataset.jsonl"
+
+# --- Attribution & Graph ---
+# Shared between `miq attribute` and `experiments/addition/run.py`
+max_n_logits: 10
+desired_logit_prob: 0.95
+max_feature_nodes: 5000
+node_threshold: 0.8
+edge_threshold: 0.98
+offload: null
+graph_output_path: "graphs/attribution_graph.pt"
+graph_file_dir: "graphs/json/"
+
+# --- Addition Experiment Specifics ---
+# Specific to `experiments/addition/run.py`
+addition_experiment:
+  out_root: "runs/addition"
+  top_k_features: 50
+  perturbed_prompt: "calc: 36+60="
+  alpha: 0.0
+  top_n_groups: 4

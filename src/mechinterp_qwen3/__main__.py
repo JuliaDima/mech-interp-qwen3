@@ -1,6 +1,16 @@
 import argparse
+import logging
 import os
+import sys
 import warnings
+
+log = logging.getLogger(__name__)
+
+from mechinterp_qwen3.utils.config_utils import (  # noqa: E402
+    add_config_args,
+    load_config,
+    set_parser_defaults_from_config,
+)
 
 
 def main():
@@ -9,9 +19,12 @@ def main():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
-    # Create subparsers
+    # Subparsers
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
     subparsers.required = True
+
+    # Add hidden config arg to parent for pre-parsing
+    add_config_args(parser)
 
     # Dataset generation subcommand
     gen_parser = subparsers.add_parser(
@@ -228,6 +241,42 @@ def main():
         type=str,
         help="Path to save graph statistics (nodes, edges, layers, etc.).",
     )
+
+    # --- Config Loading ---
+    # We pre-parse to find if the user specified a config file
+    # or if we should use the root project config.
+    # Note: we use parse_known_args to avoid failing on subcommand args
+    pre_args, _ = parser.parse_known_args()
+
+    # Support positional config like "miq my_config.yaml attribute ..."
+    pos_config = None
+    if len(sys.argv) > 1 and sys.argv[1].endswith(".yaml") and not sys.argv[1].startswith("-"):
+        pos_config = sys.argv[1]
+        # We don't pop it yet because we need to know the command
+
+    config_file = pre_args.config or pos_config
+    config = load_config(config_file)
+    if config:
+        log.info(
+            "Project configuration loaded (from %s or root config.yaml)", config_file or "root"
+        )
+
+    # Apply config defaults to subparsers
+    if "generate-dataset" in subparsers.choices:
+        set_parser_defaults_from_config(
+            subparsers.choices["generate-dataset"], config, section="generate_dataset"
+        )
+    if "attribute" in subparsers.choices:
+        # Attribution defaults are now mostly flat at top-level,
+        # but we check the section too if it exists.
+        set_parser_defaults_from_config(
+            subparsers.choices["attribute"], config, section="attribution"
+        )
+
+    # Final parse
+    # If we had a positional config, we now need to handle it
+    if pos_config and sys.argv[1] == pos_config:
+        sys.argv.pop(1)
 
     args = parser.parse_args()
 
