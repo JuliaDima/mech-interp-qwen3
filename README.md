@@ -1,6 +1,7 @@
 # Mechanistic Interpretability of Qwen3-4B-Instruct
 
 **Documentation**: [https://eid23-ab47b6.uniofcam.dev/](https://eid23-ab47b6.uniofcam.dev/)
+**Visualizing the attribution graph**: [https://mechinterp-viz-94c364.uniofcam.dev/](https://mechinterp-viz-94c364.uniofcam.dev/)
 
 [![pipeline status](https://gitlab.developers.cam.ac.uk/phy/data-intensive-science-mphil/assessments/projects/eid23/badges/main/pipeline.svg)](https://gitlab.developers.cam.ac.uk/phy/data-intensive-science-mphil/assessments/projects/eid23/-/pipelines) [![coverage report](https://gitlab.developers.cam.ac.uk/phy/data-intensive-science-mphil/assessments/projects/eid23/badges/main/coverage.svg)](https://gitlab.developers.cam.ac.uk/phy/data-intensive-science-mphil/assessments/projects/eid23/-/jobs)
 
@@ -49,7 +50,13 @@ For in-depth guides, visit the [Documentation Site](https://eid23-ab47b6.uniofca
 - `experiments/addition/`: Specialized module for the Anthropic reproduction case study.
 - `docs/`: Sphinx site source files.
 - `scripts/`: Production sbatch and utility scripts.
-- `config.yaml`: Centralized configuration for all CLI and script runs.
+
+## ⚙️ Configuration System
+
+The project uses a centralized configuration system centered around the root **[config.yaml](config.yaml)** file:
+
+- **Single Source of Truth**: This file contains all project-wide defaults (architecture, batch sizes, seeds, etc.).
+- **Automatic Usage**: All `miq` CLI commands and scripts (including `sbatch_run.sh`) load this file by default.
+- **Overrides**: You can override any value by passing an explicit argument (e.g., `--dtype bfloat16`) or by providing a custom YAML file via the `--config` flag.
 
 ---
-*Visualization tools can be found at: [https://mechinterp-viz-94c364.uniofcam.dev/](https://mechinterp-viz-94c364.uniofcam.dev/)*
