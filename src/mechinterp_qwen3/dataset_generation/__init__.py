@@ -1,4 +1,4 @@
-from .dataset_generation import (
+from .generate_add_dataset import (
     DatasetConfig,
     SamplingStrategy,
     TemplateID,

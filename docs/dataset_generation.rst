@@ -25,7 +25,7 @@ Architecture
 
 The system is split into two core modules:
 
-*   **`mechinterp_qwen3.dataset_generation.dataset_generation`**: Contains the core logic for sampling, prompt building, and scoring.
+*   **`mechinterp_qwen3.dataset_generation.generate_add_dataset`**: Contains the core logic for sampling, prompt building, and scoring.
 *   **`mechinterp_qwen3.dataset_generation.__main__`**: The CLI entrypoint utilizing `argparse`.
 
 Key functions include:

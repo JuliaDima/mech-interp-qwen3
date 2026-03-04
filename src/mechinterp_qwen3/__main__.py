@@ -305,7 +305,7 @@ def run_dataset_generation(args):
     """Bridge function for dataset generation."""
     from pathlib import Path
 
-    from .dataset_generation import (
+    from .dataset_generation.generate_add_dataset import (
         DatasetConfig,
         SamplingStrategy,
         TemplateID,
@@ -355,7 +355,7 @@ def run_attribution(args, parser):
         warnings.warn(
             (
                 f"You provided --{which_one} but not --{missing_one}. Both are required "
-                "for creating graph files."
+                f"for creating graph files (check your config.yaml or CLI flags)."
             ),
             UserWarning,
             stacklevel=2,

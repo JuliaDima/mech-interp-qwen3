@@ -3,32 +3,32 @@
 
 Example usage:
     # Grid sampling with all templates
-    python -m mechinterp_qwen3.dataset_generation \\
-        --model_name Qwen/Qwen2.5-3B-Instruct \\
-        --output_path data/addition_dataset.jsonl \\
-        --sampling_strategy grid \\
-        --max_value 20 \\
+    python -m mechinterp_qwen3.dataset_generation \
+        --model_name Qwen/Qwen2.5-3B-Instruct \
+        --output_path data/addition_dataset.jsonl \
+        --sampling_strategy grid \
+        --max_value 20 \
         --templates T0 T1 T2
 
     # Stratified sampling with greedy generation
-    python -m mechinterp_qwen3.dataset_generation \\
-        --model_name Qwen/Qwen2.5-3B-Instruct \\
-        --output_path data/addition_stratified.jsonl \\
-        --sampling_strategy stratified \\
-        --max_value 100 \\
-        --templates T0 \\
-        --stratified_n_per_category 50 \\
-        --stratified_uniform_remainder 100 \\
-        --enable_greedy_generation \\
+    python -m mechinterp_qwen3.dataset_generation \
+        --model_name Qwen/Qwen2.5-3B-Instruct \
+        --output_path data/addition_stratified.jsonl \
+        --sampling_strategy stratified \
+        --max_value 100 \
+        --templates T0 \
+        --stratified_n_per_category 50 \
+        --stratified_uniform_remainder 100 \
+        --enable_greedy_generation \
         --seed 42
 
     # Random sampling
-    python -m mechinterp_qwen3.dataset_generation \\
-        --model_name Qwen/Qwen2.5-3B-Instruct \\
-        --output_path data/addition_random.jsonl \\
-        --sampling_strategy random \\
-        --max_value 1000 \\
-        --n_samples 500 \\
+    python -m mechinterp_qwen3.dataset_generation \
+        --model_name Qwen/Qwen2.5-3B-Instruct \
+        --output_path data/addition_random.jsonl \
+        --sampling_strategy random \
+        --max_value 1000 \
+        --n_samples 500 \
         --templates T1
 """
 
@@ -36,7 +36,7 @@ import argparse
 from pathlib import Path
 
 from ..utils.config_utils import print_config
-from .dataset_generation import (
+from .generate_add_dataset import (
     DatasetConfig,
     SamplingStrategy,
     TemplateID,

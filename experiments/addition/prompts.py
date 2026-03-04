@@ -11,7 +11,16 @@ Anthropic used:
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TypedDict
+
+from mechinterp_qwen3.dataset_generation.generate_add_dataset import (
+    DatasetConfig,
+    SamplingStrategy,
+    TemplateID,
+    build_prompt,
+    generate_pairs,
+)
 
 # ---------------------------------------------------------------------------
 # Template
@@ -33,18 +42,27 @@ class CalcEntry(TypedDict):
 
 
 def _build_calc_grid() -> list[CalcEntry]:
-    """Build all 10,000 calc: a+b= prompts for a,b in {0,...,99}."""
+    """Build all 10,000 calc: a+b= prompts for a,b in {0,...,99} using shared logic."""
+    # We use a dummy config to get the grid pairs
+    config = DatasetConfig(
+        model_name="dummy",
+        output_path=Path("dummy.jsonl"),
+        templates=[TemplateID.T0],
+        sampling_strategy=SamplingStrategy.GRID,
+        max_value=99,
+    )
+    pairs = generate_pairs(config)
+
     grid: list[CalcEntry] = []
-    for a in range(100):
-        for b in range(100):
-            grid.append(
-                CalcEntry(
-                    a=a,
-                    b=b,
-                    prompt=CALC_TEMPLATE.format(a=a, b=b),
-                    answer=str(a + b),
-                )
+    for a, b in pairs:
+        grid.append(
+            CalcEntry(
+                a=a,
+                b=b,
+                prompt=build_prompt(TemplateID.T0, a, b),
+                answer=str(a + b),
             )
+        )
     return grid
 
 
