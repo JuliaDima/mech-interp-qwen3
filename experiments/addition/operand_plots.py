@@ -45,7 +45,7 @@ log = logging.getLogger(__name__)
 def _eq_token_position(tokens: torch.Tensor) -> int:
     """Return the index of the final token in the prompt (= sign position).
 
-    For "calc: a+b=" the '=' is always the last token. We assert this to
+    For "calc: a+b= " the '=' is always the last token. We assert this to
     catch tokenisation surprises early.
     """
     # We simply take the last position; see README.md for justification.
@@ -71,7 +71,7 @@ def collect_grid_activations(
 
     For each feature (layer, feat_idx), returns a (100, 100) numpy array
     A[a, b] = activation value of that feature at the '=' position for the
-    prompt "calc: a+b=".
+    prompt "calc: a+b= ".
 
     Args:
         model:         Loaded AttributionModel with transcoders.
@@ -98,7 +98,9 @@ def collect_grid_activations(
     # ------------------------------------------------------------------
     if feature_ids is None:
         log.info("Auto-discovering top-%d features on FOCUS_PROMPT ...", top_k_global)
-        focus_prompt = "calc: 36+59="
+        from .prompts import FOCUS_PROMPT
+
+        focus_prompt = FOCUS_PROMPT
         _, activation_cache = model.get_activations(focus_prompt)
         # activation_cache: (n_layers, n_pos, d_transcoder) dense
         # shape is (n_layers, seq_len, d_transcoder)

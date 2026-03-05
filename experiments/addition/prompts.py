@@ -23,13 +23,6 @@ from experiments.addition.dataset_generation.generate_add_dataset import (
 )
 
 # ---------------------------------------------------------------------------
-# Template
-# ---------------------------------------------------------------------------
-
-CALC_TEMPLATE: str = "calc: {a}+{b}="
-
-
-# ---------------------------------------------------------------------------
 # A. Full grid — calc: a+b= for all a,b in {0,...,99}
 # ---------------------------------------------------------------------------
 
@@ -76,7 +69,7 @@ CALC_GRID: list[CalcEntry] = _build_calc_grid()
 FOCUS_A: int = 36
 FOCUS_B: int = 59
 FOCUS_ANSWER: str = str(FOCUS_A + FOCUS_B)  # "95"
-FOCUS_PROMPT: str = CALC_TEMPLATE.format(a=FOCUS_A, b=FOCUS_B)  # "calc: 36+59="
+FOCUS_PROMPT: str = build_prompt(TemplateID.T0, FOCUS_A, FOCUS_B)  # "calc: 36+59= "
 
 
 # ---------------------------------------------------------------------------

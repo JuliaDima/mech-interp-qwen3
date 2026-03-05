@@ -111,7 +111,7 @@ After running the sweep, check the accuracy:
 **Accuracy < 80%** ⚠️
   **DO NOT proceed!** Change the prompt format first (e.g., try spacing or natural language).
 
-  - Try spacing: ``"calc: 36 + 59 ="``
+  - Try spacing: ``"calc: 36 + 59 = "``
   - Try natural language: ``"What is 36+59? Answer:"``
   - Try few-shot: ``"calc: 12+34=46\ncalc: 36+59="``
   - Try explicit delimiter: ``"36+59=<answer>"``

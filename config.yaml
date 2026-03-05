@@ -44,6 +44,7 @@ slug: "qwen3-4b"
 addition_experiment:
   out_root: "runs/addition"
   top_k_features: 50
-  perturbed_prompt: "calc: 36+60="
+  perturbed_prompt: "calc: 36+60= "
   alpha: 0.0
   top_n_groups: 4
+  batch_size: 64  # Reduced from 256 to avoid OOM with high feature activation count
