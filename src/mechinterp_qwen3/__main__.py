@@ -256,6 +256,94 @@ def main():
         help="Path to save graph statistics (nodes, edges, layers, etc.).",
     )
 
+    # Intervention subcommand
+    int_parser = subparsers.add_parser(
+        "intervene",
+        help="Run constrained patching on a saved attribution graph (addition experiment)",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    int_parser.add_argument(
+        "-g",
+        "--graph_path",
+        help="Path to a .pt graph file saved by `miq attribute`. Required if not in config.",
+    )
+    int_parser.add_argument(
+        "-m",
+        "--model",
+        type=str,
+        default=None,
+        help="HuggingFace model name (inferred from transcoder config if omitted).",
+    )
+    int_parser.add_argument(
+        "-t",
+        "--transcoder_set",
+        help="HuggingFace repo id for the transcoder set. Required if not in config.",
+    )
+    int_parser.add_argument(
+        "-o",
+        "--out_dir",
+        default="runs/addition/interventions",
+        help="Output directory for intervention results.",
+    )
+    int_parser.add_argument(
+        "-p",
+        "--prompt",
+        default=None,
+        help="Clean prompt (default: FOCUS_PROMPT from addition experiment).",
+    )
+    int_parser.add_argument(
+        "--perturbed_prompt",
+        default=None,
+        help="Perturbed prompt for constrained patching (default: calc: 36+60= ).",
+    )
+    int_parser.add_argument(
+        "--node_threshold",
+        type=float,
+        default=0.8,
+        help="Node pruning threshold.",
+    )
+    int_parser.add_argument(
+        "--edge_threshold",
+        type=float,
+        default=0.98,
+        help="Edge pruning threshold.",
+    )
+    int_parser.add_argument(
+        "--alpha",
+        type=float,
+        default=0.0,
+        help="Feature scale factor (0.0 = full inhibition).",
+    )
+    int_parser.add_argument(
+        "--top_n_groups",
+        type=int,
+        default=4,
+        help="Number of supernode groups to test.",
+    )
+    int_parser.add_argument(
+        "--dtype",
+        type=str,
+        choices=["float32", "bfloat16", "float16"],
+        default="float32",
+        help="Model dtype.",
+    )
+    int_parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility.")
+    int_parser.add_argument(
+        "--nondeterministic",
+        action="store_true",
+        help="Disable deterministic algorithms.",
+    )
+    int_parser.add_argument("--verbose", action="store_true", help="Display progress information.")
+
+    # Plot interventions subcommand
+    plot_int_parser = subparsers.add_parser(
+        "plot-interventions",
+        help="Generate standard visualizations for intervention results JSON",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    plot_int_parser.add_argument("input_json", help="Path to intervention_results.json")
+    plot_int_parser.add_argument("--out_dir", default="plots", help="Output directory for figures")
+
     # --- Config Loading ---
     pre_args, _ = parser.parse_known_args()
     pos_config = None
@@ -269,6 +357,12 @@ def main():
         log.info(
             "Project configuration loaded (from %s or root config.yaml)", config_file or "root"
         )
+        # Map common keys to subcommand-specific keys
+        if "graph_path" not in config and "graph_output_path" in config:
+            config["graph_path"] = config["graph_output_path"]
+        if "out_dir" not in config and "addition_experiment" in config:
+            # addition_experiment uses 'out_root', but we can allow it as a fallback if not set
+            pass
 
     # Apply config defaults to subparsers
     if "generate-dataset" in subparsers.choices:
@@ -280,6 +374,18 @@ def main():
         # but we check the section too if it exists.
         set_parser_defaults_from_config(
             subparsers.choices["attribute"], config, section="attribution"
+        )
+    if "intervene" in subparsers.choices:
+        # Intervene picks up defaults from both addition_experiment and intervention sections
+        set_parser_defaults_from_config(
+            subparsers.choices["intervene"], config, section="addition_experiment"
+        )
+        set_parser_defaults_from_config(
+            subparsers.choices["intervene"], config, section="intervention"
+        )
+    if "visualize-dataset" in subparsers.choices:
+        set_parser_defaults_from_config(
+            subparsers.choices["visualize-dataset"], config, section="visualize_dataset"
         )
 
     # Final parse
@@ -303,6 +409,15 @@ def main():
             gen_parser.error(
                 "the following arguments are required: --output_path (or define in config.yaml)"
             )
+    elif args.command == "intervene":
+        if not args.graph_path:
+            int_parser.error(
+                "the following arguments are required: -g/--graph_path (or define in config.yaml)"
+            )
+        if not args.transcoder_set:
+            int_parser.error(
+                "the following arguments are required: -t/--transcoder_set (or define in config.yaml)"
+            )
 
     # Standardized configuration printing
     print_config(args, title=f"Effective {args.command.title()} Configuration")
@@ -313,6 +428,45 @@ def main():
         run_dataset_generation(args)
     elif args.command == "visualize-dataset":
         run_dataset_visualization(args)
+    elif args.command == "intervene":
+        run_intervene(args, int_parser)
+    elif args.command == "plot-interventions":
+        run_plot_interventions(args)
+
+
+def run_plot_interventions(args):
+    import json
+    from pathlib import Path
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+
+    from .plot_interventions import (
+        plot_causal_importance,
+        plot_layer_locations,
+        plot_leakage_comparison,
+        plot_probability_impact,
+    )
+
+    in_path = Path(args.input_json)
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    with open(in_path) as f:
+        data = json.load(f)
+
+    results = data.get("results", data)
+    results = sorted(results, key=lambda x: x.get("intervention_layer", 0))
+
+    print(f"Loaded {len(results)} groups. Generating plots in {out_dir}/ ...")
+
+    plot_causal_importance(results, out_dir)
+    plot_probability_impact(results, out_dir)
+    plot_leakage_comparison(results, out_dir)
+    plot_layer_locations(results, out_dir)
+
+    print("Done.")
 
 
 def run_dataset_generation(args):
@@ -491,6 +645,74 @@ def run_attribution(args, parser):
             edge_threshold=args.edge_threshold,
         )
         print(f"INFO: Graph JSON files written to {args.graph_file_dir}")
+
+
+def run_intervene(args, parser):
+    """Bridge function for miq intervene.
+
+    Loads a Graph from a .pt file and runs constrained patching
+    using the addition experiment's intervention orchestrator.
+    """
+    import torch
+
+    # Ensure repo root is on sys.path so experiments package is importable
+    repo_root = str(Path(__file__).resolve().parent.parent.parent)
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
+
+    from .attribution_model import AttributionModel
+    from .graph import Graph
+    from .utils.hf_utils import load_transcoder_from_hub
+    from .utils_seed import SeedConfig, set_all_seeds
+
+    set_all_seeds(SeedConfig(seed=args.seed, deterministic=not args.nondeterministic))
+
+    dtype = getattr(torch, args.dtype)
+
+    # Load graph
+    graph_path = Path(args.graph_path)
+    if not graph_path.exists():
+        parser.error(f"Graph file not found: {graph_path}")
+    print(f"INFO: Loading graph from {graph_path}")
+    graph = Graph.from_pt(str(graph_path))
+
+    # Load model
+    print(f"INFO: Loading transcoder from {args.transcoder_set!r} …")
+    transcoder, config = load_transcoder_from_hub(
+        args.transcoder_set,
+        dtype=dtype,
+        lazy_encoder=False,
+        lazy_decoder=True,
+    )
+    model_name = args.model or config.get("model") or "Qwen/Qwen3-4B"
+    print(f"INFO: Loading model {model_name!r} (dtype={args.dtype}) …")
+    model = AttributionModel.from_pretrained_and_transcoders(model_name, transcoder, dtype=dtype)
+
+    # Resolve default prompts from the addition experiment
+    from experiments.addition.dataset_generation.generate_add_dataset import (
+        TemplateID,
+        build_prompt,
+    )
+    from experiments.addition.prompts import FOCUS_PROMPT
+
+    clean_prompt = args.prompt or FOCUS_PROMPT
+    perturbed_prompt = args.perturbed_prompt or build_prompt(TemplateID.T0, 36, 60)
+
+    from .interventions import run_interventions
+
+    out_dir = Path(args.out_dir)
+    results = run_interventions(
+        model,
+        graph,
+        out_dir=out_dir,
+        prompt=clean_prompt,
+        perturbed_prompt=perturbed_prompt,
+        node_threshold=args.node_threshold,
+        edge_threshold=args.edge_threshold,
+        alpha=args.alpha,
+        top_n_groups=args.top_n_groups,
+    )
+    print(f"\n✓  intervene complete → {out_dir}  ({len(results)} groups tested)")
 
 
 def main_generate_dataset():

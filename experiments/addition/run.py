@@ -10,8 +10,6 @@ Run end-to-end:
 Or run individual phases:
   --make-prompts   Write prompt catalogue to run dir (no model needed)
   --operand-plots  Collect grid activations & plot 100x100 heatmaps
-  --graph          Build + prune attribution graph for calc: 36+59=
-  --intervene      Run intervention validation (constrained patching)
   --all            Run all phases in order
 
 See experiments/addition/README.md for the full experiment description.
@@ -63,8 +61,6 @@ def build_parser() -> argparse.ArgumentParser:
     phases = p.add_argument_group("Phases")
     phases.add_argument("--make-prompts", action="store_true", help="Write prompt catalogue JSON")
     phases.add_argument("--operand-plots", action="store_true", help="100×100 operand heatmaps")
-    phases.add_argument("--graph", action="store_true", help="Attribution graph for 36+59=")
-    phases.add_argument("--intervene", action="store_true", help="Intervention / constrained-patch")
     phases.add_argument("--all", action="store_true", help="Run all phases in order")
 
     # Model
@@ -106,47 +102,6 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=50,
         help="Number of top features to auto-discover for operand plots",
-    )
-
-    # Graph
-    graph_args = p.add_argument_group("Graph")
-    graph_args.add_argument(
-        "--max_feature_nodes",
-        type=int,
-        default=5000,
-        help="Feature-node budget for attribution graph",
-    )
-    graph_args.add_argument(
-        "--node_threshold",
-        type=float,
-        default=0.8,
-        help="Node pruning threshold (fraction of influence kept)",
-    )
-    graph_args.add_argument(
-        "--edge_threshold",
-        type=float,
-        default=0.98,
-        help="Edge pruning threshold",
-    )
-
-    # Intervention
-    int_args = p.add_argument_group("Interventions")
-    int_args.add_argument(
-        "--perturbed_prompt",
-        default="calc: 36+60=",
-        help="Perturbed prompt for constrained patching (change one operand)",
-    )
-    int_args.add_argument(
-        "--alpha",
-        type=float,
-        default=0.0,
-        help="Feature scale factor for inhibition (0 = zero out)",
-    )
-    int_args.add_argument(
-        "--top_n_groups",
-        type=int,
-        default=4,
-        help="How many supernode groups to test in interventions",
     )
 
     # Reproducibility
@@ -298,62 +253,6 @@ def phase_operand_plots(run_dir: Path, model, args: argparse.Namespace) -> None:
     print(f"\n✓  operand-plots complete → {out_dir}  ({len(matrices)} feature matrices)")
 
 
-def phase_graph(run_dir: Path, model, args: argparse.Namespace):
-    """Build and export attribution graph for calc: 36+59=."""
-    from experiments.addition.graph_36_59 import run_graph
-    from experiments.addition.prompts import FOCUS_PROMPT
-
-    out_dir = run_dir / "graph"
-    graph, export = run_graph(
-        model,
-        out_dir=out_dir,
-        prompt=FOCUS_PROMPT,
-        max_feature_nodes=args.max_feature_nodes,
-        batch_size=args.batch_size,
-        node_threshold=args.node_threshold,
-        edge_threshold=args.edge_threshold,
-        verbose=True,
-        save_raw=True,
-    )
-    print(
-        f"\n✓  graph complete → {out_dir}  "
-        f"({len(export['nodes'])} nodes, {len(export['edges'])} edges)"
-    )
-    return graph
-
-
-def phase_intervene(run_dir: Path, model, args: argparse.Namespace, graph=None) -> None:
-    """Run intervention validation (constrained patching)."""
-    from experiments.addition.interventions import run_interventions
-
-    # Load graph if not already built in this run
-    if graph is None:
-        graph_pt = run_dir / "graph" / "graph_raw.pt"
-        if not graph_pt.exists():
-            log.error(
-                "--intervene requires the graph to be built first. "
-                "Run --graph or --all, or ensure %s exists.",
-                graph_pt,
-            )
-            sys.exit(1)
-        from mechinterp_qwen3.graph import Graph
-
-        graph = Graph.from_pt(str(graph_pt))
-
-    out_dir = run_dir / "interventions"
-    results = run_interventions(
-        model,
-        graph,
-        out_dir=out_dir,
-        perturbed_prompt=args.perturbed_prompt,
-        node_threshold=args.node_threshold,
-        edge_threshold=args.edge_threshold,
-        alpha=args.alpha,
-        top_n_groups=args.top_n_groups,
-    )
-    print(f"\n✓  intervene complete → {out_dir}  ({len(results)} groups tested)")
-
-
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -387,10 +286,8 @@ def main() -> None:
     run_all = args.all
     do_prompts = run_all or args.make_prompts
     do_plots = run_all or args.operand_plots
-    do_graph = run_all or args.graph
-    do_intervene = run_all or args.intervene
 
-    if not any([do_prompts, do_plots, do_graph, do_intervene]):
+    if not any([do_prompts, do_plots]):
         parser.print_help()
         sys.exit(0)
 
@@ -402,10 +299,8 @@ def main() -> None:
 
     # Model is only needed for non-trivial phases
     model = None
-    if do_plots or do_graph or do_intervene:
+    if do_plots:
         model = _load_model(args)
-
-    graph = None  # may be produced by --graph and consumed by --intervene
 
     if do_prompts:
         phase_make_prompts(run_dir)
@@ -413,14 +308,6 @@ def main() -> None:
     if do_plots:
         assert model is not None
         phase_operand_plots(run_dir, model, args)
-
-    if do_graph:
-        assert model is not None
-        graph = phase_graph(run_dir, model, args)
-
-    if do_intervene:
-        assert model is not None
-        phase_intervene(run_dir, model, args, graph=graph)
 
     print(f"\n{'=' * 60}")
     print(f"All requested phases complete.  Outputs in:\n  {run_dir}")
