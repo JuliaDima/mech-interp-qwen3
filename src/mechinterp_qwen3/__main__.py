@@ -3,6 +3,7 @@ import logging
 import os
 import sys
 import warnings
+from pathlib import Path
 
 from mechinterp_qwen3.utils.config_utils import (  # noqa: E402
     add_config_args,
@@ -35,8 +36,8 @@ def main():
     gen_parser.add_argument(
         "--model",
         type=str,
-        default="Qwen/Qwen2.5-3B-Instruct",
-        help="HuggingFace model name (default: Qwen/Qwen2.5-3B-Instruct)",
+        default="Qwen/Qwen3-4B",
+        help="HuggingFace model name (default: Qwen/Qwen3-4B)",
     )
     gen_parser.add_argument(
         "--device",
@@ -131,6 +132,16 @@ def main():
         default=42,
         help="Random seed for reproducibility (default: 42)",
     )
+
+    # Visualization subcommand
+    viz_parser = subparsers.add_parser("visualize-dataset", help="Visualize addition dataset")
+    viz_parser.add_argument("dataset_path", help="Path to JSONL dataset")
+    viz_parser.add_argument(
+        "--output_dir",
+        default="visualizations",
+        help="Output directory for plots (default: visualizations)",
+    )
+    viz_parser.add_argument("--template", default="T0", help="Template to visualize (default: T0)")
 
     # Attribution subcommand
     attr_parser = subparsers.add_parser("attribute", help="Run attribution analysis on a prompt")
@@ -300,13 +311,18 @@ def main():
         run_attribution(args, attr_parser)
     elif args.command == "generate-dataset":
         run_dataset_generation(args)
+    elif args.command == "visualize-dataset":
+        run_dataset_visualization(args)
 
 
 def run_dataset_generation(args):
     """Bridge function for dataset generation."""
-    from pathlib import Path
+    # Ensure repo root is on sys.path to find experiments
+    repo_root = str(Path(__file__).resolve().parent.parent.parent)
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
 
-    from .dataset_generation.generate_add_dataset import (
+    from experiments.addition.dataset_generation import (
         DatasetConfig,
         SamplingStrategy,
         TemplateID,
@@ -346,6 +362,24 @@ def run_dataset_generation(args):
     write_dataset(records, summary, config.output_path)
 
     print("\nDataset generation complete!")
+
+
+def run_dataset_visualization(args):
+    """Bridge function for dataset visualization."""
+    # Ensure repo root is on sys.path to find experiments
+    repo_root = str(Path(__file__).resolve().parent.parent.parent)
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
+
+    from experiments.addition.dataset_generation.visualize_dataset import (
+        create_comprehensive_report,
+    )
+
+    create_comprehensive_report(
+        jsonl_path=Path(args.dataset_path),
+        output_dir=Path(args.output_dir),
+        template_id=args.template,
+    )
 
 
 def run_attribution(args, parser):
@@ -457,6 +491,14 @@ def run_attribution(args, parser):
             edge_threshold=args.edge_threshold,
         )
         print(f"INFO: Graph JSON files written to {args.graph_file_dir}")
+
+
+def main_generate_dataset():
+    """CLI entrypoint for the miq-generate-dataset script."""
+    # This is a simple wrapper that ensures we use the generate-dataset command
+    # logic even when called as a standalone script.
+    sys.argv.insert(1, "generate-dataset")
+    main()
 
 
 if __name__ == "__main__":

@@ -44,9 +44,9 @@ Features
       interventions. **Does NOT use teacher forcing**. Forward passes use only prompts
       (e.g., ``"calc: 36+59="``), and attribution is computed from output logits.
 
-   2. **Behavioral Analysis** (``dataset_generation/``): Optional teacher-forced statistics for
-      exploratory visualization and hypothesis generation. Helps identify interesting examples
-      before circuit analysis.
+   2. **Behavioral Analysis** (``experiments/addition/dataset_generation/``): Optional teacher-forced
+      statistics for exploratory visualization and hypothesis generation. Helps identify
+      interesting examples before circuit analysis.
 
    See :doc:`carry_discovery` and :doc:`dataset_generation` for details.
 

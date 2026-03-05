@@ -14,7 +14,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TypedDict
 
-from mechinterp_qwen3.dataset_generation.generate_add_dataset import (
+from experiments.addition.dataset_generation.generate_add_dataset import (
     DatasetConfig,
     SamplingStrategy,
     TemplateID,
@@ -42,7 +42,7 @@ class CalcEntry(TypedDict):
 
 
 def _build_calc_grid() -> list[CalcEntry]:
-    """Build all 10,000 calc: a+b= prompts for a,b in {0,...,99} using shared logic."""
+    """Build all 10,000 calc: a+b= prompts for a,b in {0,...,99}."""
     # We use a dummy config to get the grid pairs
     config = DatasetConfig(
         model="dummy",

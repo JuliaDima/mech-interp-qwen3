@@ -26,10 +26,10 @@ The dataset generation pipeline is a production-quality tool for generating cont
    The actual carry discovery experiments (in ``experiments/addition/``) use **causal interventions**
    (activation patching) and **gradient-based attribution**, neither of which require teacher forcing.
 
-   Teacher forcing helps you:
+   Teacher forcing helps to understand:
 
-   - Understand which examples are difficult for the model
-   - Visualize behavioral patterns across carry types
+   - Which examples are difficult for the model
+   - Behavioral patterns across carry types
    - Generate hypotheses before diving into circuit analysis
 
    But all circuit discovery work uses standard forward passes with attribution/intervention techniques.
@@ -37,25 +37,25 @@ The dataset generation pipeline is a production-quality tool for generating cont
 Architecture
 ------------
 
-The system is split into two core modules:
+The system is split into two core modules, now located within the addition experiment directory:
 
-*   **`mechinterp_qwen3.dataset_generation.generate_add_dataset`**: Contains the core logic for sampling, prompt building, and scoring.
-*   **`mechinterp_qwen3.dataset_generation.__main__`**: The CLI entrypoint utilizing `argparse`.
+*   **``experiments/addition/dataset_generation/generate_add_dataset.py``**: Contains the core logic for sampling, prompt building, and scoring.
+*   **``experiments/addition/dataset_generation/__main__.py``**: The CLI entrypoint for standalone runs.
 
-Key functions include:
-    - ``generate_pairs()``: Samples (a, b) pairs.
-    - ``score_teacher_forced()``: Computes per-token statistics.
-    - ``greedy_generate()``: Validates model output.
+These are also accessible via the global ``miq`` command:
+
+*   ``miq generate-dataset``: Wrapper for the generation logic.
+*   ``miq visualize-dataset``: Wrapper for the visualization suite.
 
 Quick Start
 -----------
 
-Generate a basic addition dataset:
+Generate a basic addition dataset using the ``miq`` CLI:
 
 .. code-block:: bash
 
-   python -m mechinterp_qwen3.dataset_generation \
-     --model Qwen/Qwen2.5-3B-Instruct \
+   miq generate-dataset \
+     --model Qwen/Qwen3-4B \
      --output_path data/addition_grid.jsonl \
      --sampling_strategy grid \
      --max_value 20 \
@@ -67,7 +67,7 @@ Visualize the results:
 
 .. code-block:: bash
 
-   python -m mechinterp_qwen3.visualize_dataset \
+   miq visualize-dataset \
      data/addition_grid.jsonl \
      --output_dir visualizations/grid \
      --template T0
@@ -101,7 +101,7 @@ Generates all possible (a, b) pairs over [0..N] × [0..N].
 .. code-block:: bash
 
    python -m mechinterp_qwen3.dataset_generation \
-     --model Qwen/Qwen2.5-3B-Instruct \
+     --model Qwen/Qwen3-4B \
      --output_path data/addition_grid_20.jsonl \
      --sampling_strategy grid \
      --max_value 20 \
@@ -124,7 +124,7 @@ Samples by carry patterns to ensure balanced representation:
 .. code-block:: bash
 
    python -m mechinterp_qwen3.dataset_generation \
-     --model Qwen/Qwen2.5-3B-Instruct \
+     --model Qwen/Qwen3-4B \
      --output_path data/addition_stratified.jsonl \
      --sampling_strategy stratified \
      --max_value 100 \
@@ -146,7 +146,7 @@ Pure random sampling with specified sample count.
 .. code-block:: bash
 
    python -m mechinterp_qwen3.dataset_generation \
-     --model Qwen/Qwen2.5-3B-Instruct \
+     --model Qwen/Qwen3-4B \
      --output_path data/addition_random.jsonl \
      --sampling_strategy random \
      --max_value 1000 \
@@ -215,7 +215,7 @@ Each JSONL record contains:
      ],
      "greedy_completion_str": "46",
      "metadata": {
-       "model_name": "Qwen/Qwen2.5-3B-Instruct",
+       "model_name": "Qwen/Qwen3-4B",
        "seed": 42,
        "dtype": "float32",
        "device": "cuda:0",
@@ -469,7 +469,7 @@ Complete options for dataset generation:
 .. code-block:: bash
 
    python -m mechinterp_qwen3.dataset_generation \
-     --model Qwen/Qwen2.5-3B-Instruct \
+     --model Qwen/Qwen3-4B \
      --output_path data/dataset.jsonl \
      --sampling_strategy {grid,stratified,random} \
      --max_value 100 \
@@ -484,7 +484,7 @@ Key Parameters
 ~~~~~~~~~~~~~~
 
 **Model Configuration**:
-  - ``--model``: HuggingFace model name (default: Qwen/Qwen2.5-3B-Instruct)
+  - ``--model``: HuggingFace model name (default: Qwen/Qwen3-4B)
   - ``--device``: Device (cuda/cpu, auto-detects if not specified)
   - ``--dtype``: Model precision (float32/float16/bfloat16)
 

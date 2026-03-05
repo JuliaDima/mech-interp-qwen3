@@ -4,9 +4,15 @@
 This shows how to use the visualization API for custom analysis beyond the CLI.
 """
 
+import sys
 from pathlib import Path
 
-from src.mechinterp_qwen3.visualize_dataset import (
+# Add repo root to sys.path to find experiments
+repo_root = str(Path(__file__).resolve().parent.parent)
+if repo_root not in sys.path:
+    sys.path.insert(0, repo_root)
+
+from experiments.addition.dataset_generation.visualize_dataset import (  # noqa: E402
     classify_carry,
     create_carry_structure_plot,
     create_comprehensive_report,
@@ -259,7 +265,7 @@ if __name__ == "__main__":
     if not Path("data/addition_grid.jsonl").exists():
         print("\nERROR: data/addition_grid.jsonl not found!")
         print("Please generate the dataset first:")
-        print("  python -m mechinterp_qwen3.dataset_generation \\")
+        print("  miq generate-dataset \\")
         print("    --output_path data/addition_grid.jsonl \\")
         print("    --sampling_strategy grid \\")
         print("    --max_value 20 \\")

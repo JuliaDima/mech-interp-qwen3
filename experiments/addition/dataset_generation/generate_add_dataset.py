@@ -19,8 +19,8 @@ import torch
 from tqdm import tqdm
 from transformer_lens import HookedTransformer
 
-from ..utils.inference_utils import batched_greedy_generate, silence_libraries
-from ..utils_seed import seed_everything
+from mechinterp_qwen3.utils.inference_utils import batched_greedy_generate, silence_libraries
+from mechinterp_qwen3.utils_seed import seed_everything
 
 # Silence Hugging Face Hub downloads and Transformers loading progress
 silence_libraries()
@@ -38,12 +38,12 @@ class TemplateID(StrEnum):
     T6 = "T6"
 
 
-TEMPLATES = {
-    TemplateID.T0: "calc: {a}+{b}=",
-    TemplateID.T1: "calc: {a} + {b} =",
-    TemplateID.T2: "What is {a}+{b}? Answer:",
+TEMPLATES = {  # see observations.rst for details on why trailing spaces are important
+    TemplateID.T0: "calc: {a}+{b}= ",
+    TemplateID.T1: "calc: {a} + {b} = ",
+    TemplateID.T2: "What is {a}+{b}? Answer: ",
     TemplateID.T3: "calc: {a}+{b}=\n",
-    TemplateID.T4: "calc: {a}+{b}=\nAnswer:",
+    TemplateID.T4: "calc: {a}+{b}=\nAnswer: ",
     TemplateID.T5: "<|im_start|>user\nCalculate {a}+{b}<|im_end|>\n<|im_start|>assistant\n",
     TemplateID.T6: "Answer the following addition problem: {a} + {b} =",
 }
@@ -541,7 +541,7 @@ if __name__ == "__main__":
 
     # Import and run the CLI
     try:
-        from ..dataset_generation import main
+        from . import main
 
         main()
     except ImportError:

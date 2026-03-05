@@ -47,11 +47,23 @@ The ``miq generate-dataset`` command is used to generate synthetic datasets (e.g
 .. code-block:: bash
 
    miq generate-dataset \
-     --model Qwen/Qwen2.5-3B-Instruct \
+     --model Qwen/Qwen3-4B \
      --output_path data/addition_grid.jsonl \
      --sampling_strategy grid \
      --max_value 20 \
      --templates T0
+
+Dataset Visualization
+---------------------
+
+The ``miq visualize-dataset`` command provides advanced visualizations for behavioral analysis.
+
+.. code-block:: bash
+
+   miq visualize-dataset \
+     data/addition_grid.jsonl \
+     --output_dir visualizations/ \
+     --template T0
 
 This workflow follows Anthropic's mechanistic interpretability methodology. For a detailed guide on sampling strategies and visualizations, see :doc:`dataset_generation`.
 

@@ -7,18 +7,19 @@ Example usage:
     python -m mechinterp_qwen3.dataset_generation
 
     # Override defaults:
-    python -m mechinterp_qwen3.dataset_generation --model Qwen/Qwen2.5-3B-Instruct --max_value 100
+    python -m mechinterp_qwen3.dataset_generation --model Qwen/Qwen3-4B --max_value 100
 """
 
 import argparse
 from pathlib import Path
 
-from ..utils.config_utils import (
+from mechinterp_qwen3.utils.config_utils import (
     add_config_args,
     load_config,
     print_config,
     set_parser_defaults_from_config,
 )
+
 from .generate_add_dataset import (
     DatasetConfig,
     SamplingStrategy,
@@ -39,8 +40,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--model",
         type=str,
-        default="Qwen/Qwen2.5-3B-Instruct",
-        help="HuggingFace model name (default: Qwen/Qwen2.5-3B-Instruct)",
+        default="Qwen/Qwen3-4B",
+        help="HuggingFace model name (default: Qwen/Qwen3-4B)",
     )
     parser.add_argument(
         "--device",

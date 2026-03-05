@@ -1,4 +1,4 @@
-salloc -p ampere -A MPHIL-DIS-SL2-GPU --nodes=1 --gres=gpu:1 --time=00:05:00
+salloc -p ampere -A MPHIL-DIS-SL2-GPU --nodes=1 --gres=gpu:1 --time=00:15:00
 module purge
 module load rhel8/default-amp
 source ~/.bashrc
@@ -6,4 +6,11 @@ conda activate p28_py311_env
 export PYTHONPATH=$PYTHONPATH:/home/eid23/mechinterp-qwen-3B-Instruct/mechinterp-qwen3
 export LD_LIBRARY_PATH=/home/eid23/miniforge3/envs/p28_py311_env/lib
 
-# command ...
+miq generate-dataset \
+     --model Qwen/Qwen3-4B \
+     --output_path data/addition_grid.jsonl \
+     --sampling_strategy grid \
+     --max_value 30 \
+     --templates T0
+
+miq visualize-dataset      data/addition_grid.jsonl      --output_dir visualizations/      --template T0

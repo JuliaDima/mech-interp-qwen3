@@ -33,8 +33,8 @@ run_cmd() {
 }
 
 # Run 1: Grid Sampling (All Templates, 0-20)
-run_cmd python3 -m mechinterp_qwen3.dataset_generation \
-    --model_name Qwen/Qwen3-4B \
+run_cmd miq generate-dataset \
+    --model Qwen/Qwen3-4B \
     --output_path data/addition_grid.jsonl \
     --sampling_strategy grid \
     --max_value 20 \
@@ -43,21 +43,20 @@ run_cmd python3 -m mechinterp_qwen3.dataset_generation \
     --dtype bfloat16
 
 # Run 2: Stratified Sampling (Balanced Carry Patterns, 0-100)
-run_cmd python3 -m mechinterp_qwen3.dataset_generation \
-    --model_name Qwen/Qwen3-4B \
+run_cmd miq generate-dataset \
+    --model Qwen/Qwen3-4B \
     --output_path data/addition_stratified.jsonl \
     --sampling_strategy stratified \
     --max_value 100 \
     --templates T0 \
     --stratified_n_per_category 50 \
     --stratified_uniform_remainder 100 \
-    --enable_greedy_generation \
     --seed 42 \
     --dtype bfloat16
 
 # Run 3: Random Sampling (0-1000, 500 samples)
-run_cmd python3 -m mechinterp_qwen3.dataset_generation \
-    --model_name Qwen/Qwen3-4B \
+run_cmd miq generate-dataset \
+    --model Qwen/Qwen3-4B \
     --output_path data/addition_random.jsonl \
     --sampling_strategy random \
     --max_value 1000 \

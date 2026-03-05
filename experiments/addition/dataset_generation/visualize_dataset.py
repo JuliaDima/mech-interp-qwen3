@@ -19,6 +19,18 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import LinearSegmentedColormap
 
+from .generate_add_dataset import TEMPLATES as _TEMPLATES
+
+
+def _template_label(template_id: str) -> str:
+    """Return a short label like 'T0: "calc: {a}+{b}= "'."""
+    fmt = _TEMPLATES.get(template_id)
+    if fmt is None:
+        return template_id
+    fmt_display = fmt.replace("\n", "\\n")
+    return f'{template_id}: "{fmt_display}"'
+
+
 try:
     import seaborn as sns
 
@@ -115,7 +127,7 @@ def create_probability_heatmap(
     ax.set_xlabel("a (first operand)", fontsize=12)
     ax.set_ylabel("b (second operand)", fontsize=12)
     ax.set_title(
-        f"Model Confidence Map: Position {position} | Template {template_id}\n"
+        f"Model Confidence Map: Position {position} | {_template_label(template_id)}\n"
         f"Probability of correct {['first', 'second', 'third', 'fourth'][position]} digit",
         fontsize=14,
         pad=20,
@@ -210,7 +222,7 @@ def create_carry_structure_plot(
     ax2.set_title(f"P(correct) with Carry Boundaries | Pos {position}", fontsize=13)
     ax2.grid(True, alpha=0.2, color="white", linewidth=0.5)
 
-    plt.suptitle(f"Carry Pattern Analysis | Template {template_id}", fontsize=15, y=0.98)
+    plt.suptitle(f"Carry Pattern Analysis | {_template_label(template_id)}", fontsize=15, y=0.98)
     plt.tight_layout()
 
     if output_path:
@@ -268,29 +280,42 @@ def create_diagonal_analysis(
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
 
     # Left: Mean probability by sum
-    ax1.plot(sums, mean_probs, "o-", linewidth=2, markersize=4, color="#3498db")
+    ax1.plot(
+        sums, mean_probs, "o-", linewidth=2, markersize=4, color="#3498db", label="Mean P(correct)"
+    )
     ax1.fill_between(
         sums,
         np.array(mean_probs) - np.array(std_probs),
         np.array(mean_probs) + np.array(std_probs),
         alpha=0.3,
         color="#3498db",
+        label="±1 std dev",
     )
     ax1.set_xlabel("Sum (a + b)", fontsize=12)
     ax1.set_ylabel("Mean P(correct)", fontsize=12)
     ax1.set_title(f"Confidence vs Sum | Pos {position}", fontsize=13)
     ax1.grid(True, alpha=0.3)
     ax1.set_ylim(0, 1)
+    ax1.legend(loc="lower right", fontsize=10)
 
     # Right: Variance by sum (shows consistency)
-    ax2.plot(sums, std_probs, "o-", linewidth=2, markersize=4, color="#e74c3c")
+    ax2.plot(
+        sums,
+        std_probs,
+        "o-",
+        linewidth=2,
+        markersize=4,
+        color="#e74c3c",
+        label="Std Dev P(correct)",
+    )
     ax2.set_xlabel("Sum (a + b)", fontsize=12)
     ax2.set_ylabel("Std Dev P(correct)", fontsize=12)
     ax2.set_title("Consistency vs Sum", fontsize=13)
     ax2.grid(True, alpha=0.3)
+    ax2.legend(loc="upper right", fontsize=10)
 
     plt.suptitle(
-        f"Diagonal Analysis: Does model use sum-based strategy? | Template {template_id}",
+        f"Diagonal Analysis: Does model use sum-based strategy? | {_template_label(template_id)}",
         fontsize=14,
         y=0.98,
     )
@@ -353,7 +378,7 @@ def create_entropy_map(
     ax.set_xlabel("a (first operand)", fontsize=12)
     ax.set_ylabel("b (second operand)", fontsize=12)
     ax.set_title(
-        f"Prediction Uncertainty Map | Position {position} | Template {template_id}\n"
+        f"Prediction Uncertainty Map | Position {position} | {_template_label(template_id)}\n"
         f"Higher entropy = model is more uncertain",
         fontsize=14,
         pad=20,
@@ -446,7 +471,7 @@ def create_error_analysis(
         ax.grid(True, alpha=0.3, color="white", linewidth=0.5)
 
     plt.suptitle(
-        f"Error Analysis: Where and How Model Fails | Template {template_id}",
+        f"Error Analysis: Where and How Model Fails | {_template_label(template_id)}",
         fontsize=15,
         y=0.98,
     )
@@ -530,7 +555,7 @@ def create_positional_cascade(
     fig.colorbar(im, cax=cbar_ax, label="P(correct)")
 
     plt.suptitle(
-        f"Confidence Cascade Across Positions | Template {template_id}\n"
+        f"Confidence Cascade Across Positions | {_template_label(template_id)}\n"
         f"Shows teacher-forcing effect: confidence increases with more context",
         fontsize=14,
         y=1.02,

@@ -1,3 +1,7 @@
+"""
+usage: python experiments/addition/compare_templates.py
+"""
+
 import os
 import random
 import sys
@@ -11,12 +15,12 @@ if repo_root not in sys.path:
     sys.path.insert(0, repo_root)
 os.chdir(repo_root)
 
-from experiments.addition.prompts import CALC_GRID  # noqa: E402
-from mechinterp_qwen3.attribution_model import AttributionModel  # noqa: E402
-from mechinterp_qwen3.dataset_generation.generate_add_dataset import (  # noqa: E402
+from experiments.addition.dataset_generation.generate_add_dataset import (  # noqa: E402
     TEMPLATES,
     build_prompt,
 )
+from experiments.addition.prompts import CALC_GRID  # noqa: E402
+from mechinterp_qwen3.attribution_model import AttributionModel  # noqa: E402
 from mechinterp_qwen3.utils.hf_utils import load_transcoder_from_hub  # noqa: E402
 
 # 2. Configuration
