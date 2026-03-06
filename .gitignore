@@ -22,3 +22,6 @@ experiments/addition/README_ACCURACY_SWEEP.md
 experiments/addition/USAGE_GUIDE.md
 plots
 *.pyc
+*.png
+*.csv
+robustness_results.json

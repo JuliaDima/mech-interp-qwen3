@@ -23,6 +23,7 @@ This project provides an independent mechanistic interpretability pipeline speci
    carry_discovery
    accuracy_sweep
    accuracy_sweep_performance
+   robustness_experiment
 
 Features
 --------

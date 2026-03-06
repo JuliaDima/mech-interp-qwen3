@@ -1,10 +1,12 @@
-salloc -p ampere -A MPHIL-DIS-SL2-GPU --nodes=1 --gres=gpu:1 --time=00:15:00
+salloc -p ampere -A MPHIL-DIS-SL2-GPU --nodes=1 --gres=gpu:1 --time=00:30:00
 module purge
 module load rhel8/default-amp
 source ~/.bashrc
 conda activate p28_py311_env
 export PYTHONPATH=$PYTHONPATH:/home/eid23/mechinterp-qwen-3B-Instruct/mechinterp-qwen3
 export LD_LIBRARY_PATH=/home/eid23/miniforge3/envs/p28_py311_env/lib
+
+python experiments/addition/robustness_experiment.py
 
 miq attribute \
   --prompt "calc: 36+59=" \
