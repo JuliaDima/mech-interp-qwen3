@@ -13,16 +13,13 @@ docs/_build
 scripts/test_prune.py
 scripts/salloc_gpu.txt
 src/mechinterp_qwen3/__pycache__
-visualizations
 data
 VISUALIZATION_GUIDE.md
 VISUALIZATION_SUMMARY.md
 experiments/addition/PERFORMANCE_NOTES.md
 experiments/addition/README_ACCURACY_SWEEP.md
 experiments/addition/USAGE_GUIDE.md
-plots
 *.pyc
-*.png
 *.csv
 robustness_results.json
 QUICK_START_PROBE.md
@@ -31,3 +28,4 @@ scripts/README_layerwise_scan.md
 CARRY_PROBE_SUMMARY.md
 probe_INSTALLATION.md
 docs/carry_probe.md
+RECOMMENDATIONS.md

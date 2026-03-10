@@ -97,6 +97,13 @@ def generate_addition_examples(
 
         labels = [compute_carry_label(a, b) for a, b in zip(operands_a, operands_b, strict=False)]
 
+        # Shuffle to avoid train/val distribution shift
+        indices = list(range(len(operands_a)))
+        random.shuffle(indices)
+        operands_a = [operands_a[i] for i in indices]
+        operands_b = [operands_b[i] for i in indices]
+        labels = [labels[i] for i in indices]
+
         # Subsample if requested
         if n_samples is not None and n_samples < len(operands_a):
             indices = np.random.choice(len(operands_a), n_samples, replace=False)

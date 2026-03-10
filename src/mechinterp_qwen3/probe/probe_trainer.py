@@ -309,13 +309,18 @@ class ProbeTrainer:
                         self.save_checkpoint(checkpoint_dir / "best_probe.pt")
                 else:
                     patience_counter += 1
-                    if (
-                        early_stopping_patience is not None
-                        and patience_counter >= early_stopping_patience
-                    ):
-                        if verbose:
-                            print(f"\nEarly stopping at epoch {epoch + 1}")
-                        break
+
+                # Save epoch checkpoint if requested
+                if save_epochs and checkpoint_dir is not None:
+                    self.save_checkpoint(checkpoint_dir / f"epoch_{epoch + 1}.pt")
+
+                if (
+                    early_stopping_patience is not None
+                    and patience_counter >= early_stopping_patience
+                ):
+                    if verbose:
+                        print(f"\nEarly stopping at epoch {epoch + 1}")
+                    break
 
         # Save final checkpoint
         if checkpoint_dir is not None:
