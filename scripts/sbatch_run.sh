@@ -21,10 +21,10 @@
 #SBATCH -A MPHIL-DIS-SL2-GPU
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
-#SBATCH --time=04:00:00
+#SBATCH --time=00:30:00
 #SBATCH --job-name=miq_run
-#SBATCH --output=logs/%x_%j.out
-#SBATCH --error=logs/%x_%j.err
+#SBATCH --output=/dev/null
+#SBATCH --error=/dev/null
 
 # ---- Repo root ----
 if [ -n "${SLURM_SUBMIT_DIR:-}" ]; then

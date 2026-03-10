@@ -8,9 +8,7 @@ export LD_LIBRARY_PATH=/home/eid23/miniforge3/envs/p28_py311_env/lib
 
 python experiments/addition/robustness_experiment.py
 
-miq attribute \
-  --prompt "calc: 36+59=" \
-  --slug addition_36_59 \
+miq attribute --prompt "calc: 36+59= " --slug addition_36_59
 
 miq intervene \
 --graph_path graphs/attribution_graph.pt \

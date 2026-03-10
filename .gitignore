@@ -25,3 +25,9 @@ plots
 *.png
 *.csv
 robustness_results.json
+QUICK_START_PROBE.md
+QUICK_START.md
+scripts/README_layerwise_scan.md
+CARRY_PROBE_SUMMARY.md
+probe_INSTALLATION.md
+docs/carry_probe.md

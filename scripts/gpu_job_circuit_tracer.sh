@@ -5,8 +5,8 @@
 #SBATCH --gres=gpu:1
 #SBATCH --time=04:00:00
 #SBATCH --job-name=job_1gpu
-#SBATCH --output=logs/%x_%j.out
-#SBATCH --error=logs/%x_%j.err
+#SBATCH --output=/dev/null
+#SBATCH --error=/dev/null
 
 mkdir -p logs
 
