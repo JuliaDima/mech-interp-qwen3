@@ -108,7 +108,7 @@ def compute_metrics(
     f1 = f1_score(labels_np, preds_np, zero_division=0)
 
     if probabilities is not None:
-        probs_np = probabilities.cpu().float().numpy()
+        probs_np = probabilities.detach().cpu().float().numpy()
         try:
             roc_auc = roc_auc_score(labels_np, probs_np)
         except ValueError:

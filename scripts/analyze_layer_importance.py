@@ -119,19 +119,32 @@ def analyze_layer_importance(probe: CarryProbe, top_k: int = 1000) -> dict:
     return results
 
 
-def plot_layer_importance(results: dict, output_dir: Path, metric: str = "l1_norm"):
+def plot_layer_importance(
+    results: dict, output_dir: Path, metric: str = "l1_norm", highlight_top_n: int = 3
+):
     """Plot layer importance based on a specific metric.
 
     Args:
         results: Dictionary from analyze_layer_importance
         output_dir: Directory to save plots
         metric: Metric to plot (e.g., 'l1_norm', 'mean_abs_weight', 'top_k_sum')
+        highlight_top_n: Number of top layers to highlight
     """
     layers = sorted(results.keys())
     values = [results[layer][metric] for layer in layers]
 
     plt.figure(figsize=(14, 6))
-    plt.bar(layers, values, color="steelblue", alpha=0.7, edgecolor="black")
+    plt.bar(layers, values, color="skyblue", alpha=0.7)
+
+    # Highlight top N layers
+    if highlight_top_n > 0:
+        top_indices = np.argsort(values)[-highlight_top_n:]
+        for idx in top_indices:
+            layer = layers[idx]
+            val = values[idx]
+            plt.bar(layer, val, color="salmon", alpha=0.8)
+            plt.text(layer, val, f"{layer}", ha="center", va="bottom", fontweight="bold")
+
     plt.xlabel("Layer Index", fontsize=12)
     plt.ylabel(metric.replace("_", " ").title(), fontsize=12)
     plt.title(f"Layer Importance for Carry Detection ({metric})", fontsize=14, fontweight="bold")
@@ -157,18 +170,18 @@ def plot_all_metrics(results: dict, output_dir: Path):
     axes = axes.flatten()
 
     metrics = [
-        ("l1_norm", "L1 Norm", "steelblue"),
-        ("l2_norm", "L2 Norm", "coral"),
-        ("mean_abs_weight", "Mean Absolute Weight", "seagreen"),
-        ("max_abs_weight", "Max Absolute Weight", "tomato"),
-        ("top_k_sum", "Top-1000 Sum", "purple"),
-        ("top_k_mean", "Top-1000 Mean", "orange"),
+        ("l1_norm", "L1 Norm", "skyblue"),
+        ("l2_norm", "L2 Norm", "skyblue"),
+        ("mean_abs_weight", "Mean Absolute Weight", "skyblue"),
+        ("max_abs_weight", "Max Absolute Weight", "skyblue"),
+        ("top_k_sum", "Top-1000 Sum", "skyblue"),
+        ("top_k_mean", "Top-1000 Mean", "skyblue"),
     ]
 
     for idx, (metric, title, color) in enumerate(metrics):
         values = [results[layer][metric] for layer in layers]
 
-        axes[idx].bar(layers, values, color=color, alpha=0.7, edgecolor="black")
+        axes[idx].bar(layers, values, color=color, alpha=0.7)
         axes[idx].set_xlabel("Layer Index", fontsize=10)
         axes[idx].set_ylabel(title, fontsize=10)
         axes[idx].set_title(title, fontsize=11, fontweight="bold")
@@ -178,9 +191,7 @@ def plot_all_metrics(results: dict, output_dir: Path):
         top_5_indices = np.argsort(values)[-5:]
         for top_idx in top_5_indices:
             layer = layers[top_idx]
-            axes[idx].bar(
-                layer, values[top_idx], color="red", alpha=0.8, edgecolor="darkred", linewidth=2
-            )
+            axes[idx].bar(layer, values[top_idx], color="salmon", alpha=0.8, linewidth=2)
 
     plt.suptitle(
         "Layer-wise Feature Importance for Carry Detection", fontsize=16, fontweight="bold", y=1.00
