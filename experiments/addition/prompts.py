@@ -14,7 +14,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TypedDict
 
-from experiments.addition.dataset_generation.generate_add_dataset import (
+from experiments.addition.dataset_generation.generate_dataset_with_predictions import (
     DatasetConfig,
     SamplingStrategy,
     TemplateID,

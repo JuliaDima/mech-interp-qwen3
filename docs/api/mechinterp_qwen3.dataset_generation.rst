@@ -4,10 +4,10 @@ mechinterp\_qwen3.dataset\_generation package
 Submodules
 ----------
 
-mechinterp\_qwen3.dataset\_generation.generate\_add\_dataset module
-----------------------------------------------------------------
+mechinterp\_qwen3.dataset\_generation.generate\_dataset\_with\_predictions module
+--------------------------------------------------------------------------------
 
-.. automodule:: mechinterp_qwen3.dataset_generation.generate_add_dataset
+.. automodule:: mechinterp_qwen3.dataset_generation.generate_dataset_with_predictions
    :members:
    :show-inheritance:
    :undoc-members:

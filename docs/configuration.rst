@@ -61,4 +61,16 @@ For cluster execution, the ``scripts/sbatch_run.sh`` script acts as a universal 
    sbatch scripts/sbatch_run.sh python experiments/addition/run.py --all
 
    # Uses custom overrides
-   sbatch scripts/sbatch_run.sh python experiments/addition/run.py my_config.yaml --all
+Stitching Experiment
+~~~~~~~~~~~~~~~~~~~~
+
+Key settings for the SAE-mediated stitching pipeline:
+
+.. code-block:: yaml
+
+   stitching_experiment:
+     hub_model: "PhilipQuirke/QuantaMaths_add_d5_l1_h3_t15K_s372001"
+     small_sae_d_transcoder: 4096
+     small_sae_lr: 1e-3
+     stitch_layer_pairs: [14, 16, 18]
+     num_verify_samples: 1000

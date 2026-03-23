@@ -7,7 +7,7 @@ usage: # will take default values from config.yaml, if not provided
 
    python -m src.mechinterp_qwen3.dataset_generation.visualize_dataset \
      data/addition_dataset.jsonl \
-     --output_dir visualizations/grid \
+     --output_dir plots/grid \
      --template T0
 """
 
@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import LinearSegmentedColormap
 
-from .generate_add_dataset import TEMPLATES as _TEMPLATES
+from .generate_dataset_with_predictions import TEMPLATES as _TEMPLATES
 
 
 def _template_label(template_id: str) -> str:

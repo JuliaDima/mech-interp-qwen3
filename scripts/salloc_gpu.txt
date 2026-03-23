@@ -6,6 +6,8 @@ conda activate p28_py311_env
 export PYTHONPATH=$PYTHONPATH:/home/eid23/mechinterp-qwen-3B-Instruct/mechinterp-qwen3
 export LD_LIBRARY_PATH=/home/eid23/miniforge3/envs/p28_py311_env/lib
 
+------------------------------------------------------------------
+
 python experiments/addition/robustness_experiment.py
 
 miq attribute --prompt "calc: 36+59= " --slug addition_36_59
@@ -28,3 +30,7 @@ miq generate-dataset \
 miq visualize-dataset      data/addition_grid.jsonl      --output_dir visualizations/      --template T0
 
 python experiments/addition/run.py --graph
+
+
+export PYTHONPATH=$PYTHONPATH:. && python -u scripts/plot_stitching_improvement.py
+export PYTHONPATH=$PYTHONPATH:. && python -u scripts/plot_stitching_failures.py

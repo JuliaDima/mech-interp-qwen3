@@ -689,7 +689,7 @@ def run_intervene(args, parser):
     model = AttributionModel.from_pretrained_and_transcoders(model_name, transcoder, dtype=dtype)
 
     # Resolve default prompts from the addition experiment
-    from experiments.addition.dataset_generation.generate_add_dataset import (
+    from experiments.addition.dataset_generation.generate_dataset_with_predictions import (
         TemplateID,
         build_prompt,
     )

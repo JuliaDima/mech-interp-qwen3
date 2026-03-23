@@ -20,7 +20,7 @@ from mechinterp_qwen3.utils.config_utils import (
     set_parser_defaults_from_config,
 )
 
-from .generate_add_dataset import (
+from .generate_dataset_with_predictions import (
     DatasetConfig,
     SamplingStrategy,
     TemplateID,

@@ -62,7 +62,7 @@ The ``miq visualize-dataset`` command provides advanced visualizations for behav
 
    miq visualize-dataset \
      data/addition_grid.jsonl \
-     --output_dir visualizations/ \
+     --output_dir plots/ \
      --template T0
 
 This workflow follows Anthropic's mechanistic interpretability methodology. For a detailed guide on sampling strategies and visualizations, see :doc:`dataset_generation`.

@@ -129,3 +129,31 @@ def get_default_device() -> "torch.device":
     import torch
 
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+DTYPE_MAP = {
+    "float32": torch.float32,
+    "bfloat16": torch.bfloat16,
+    "float16": torch.float16,
+}
+
+
+def parse_dtype(dtype_str: str, default: torch.dtype = torch.bfloat16) -> torch.dtype:
+    """Parse dtype string to torch.dtype.
+
+    Args:
+        dtype_str: String representation of dtype ("float32", "bfloat16", or "float16")
+        default: Default dtype to return if dtype_str is not recognized
+
+    Returns:
+        Corresponding torch.dtype
+
+    Examples:
+        >>> parse_dtype("float32")
+        torch.float32
+        >>> parse_dtype("bfloat16")
+        torch.bfloat16
+        >>> parse_dtype("unknown")
+        torch.bfloat16
+    """
+    return DTYPE_MAP.get(dtype_str, default)

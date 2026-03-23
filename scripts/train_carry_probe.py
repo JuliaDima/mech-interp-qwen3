@@ -40,7 +40,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 # ruff: noqa: E402
 # Project imports must come after sys.path modification
-from experiments.addition.dataset_generation.generate_add_dataset import (
+from experiments.addition.dataset_generation.generate_dataset_with_predictions import (
     TemplateID,
     build_prompt,
 )

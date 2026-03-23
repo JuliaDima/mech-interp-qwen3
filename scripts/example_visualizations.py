@@ -34,7 +34,7 @@ def example_comprehensive():
 
     create_comprehensive_report(
         jsonl_path=Path("data/addition_grid.jsonl"),
-        output_dir=Path("visualizations/example1"),
+        output_dir=Path("plots/example1"),
         template_id="T0",
     )
 
@@ -57,7 +57,7 @@ def example_custom():
         records,
         template_id="T0",
         position=0,
-        output_path=Path("visualizations/example2/large_heatmap.png"),
+        output_path=Path("plots/example2/large_heatmap.png"),
         figsize=(16, 14),
     )
 
@@ -67,11 +67,11 @@ def example_custom():
         records,
         template_id="T0",
         position=1,
-        output_path=Path("visualizations/example2/entropy_pos1.png"),
+        output_path=Path("plots/example2/entropy_pos1.png"),
         figsize=(14, 12),
     )
 
-    print("✓ Custom visualizations saved to visualizations/example2/")
+    print("✓ Custom visualizations saved to plots/example2/")
 
 
 # ============================================================================
@@ -102,11 +102,11 @@ def example_compare_templates():
             records,
             template_id=template,
             position=0,
-            output_path=Path(f"visualizations/example3/heatmap_{template}.png"),
+            output_path=Path(f"plots/example3/heatmap_{template}.png"),
             figsize=(12, 10),
         )
 
-    print("✓ Template comparison saved to visualizations/example3/")
+    print("✓ Template comparison saved to plots/example3/")
 
 
 # ============================================================================
@@ -149,11 +149,11 @@ def example_carry_analysis():
         records,
         template_id="T0",
         position=0,
-        output_path=Path("visualizations/example4/carry_deep_dive.png"),
+        output_path=Path("plots/example4/carry_deep_dive.png"),
         figsize=(16, 8),
     )
 
-    print("✓ Carry analysis saved to visualizations/example4/")
+    print("✓ Carry analysis saved to plots/example4/")
 
 
 # ============================================================================
@@ -245,11 +245,11 @@ def example_positional_flow():
         records,
         template_id="T0",
         max_positions=2,
-        output_path=Path("visualizations/example6/info_flow.png"),
+        output_path=Path("plots/example6/info_flow.png"),
         figsize=(14, 6),
     )
 
-    print("✓ Information flow analysis saved to visualizations/example6/")
+    print("✓ Information flow analysis saved to plots/example6/")
 
 
 # ============================================================================
@@ -283,4 +283,4 @@ if __name__ == "__main__":
     print("\n" + "=" * 60)
     print("ALL EXAMPLES COMPLETE!")
     print("=" * 60)
-    print("\nCheck the visualizations/ directory for outputs.")
+    print("\nCheck the plots/ directory for outputs.")

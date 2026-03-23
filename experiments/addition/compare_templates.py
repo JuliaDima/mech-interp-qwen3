@@ -15,7 +15,7 @@ if repo_root not in sys.path:
     sys.path.insert(0, repo_root)
 os.chdir(repo_root)
 
-from experiments.addition.dataset_generation.generate_add_dataset import (  # noqa: E402
+from experiments.addition.dataset_generation.generate_dataset_with_predictions import (  # noqa: E402
     TEMPLATES,
     build_prompt,
 )

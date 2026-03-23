@@ -37,11 +37,18 @@ Run the end-to-end Anthropic addition case study reproduction.
 python experiments/addition/run.py --all
 ```
 
+### 4. Stitching Experiment (SAE-mediated)
+Transfer arithmetic circuits from a small specialized model into Qwen3-4B.
+```bash
+python experiments/stitching/run.py --all
+```
+
 ## 📖 Key Documentation
 
 For in-depth guides, visit the [Documentation Site](https://eid23-ab47b6.uniofcam.dev/) or explore the `docs/` folder:
 
 - **[Carry Discovery](docs/carry_discovery.rst)**: Scientific overview of the addition circuit reproduction.
+- **[Stitching Experiment](docs/stitching_experiment.rst)**: Guide to transferring circuits between models using SAEs.
 - **[Dataset Generation](docs/dataset_generation.rst)**: Guide to sampling strategies and teacher-forcing.
 - **[Configuration System](docs/configuration.rst)**: Details on the hierarchical `config.yaml` architecture.
 - **[Visualization Guide](VISUALIZATION_GUIDE.md)**: 6 publication-quality figure types for behavior analysis.

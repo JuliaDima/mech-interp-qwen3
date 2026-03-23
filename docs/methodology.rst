@@ -100,9 +100,15 @@ For addition tasks (and similar computational tasks), run an accuracy sweep:
 - **Accuracy > 80%**: Proceed with circuit discovery
 - **Accuracy < 80%**: Change prompt format (spacing, few-shot, delimiters) and re-run sweep
 
-**Output**: ``verified_prompts.txt`` containing only prompts where model succeeds. Use this list
-to restrict your circuit analysis to successful cases.
+6. SAE-Mediated Stitching
+-------------------------
 
-.. note::
-   This is distinct from teacher forcing. The accuracy sweep uses **greedy generation** to test
-   how the model actually produces answers, not teacher-forced confidence on ground truth.
+We use stitching to test whether a specialized "small" model's computational strategy can be successfully transplanted into a "large" general-purpose model.
+
+This project implements **SAE-Mediated MLP Injection**:
+
+1. **Sparsification**: Instead of stitching raw activations, we train a Sparse Autoencoder (SAE) on the small model's MLP outputs. This identifies the "conceptual" sparse features the small model uses.
+2. **Representational Mapping**: We fit an affine transformation :math:`W, b` that maps these small-model sparse features into the large model's high-dimensional MLP output space.
+3. **Causal Validation**: We patch the large model's MLP outputs with the mapped small-model representations. If the large model's accuracy on the task improves (specifically on complex cases like cascading carries), then we have successfully "stitched" the circuit.
+
+We use **linear alignment** (Chen et al. 2025) with **sparsity constraints (SAEs)** to make sure that the transferred information corresponds to discrete and interpretable features, and to match dimensions when transfering circuits.

@@ -39,7 +39,7 @@ Architecture
 
 The system is split into two core modules, now located within the addition experiment directory:
 
-*   **``experiments/addition/dataset_generation/generate_add_dataset.py``**: Contains the core logic for sampling, prompt building, and scoring.
+*   **``experiments/addition/dataset_generation/generate_dataset_with_predictions.py``**: Contains the core logic for sampling, prompt building, and scoring.
 *   **``experiments/addition/dataset_generation/__main__.py``**: The CLI entrypoint for standalone runs.
 
 These are also accessible via the global ``miq`` command:
@@ -69,7 +69,7 @@ Visualize the results:
 
    miq visualize-dataset \
      data/addition_grid.jsonl \
-     --output_dir visualizations/grid \
+     --output_dir plots/grid \
      --template T0
 
 Prompt Templates
@@ -282,7 +282,7 @@ The visualization suite provides 6 analysis types inspired by Anthropic's work:
 
    python -m mechinterp_qwen3.visualize_dataset \
      data/addition_grid.jsonl \
-     --output_dir visualizations/grid \
+     --output_dir plots/grid \
      --template T0
 
 **Output**: ``heatmap_pos0.png``, ``heatmap_pos1.png``, ...
@@ -444,7 +444,7 @@ Example: Carry Circuit Discovery
    # 2. Visualize carry structure
    python -m mechinterp_qwen3.visualize_dataset \
      data/addition_grid.jsonl \
-     --output_dir visualizations/carry_analysis
+     --output_dir plots/carry_analysis
 
    # 3. Identify carry vs no-carry examples from visualization
 

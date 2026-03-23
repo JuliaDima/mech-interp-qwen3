@@ -48,3 +48,45 @@ addition_experiment:
   alpha: 0.0
   top_n_groups: 4
   batch_size: 64  # Reduced from 256 to avoid OOM with high feature activation count
+
+# --- Stitching Experiment Specifics ---
+# Specific to `experiments/stitching/run.py`
+# SAE-mediated MLP injection
+#   - Train small SAE (SingleLayerTranscoder) on small addition model's MLP layer
+#   - Fit affine map: small_mlp_out (d_model=256) -> large_mlp_out (d_model=2560)
+#   - Patch Qwen3-4B's hook_mlp_out to test carry circuit transfer
+# References:
+#   - Quirke & Barez (ICLR 2024): arXiv:2310.13121
+#   - Chen et al. (arXiv 2506.06609): Affine stitching methodology
+stitching_experiment:
+  # Small model architecture (trained from scratch on addition)
+  # Following Quirke & Barez (ICLR 2024): N-digit numbers, autoregressive training
+  small_model_layers: 2
+  small_model_heads: 3
+  small_model_d_model: 256
+  small_model_epochs: 2000
+  small_model_lr: 1e-3
+  small_model_num_digits: 5
+
+  # Small SAE (SingleLayerTranscoder) hyperparameters
+  # d_transcoder=4096, which does 16× expansion on d_model=256
+  small_sae_d_transcoder: 4096
+  small_sae_epochs: 500
+  small_sae_lr: 1e-3
+  small_sae_layer: null  # null = last layer of small model (n_layers - 1)
+
+  # Large model layers to probe (Qwen3 hook_mlp_out)
+  # Affine map fitted for each: small_mlp_out (256) -> large_mlp_out (2560)
+  stitch_layer_pairs: [18] # this choice should be sensible
+
+  # Data split: fraction for test set evaluation
+  held_out_fraction: 0.2
+
+  # Cascading carry threshold: ≥2 consecutive carry digits (e.g. 77+23=100)
+  cascading_carry_threshold: 2
+
+  # Dataset path
+  dataset_path: "data/addition_dataset_stitching.jsonl"
+
+  # Output directory
+  out_root: "runs/stitching"
