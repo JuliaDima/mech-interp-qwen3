@@ -2,6 +2,7 @@ import matplotlib
 import torch
 
 matplotlib.use("Agg")
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,7 +11,11 @@ import numpy as np
 import seaborn as sns
 from huggingface_hub import hf_hub_download
 
-from experiments.stitching.run import _load_small_model, _qm_make_sample
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from experiments.stitching.run import _load_small_model, _qm_make_sample  # noqa: E402
 
 
 def plot_shift_sensitivity_intuitive():

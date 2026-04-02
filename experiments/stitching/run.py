@@ -58,6 +58,10 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from experiments.addition.dataset_generation.generate_dataset_with_predictions import (  # noqa: E402
+    TEMPLATES,
+    TemplateID,
+)
 from mechinterp_qwen3.attribution_model import AttributionModel  # noqa: E402
 from mechinterp_qwen3.transcoder.single_layer_transcoder import SingleLayerTranscoder  # noqa: E402
 from mechinterp_qwen3.utils.config_utils import (  # noqa: E402
@@ -68,6 +72,7 @@ from mechinterp_qwen3.utils.config_utils import (  # noqa: E402
 )
 from mechinterp_qwen3.utils.hf_utils import load_transcoder_from_hub  # noqa: E402
 from mechinterp_qwen3.utils.model_utils import get_default_device, parse_dtype  # noqa: E402
+from mechinterp_qwen3.utils.token_utils import tokenize_qwen_input  # noqa: E402
 from mechinterp_qwen3.utils_seed import seed_everything  # noqa: E402
 
 logging.basicConfig(
@@ -82,124 +87,12 @@ log = logging.getLogger("stitching.run")
 # Utilities
 # ---------------------------------------------------------------------------
 
-
-def load_addition_dataset(
-    dataset_path: str,
-    max_samples: int | None = None,
-    num_digits: int = 5,
-) -> list[dict[str, Any]]:
-    """Load addition dataset from JSONL.  Falls back to generating samples on the fly.
-
-    Fix #4: fallback now uses the correct n-digit range (not hardcoded [0, 20]),
-    matching Quirke & Barez (ICLR 2024) which trains on 5-digit numbers.
-    """
-    import random
-
-    path = Path(dataset_path)
-    samples: list[dict[str, Any]] = []
-
-    if path.exists():
-        with open(path) as f:
-            for line in f:
-                samples.append(json.loads(line))
-                if max_samples and len(samples) >= max_samples:
-                    break
-        return samples
-
-    # ---- Fallback: generate on the fly ----
-    log.warning(
-        "Dataset not found at %s — generating %d-digit samples on the fly", dataset_path, num_digits
-    )
-    num_samples = max_samples if max_samples else 200_000
-    max_val = 10**num_digits - 1
-
-    fallback_n = min(num_samples if num_samples else 50_000, 50_000)  # cap fallback at 50k
-    random.seed(42)
-    seen: set[tuple[int, int]] = set()
-    while len(samples) < fallback_n:
-        a = random.randint(0, max_val)
-        b = random.randint(0, max_val)
-        if (a, b) in seen:
-            continue
-        seen.add((a, b))
-        # Format matching the QuantaMaths expert's "stiff" positional expectations
-        a_str = f"{a:0>{num_digits}}"
-        b_str = f"{b:0>{num_digits}}"
-        samples.append(
-            {
-                "prompt": f"{a_str}+{b_str}=",
-                "answer": str(a + b),
-                "a": a,
-                "b": b,
-                "template": "T0",
-            }
-        )
-
-    log.info("Generated %d samples from [0, %d]", len(samples), max_val)
-    return samples
-
-
-def get_small_model_tokenizer(model: SmallAdditionTransformer, max_len: int | None = None):
-    """Centralized tokenizer factory for small models.
-
-    Identifies if model is QuantaMaths (15-token vocab) or scratch-trained (18-token).
-    Returns a function(text) -> list[int] with consistent padding/truncation.
-    """
-    _n_ctx = max_len if max_len is not None else model.model.cfg.n_ctx
-
-    # Case 1: QuantaMaths pretrained model (PhilipQuirke/QuantaMaths_*)
-    if hasattr(model, "_tokenizer"):
-        _tok_fn = model._tokenizer  # type: ignore[attr-defined]
-
-        def tokenize_qm(text: str, max_l: int = _n_ctx) -> list[int]:
-            toks = _tok_fn(text)
-            if len(toks) < max_l:
-                toks += [0] * (max_l - len(toks))
-            return toks[:max_l]
-
-        return tokenize_qm
-
-    # Case 2: Scratch-trained addition model
-    _vocab = ["<PAD>", "<BOS>", "<EOS>"] + [str(i) for i in range(10)] + ["+", "=", " "]
-    _c2i = {c: i for i, c in enumerate(_vocab)}
-
-    def tokenize_scratch(text: str, max_l: int = _n_ctx) -> list[int]:
-        toks = [_c2i.get(c, 0) for c in text]
-        if len(toks) < max_l:
-            toks += [0] * (max_l - len(toks))
-        return toks[:max_l]
-
-    return tokenize_scratch
-
-
-def identify_cascading_carry_cases(samples: list[dict[str, Any]], threshold: int = 2) -> list[bool]:
-    """Identify samples where carry propagates across >= threshold digits.
-
-    Fix #8: removed unused `carry_count` variable.
-    """
-    cascading = []
-    for sample in samples:
-        a = sample.get("a", 0)
-        b = sample.get("b", 0)
-        carry = 0
-        max_consecutive = 0
-        current_consecutive = 0
-
-        while a > 0 or b > 0 or carry > 0:
-            digit_sum = (a % 10) + (b % 10) + carry
-            if digit_sum >= 10:
-                carry = 1
-                current_consecutive += 1
-                max_consecutive = max(max_consecutive, current_consecutive)
-            else:
-                carry = 0
-                current_consecutive = 0
-            a //= 10
-            b //= 10
-
-        cascading.append(max_consecutive >= threshold)
-    return cascading
-
+from experiments.stitching.utils import (  # noqa: E402
+    get_small_model_tokenizer,
+    identify_cascading_carry_cases,
+    load_addition_dataset,
+    plot_stitching_results,
+)
 
 # ---------------------------------------------------------------------------
 # Step 1: Train Small Addition Model
@@ -207,7 +100,19 @@ def identify_cascading_carry_cases(samples: list[dict[str, Any]], threshold: int
 
 
 class SmallAdditionTransformer(nn.Module):
-    """Small transformer for learning addition, following Quirke & Barez (ICLR 2024)."""
+    """Small transformer for learning addition, following Quirke & Barez (ICLR 2024).
+
+    Args:
+        n_layers: Number of transformer layers
+        n_heads: Number of attention heads
+        d_model: Model dimension
+        vocab_size: Vocabulary size
+        max_seq_len: Maximum sequence length
+        device: Device to place model on
+        use_rope: If True, use Rotary Position Embeddings (RoPE) instead of learned
+                  absolute positional embeddings. RoPE is used by Qwen models and may
+                  improve alignment for stitching experiments.
+    """
 
     def __init__(
         self,
@@ -217,23 +122,35 @@ class SmallAdditionTransformer(nn.Module):
         vocab_size: int = 15,
         max_seq_len: int = 64,
         device: torch.device | str | None = None,
+        use_rope: bool = False,
     ):
         super().__init__()
         self.n_layers = n_layers
         self.n_heads = n_heads
         self.d_model = d_model
+        self.use_rope = use_rope
+
+        # RoPE requires d_head to be even (rotates pairs of dimensions)
+        d_head = d_model // n_heads
+        if use_rope and d_head % 2 != 0:
+            raise ValueError(
+                f"RoPE requires d_head to be even, but got d_head={d_head} "
+                f"(d_model={d_model}, n_heads={n_heads}). "
+                f"Please adjust d_model or n_heads so that d_model/n_heads is even."
+            )
 
         _device_str = str(device) if device is not None else "cpu"
         config = HookedTransformerConfig(
             n_layers=n_layers,
             n_heads=n_heads,
             d_model=d_model,
-            d_head=d_model // n_heads,
+            d_head=d_head,
             d_mlp=d_model * 4,
             d_vocab=vocab_size,
             n_ctx=max_seq_len,
             act_fn="gelu",
             normalization_type="LN",
+            positional_embedding_type="rotary" if use_rope else "standard",
             device=_device_str,
         )
         self.model = HookedTransformer(config)
@@ -324,8 +241,8 @@ def _qm_to_large_dicts(
         a = int(text[:plus])
         b = int(text[plus + 1 : eq])
         total = a + b
-        # Qwen3-4B prompt format matches load_addition_dataset fallback
-        prompt = f"{str(a).zfill(n_digits)}+{str(b).zfill(n_digits)}="
+        # Qwen3-4B prompt format matches T0 template
+        prompt = TEMPLATES[TemplateID.T0].format(a=a, b=b)
         dicts.append({"prompt": prompt, "a": a, "b": b, "answer": str(total)})
     return dicts
 
@@ -409,7 +326,6 @@ def load_quanta_maths_model(
     wrapper.model.to(device)
     wrapper.model.eval()
 
-    # Attach metadata used by extraction functions
     wrapper._n_digits = n_digits  # type: ignore[attr-defined]
     wrapper._tokenizer = _qm_tokenize  # type: ignore[attr-defined]
     wrapper._make_sample = _qm_make_sample  # type: ignore[attr-defined]
@@ -426,19 +342,47 @@ def train_small_model(
     dtype: torch.dtype,
     num_digits: int = 5,
     dry_run: bool = False,
+    use_rope: bool = False,
 ) -> tuple[SmallAdditionTransformer, list[str], list[str], list[str]]:
     """Train a small transformer on n-digit addition (Quirke & Barez, ICLR 2024).
 
-    Format: "12345+67890=80235" (no spaces, autoregressive next-token prediction).
-    Returns (model, train_samples_str, val_samples_str, ood_samples_str).
+    Format: "12345+67890=+080235" (QuantaMaths format: zero-padded with answer sign).
+
+    Args:
+        n_layers: Number of transformer layers
+        n_heads: Number of attention heads
+        d_model: Model dimension
+        epochs: Number of training epochs
+        lr: Learning rate
+        device: Device to train on
+        dtype: Data type for model
+        num_digits: Number of digits for addition problems
+        dry_run: If True, use small dataset for quick testing
+        use_rope: If True, use Rotary Position Embeddings (RoPE) instead of standard
+                  absolute positional embeddings. RoPE may improve alignment with Qwen.
+
+    Returns:
+        (model, train_samples_str, val_samples_str, ood_samples_str)
     """
     import random
 
-    log.info("Training small addition model (Quirke & Barez, ICLR 2024)")
+    positional_type = "RoPE" if use_rope else "absolute"
+    log.info(
+        "Training small addition model (Quirke & Barez, ICLR 2024) with %s positional embeddings",
+        positional_type,
+    )
 
-    vocab = ["<PAD>", "<BOS>", "<EOS>"] + [str(i) for i in range(10)] + ["+", "=", " "]
-    vocab_size = len(vocab)
+    # QuantaMaths vocabulary (15 tokens exactly)
+    # 0-9, +, -, =, P (answer +), M (answer -)
+    vocab = [str(i) for i in range(10)] + ["+", "-", "=", "P", "M"]
+    vocab_size = len(vocab)  # Must be exactly 15
+    assert vocab_size == 15, f"QuantaMaths requires exactly 15 tokens, got {vocab_size}"
+
+    # Map characters to indices
     char_to_idx = {c: i for i, c in enumerate(vocab)}
+    # Answer signs use dedicated tokens at the end
+    answer_plus_idx = vocab.index("P")  # Token 13
+    answer_minus_idx = vocab.index("M")  # Token 14
 
     model = SmallAdditionTransformer(
         n_layers=n_layers,
@@ -446,6 +390,7 @@ def train_small_model(
         d_model=d_model,
         vocab_size=vocab_size,
         device=device,
+        use_rope=use_rope,
     )
     model.model.to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
@@ -461,17 +406,20 @@ def train_small_model(
 
     log.info("Generating %d-digit addition data (range [0, %d])", num_digits, max_val)
 
-    train_samples = [
-        f"{random.randint(0, max_val)}+{random.randint(0, max_val)}="
-        f"{(a := random.randint(0, max_val)) + (b := random.randint(0, max_val))}"  # noqa: F841
-        for _ in range(num_train)
-    ]
+    def make_sample(a: int, b: int) -> str:
+        """Format sample in QuantaMaths format: "12345+67890=+080235"."""
+        total = a + b
+        a_str = str(a).zfill(num_digits)
+        b_str = str(b).zfill(num_digits)
+        ans_digits = num_digits + 1  # n-digit + n-digit can produce (n+1)-digit
+        ans_str = "+" + str(total).zfill(ans_digits)  # Always positive for addition
+        return f"{a_str}+{b_str}={ans_str}"
 
     train_samples = []
     for _ in range(num_train):
         a = random.randint(0, max_val)
         b = random.randint(0, max_val)
-        train_samples.append(f"{a}+{b}={a+b}")
+        train_samples.append(make_sample(a, b))
 
     val_samples: list[str] = []
     val_set = set(train_samples)
@@ -479,7 +427,7 @@ def train_small_model(
     while len(val_samples) < num_val and attempts < num_val * 10:
         a = random.randint(0, max_val)
         b = random.randint(0, max_val)
-        t = f"{a}+{b}={a+b}"
+        t = make_sample(a, b)
         if t not in val_set:
             val_samples.append(t)
             val_set.add(t)
@@ -491,7 +439,7 @@ def train_small_model(
     for _ in range(num_ood):
         a = random.randint(ood_min, ood_max)
         b = random.randint(ood_min, ood_max)
-        ood_samples.append(f"{a}+{b}={a+b}")
+        ood_samples.append(make_sample(a, b))
 
     if dry_run:
         train_samples = train_samples[:10]
@@ -499,7 +447,23 @@ def train_small_model(
         ood_samples = ood_samples[:5]
         epochs = min(epochs, 100)
 
-    tokenize = get_small_model_tokenizer(model)
+    def tokenize(text: str) -> list[int]:
+        """Tokenize QuantaMaths format: "12345+67890=+080235"."""
+        tokens: list[int] = []
+        eq_idx = text.index("=")
+        for i, ch in enumerate(text):
+            if ch == "=":
+                tokens.append(char_to_idx["="])
+            elif i == eq_idx + 1:
+                # First char after '=' is answer sign (+ or -)
+                tokens.append(answer_plus_idx if ch == "+" else answer_minus_idx)
+            elif ch.isdigit():
+                tokens.append(int(ch))
+            elif ch == "+":
+                tokens.append(char_to_idx["+"])
+            elif ch == "-":
+                tokens.append(char_to_idx["-"])
+        return tokens
 
     def evaluate(split: list[str], max_eval: int = 200) -> float:
         """Batch-evaluate accuracy on up to max_eval samples."""
@@ -507,7 +471,12 @@ def train_small_model(
         subset = split[:max_eval]
         # Pad all sequences to the same length for batched inference
         ids_list = [tokenize(t) for t in subset]
-        ids_batch = torch.tensor(ids_list, device=device, dtype=torch.long)  # (B, L)
+        max_len = max(len(ids) for ids in ids_list)
+        # Pad with zeros (or could use a specific PAD token if we had one)
+        ids_batch = torch.zeros((len(ids_list), max_len), device=device, dtype=torch.long)
+        for i, ids in enumerate(ids_list):
+            ids_batch[i, : len(ids)] = torch.tensor(ids, dtype=torch.long)
+
         correct = total = 0
         with torch.no_grad():
             logits_batch = model.model(ids_batch)  # (B, L, V) — single forward pass
@@ -515,13 +484,20 @@ def train_small_model(
             eq = text.find("=")
             if eq == -1:
                 continue
-            for k, ch in enumerate(text[eq + 1 :]):
-                if ch not in char_to_idx:
-                    break
+            # Answer starts after '=' sign
+            answer_part = text[eq + 1 :]
+            for k, ch in enumerate(answer_part):
                 pos = eq + k
                 if pos < logits_batch.shape[1] - 1:
                     pred = int(logits_batch[i, pos].argmax())
-                    if pred == char_to_idx[ch]:
+                    # First character is answer sign (P or M)
+                    if k == 0:
+                        expected = answer_plus_idx if ch == "+" else answer_minus_idx
+                    elif ch.isdigit():
+                        expected = int(ch)
+                    else:
+                        continue
+                    if pred == expected:
                         correct += 1
                     total += 1
         model.model.train()
@@ -536,13 +512,18 @@ def train_small_model(
 
         for i in range(0, len(train_samples), batch_size):
             batch = train_samples[i : i + batch_size]
-            ids = torch.tensor([tokenize(t) for t in batch], device=device, dtype=torch.long)
-            logits = model.model(ids)
+            # Pad batch to same length (use zeros, which is digit '0')
+            ids_list = [tokenize(t) for t in batch]
+            max_len = max(len(ids) for ids in ids_list)
+            ids_batch = torch.zeros((len(ids_list), max_len), device=device, dtype=torch.long)
+            for j, ids in enumerate(ids_list):
+                ids_batch[j, : len(ids)] = torch.tensor(ids, dtype=torch.long)
+
+            logits = model.model(ids_batch)
             shift_logits = logits[:, :-1].contiguous()
-            shift_labels = ids[:, 1:].contiguous()
-            loss = F.cross_entropy(
-                shift_logits.view(-1, vocab_size), shift_labels.view(-1), ignore_index=0
-            )
+            shift_labels = ids_batch[:, 1:].contiguous()
+            # No ignore_index since all tokens (including padding 0s) are valid
+            loss = F.cross_entropy(shift_logits.view(-1, vocab_size), shift_labels.view(-1))
             optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -564,6 +545,11 @@ def train_small_model(
             best_val_acc = max(best_val_acc, val_acc)
 
     log.info("Training complete. Best val accuracy: %.2f%%", best_val_acc)
+
+    model._n_digits = num_digits  # type: ignore[attr-defined]
+    model._tokenizer = tokenize  # type: ignore[attr-defined]
+    model._make_sample = make_sample  # type: ignore[attr-defined]
+
     return model, train_samples, val_samples, ood_samples
 
 
@@ -830,7 +816,7 @@ def collect_large_mlp_outputs(
     with torch.no_grad():
         for sample in tqdm(samples, desc="Collecting large MLP outputs"):
             prompt = sample["prompt"]
-            tokens = large_model.to_tokens(prompt)
+            tokens = tokenize_qwen_input(prompt, large_model.tokenizer, device=device).unsqueeze(0)
             eq_pos = tokens.shape[1] - 1  # last token before generation
 
             cache: dict[int, torch.Tensor] = {}
@@ -965,6 +951,8 @@ def inject_and_verify(
     sae_layer: int,
     cascading_carry_threshold: int,
     device: torch.device,
+    plot_dataset: bool = False,
+    out_root: Path | str | None = None,
 ) -> dict[str, Any]:
     """Inject small SAE MLP outputs into Qwen3-4B via hook_mlp_out patching.
 
@@ -996,6 +984,11 @@ def inject_and_verify(
     total_kl = 0.0
     n_valid = 0
 
+    tf_probs_before = []
+    tf_probs_after = []
+    tf_a_vals = []
+    tf_b_vals = []
+
     small_model.model.eval()
     small_sae.eval()
     large_model.eval()
@@ -1005,7 +998,7 @@ def inject_and_verify(
             a_val = sample.get("a", 0)
             b_val = sample.get("b", 0)
             answer = sample.get("answer", str(a_val + b_val))
-            prompt = sample.get("prompt", f"calc: {a_val}+{b_val}= ")
+            prompt = sample.get("prompt", TEMPLATES[TemplateID.T0].format(a=a_val, b=b_val))
 
             # ---- small model → SAE → small_mlp_out ----
             # Use correct QuantaMaths format: zero-padded with answer sign
@@ -1044,11 +1037,18 @@ def inject_and_verify(
             # ---- affine map → large MLP output space ----
             stitched = (small_mlp_out @ W.T + b_vec).to(dtype=large_model.cfg.dtype)  # (1, d_large)
 
-            # ---- large model: before / after ----
-            large_tokens = large_model.to_tokens(prompt)
+            # ---- large model: before / after (Teacher Forced) ----
+            large_tokens = tokenize_qwen_input(prompt, large_model.tokenizer, device).unsqueeze(0)
             eq_large = large_tokens.shape[1] - 1
 
-            logits_before = large_model(large_tokens)
+            if not answer:
+                continue
+            ans_encoded = large_model.tokenizer(
+                answer, return_tensors="pt", add_special_tokens=False
+            ).input_ids.to(device)
+            full_tokens = torch.cat([large_tokens, ans_encoded], dim=1)
+
+            logits_before = large_model(full_tokens)
 
             def patch_hook(
                 act: torch.Tensor,
@@ -1056,6 +1056,12 @@ def inject_and_verify(
                 _val: torch.Tensor = stitched,
                 _pos: int = eq_large,
             ) -> torch.Tensor:
+                # During generate() TransformerLens runs one token at a time
+                # (KV-cached), so act has shape (1, 1, d_model) for every
+                # decoding step after the prefill.  Only patch during the
+                # prefill pass, when the full prompt is still in context.
+                if act.shape[1] <= _pos:
+                    return act
                 act = act.clone()
                 act[:, _pos, :] = _val
                 return act
@@ -1063,28 +1069,52 @@ def inject_and_verify(
             with large_model.hooks(
                 fwd_hooks=[(f"blocks.{best_large_layer}.hook_mlp_out", patch_hook)]
             ):
-                logits_after = large_model(large_tokens)
+                logits_after = large_model(full_tokens)
 
-            pred_before = int(logits_before[0, -1].argmax())
-            pred_after = int(logits_after[0, -1].argmax())
+            # Accuracy: token-ID match at the first answer position (teacher forced).
+            # answer_toks contains all token IDs that make up the answer string; we
+            # check whether the model's top-1 prediction at eq_large is among them.
+            # This is faster than generate() and avoids decoding artifacts.
+            answer_toks = large_model.tokenizer(answer, add_special_tokens=False).input_ids
+            pred_before_tok = int(logits_before[0, eq_large, :].argmax())
+            pred_after_tok = int(logits_after[0, eq_large, :].argmax())
+            is_correct_before = pred_before_tok in answer_toks
+            is_correct_after = pred_after_tok in answer_toks
 
-            if answer:
-                answer_toks = large_model.tokenizer.encode(answer[0], add_special_tokens=False)
-                if pred_before in answer_toks:
-                    correct_before += 1
-                    if cascading[i]:
-                        casc_before += 1
-                if pred_after in answer_toks:
-                    correct_after += 1
-                    if cascading[i]:
-                        casc_after += 1
+            if is_correct_before:
+                correct_before += 1
+                if cascading[i]:
+                    casc_before += 1
+            if is_correct_after:
+                correct_after += 1
+                if cascading[i]:
+                    casc_after += 1
+
+            # ---- Teacher Forcing Analysis (Average P(correct) over the whole answer) ----
+            prob_b_seq = []
+            prob_a_seq = []
+            for k in range(ans_encoded.shape[1]):
+                t_id = ans_encoded[0, k].item()
+                pos = eq_large + k
+                prob_b_seq.append(F.softmax(logits_before[0, pos], dim=-1)[t_id].item())
+                prob_a_seq.append(F.softmax(logits_after[0, pos], dim=-1)[t_id].item())
+
+            tf_probs_before.append(float(np.mean(prob_b_seq)))
+            tf_probs_after.append(float(np.mean(prob_a_seq)))
+            tf_a_vals.append(a_val)
+            tf_b_vals.append(b_val)
 
             # ---- KL divergence ----
-            p = F.softmax(logits_before[0, -1], dim=-1).clamp(min=1e-10)
-            q = F.softmax(logits_after[0, -1], dim=-1).clamp(min=1e-10)
+            p = F.softmax(logits_before[0, eq_large], dim=-1).clamp(min=1e-10)
+            q = F.softmax(logits_after[0, eq_large], dim=-1).clamp(min=1e-10)
             kl = F.kl_div(q.log(), p, reduction="sum", log_target=False).item()
             total_kl += kl
             n_valid += 1
+
+    # Plot if requested
+    if plot_dataset and out_root is not None:
+        plot_dir = Path(out_root) / "plots" / "stitching"
+        plot_stitching_results(tf_a_vals, tf_b_vals, tf_probs_before, tf_probs_after, plot_dir)
 
     denom = max(n_valid, 1)
     metrics: dict[str, Any] = {
@@ -1158,6 +1188,9 @@ def build_parser() -> argparse.ArgumentParser:
     phases.add_argument("--fit-stitch", action="store_true", help="Fit affine maps")
     phases.add_argument("--verify", action="store_true", help="Verify with activation patching")
     phases.add_argument("--compare-graphs", action="store_true", help="Compare attribution graphs")
+    phases.add_argument(
+        "--plot-dataset", action="store_true", help="Plot teacher-forced P(correct) vs examples"
+    )
     phases.add_argument("--all", action="store_true", help="Run all phases")
 
     model_args = p.add_argument_group("Model")
@@ -1182,13 +1215,27 @@ def build_parser() -> argparse.ArgumentParser:
     small_args.add_argument("--small_model_layers", type=int, default=2)
     small_args.add_argument("--small_model_heads", type=int, default=3)
     small_args.add_argument("--small_model_d_model", type=int, default=256)
-    small_args.add_argument("--small_model_epochs", type=int, default=2000)
+    small_args.add_argument(
+        "--small_model_epochs",
+        type=int,
+        default=30,
+        help="Training epochs. Paper uses ~1.5M datums: 50K samples × 30 epochs = 1.5M",
+    )
     small_args.add_argument("--small_model_lr", type=float, default=1e-3)
     small_args.add_argument(
         "--small_model_num_digits",
         type=int,
         default=5,
         help="Only used when training from scratch (--hub-model='')",
+    )
+    small_args.add_argument(
+        "--small_model_use_rope",
+        action="store_true",
+        help=(
+            "Use Rotary Position Embeddings (RoPE) instead of absolute positional embeddings "
+            "when training small model from scratch. RoPE matches Qwen's positional encoding "
+            "and may improve representation alignment for stitching. Only used when --hub-model=''."
+        ),
     )
 
     sae_args = p.add_argument_group("Small SAE")
@@ -1315,6 +1362,16 @@ def main() -> None:
     stitch_maps_path = out_root / "stitch_maps.pt"
     small_samples_path = out_root / "training_samples.pt"
 
+    # ---- Load large model once (reuse across steps) ----
+    # Only load if we need it (steps 3, 5, or 6)
+    large_model: AttributionModel | None = None
+    if do_collect_lg or do_verify or do_compare:
+        log.info("=" * 60)
+        log.info("Loading large model (will be reused across steps)")
+        log.info("=" * 60)
+        large_model = _load_large_model(args, dtype, device=device)
+        log.info("Large model loaded successfully - will reuse for all steps")
+
     # ========================================================================
     # Step 1: Train small model
     # ========================================================================
@@ -1330,8 +1387,21 @@ def main() -> None:
 
         if hub_model_id:
             # ---- Load pretrained QuantaMaths model from HuggingFace ----
-            log.info("Using pretrained model: %s (skipping training)", hub_model_id)
+            log.info(
+                "Using pretrained model: %s (skipping training)",
+                hub_model_id,
+            )
             small_model, n_digits_hub = load_quanta_maths_model(hub_model_id, device=device)
+            args.small_model_d_model = small_model.d_model  # Use the actual pretrained dimension
+            log.info(
+                "Overwriting args.small_model_d_model with actual pretrained dimension: %d",
+                small_model.d_model,
+            )
+            args.small_model_num_digits = n_digits_hub
+            log.info(
+                "Overwriting args.small_model_num_digits with actual pretrained digits: %d",
+                n_digits_hub,
+            )
             import random as _rnd
 
             _rnd.seed(args.seed)
@@ -1361,6 +1431,7 @@ def main() -> None:
                 dtype=dtype,
                 num_digits=args.small_model_num_digits,
                 dry_run=args.dry_run,
+                use_rope=args.small_model_use_rope,
             )
             torch.save(small_model.state_dict(), small_model_path)
             torch.save({"train": tr_str, "val": val_str, "ood": ood_str}, small_samples_path)
@@ -1412,9 +1483,17 @@ def main() -> None:
         if not small_extraction_samples:
             small_extraction_samples = _load_small_samples(small_samples_path)
 
+        # Limit to 5000 samples for speed
+        small_extraction_samples_limited = small_extraction_samples[:5000]
+        log.info(
+            "Using %d samples for collection (limited from %d)",
+            len(small_extraction_samples_limited),
+            len(small_extraction_samples),
+        )
+
         _sae_layer = sae_layer if sae_layer is not None else small_model.n_layers - 1
         small_sae_outputs = collect_small_sae_outputs(
-            small_model, small_sae, small_extraction_samples, device, _sae_layer
+            small_model, small_sae, small_extraction_samples_limited, device, _sae_layer
         )
         torch.save(small_sae_outputs, small_sae_out_path)
         log.info("Saved small SAE outputs: %s", small_sae_outputs.shape)
@@ -1429,18 +1508,22 @@ def main() -> None:
         log.info("=" * 60)
         log.info("Step 3: Collecting large model MLP outputs")
         log.info("=" * 60)
-        large_model = _load_large_model(args, dtype, device=device)
+        # Large model already loaded at the start - reuse it
+        if large_model is None:
+            raise RuntimeError("Large model should have been loaded at start of main()")
         large_layers: list[int] = list(args.stitch_layer_pairs)
 
         # Build matched samples: same (a,b) pairs as the small model saw
         hub_model_id = getattr(args, "hub_model", "").strip()
         if hub_model_id and small_extraction_samples:
+            # Limit to 5000 samples for speed (must match small SAE collection)
+            small_extraction_samples_limited = small_extraction_samples[:5000]
             # Parse QuantaMaths strings → Qwen3-4B prompt dicts (same problems, different format)
             _n_dig = (
                 getattr(small_model, "_n_digits", args.small_model_num_digits) if small_model else 5
             )
             large_collect_samples = _qm_to_large_dicts(
-                small_extraction_samples, large_model, _n_dig
+                small_extraction_samples_limited, large_model, _n_dig
             )
             log.info(
                 "Using %d matched QuantaMaths samples for large model collection",
@@ -1494,7 +1577,9 @@ def main() -> None:
             small_sae = _load_small_sae(args, small_sae_path, device)
         if stitch_maps is None:
             stitch_maps = torch.load(stitch_maps_path)
-        large_model = _load_large_model(args, dtype, device=device)
+        # Large model already loaded at the start - reuse it
+        if large_model is None:
+            raise RuntimeError("Large model should have been loaded at start of main()")
 
         # Slice test_dict to avoid extremely long verification runs
         hub_model_id = getattr(args, "hub_model", "").strip()
@@ -1531,6 +1616,8 @@ def main() -> None:
             sae_layer=_sae_layer,
             cascading_carry_threshold=args.cascading_carry_threshold,
             device=device,
+            plot_dataset=True,
+            out_root=out_root,
         )
         metrics["patching"] = patch_metrics
 
@@ -1541,7 +1628,9 @@ def main() -> None:
         log.info("=" * 60)
         log.info("Step 6: Attribution graph comparison")
         log.info("=" * 60)
-        large_model = _load_large_model(args, dtype, device=device)
+        # Large model already loaded at the start - reuse it
+        if large_model is None:
+            raise RuntimeError("Large model should have been loaded at start of main()")
         if stitch_maps is None:
             stitch_maps = torch.load(stitch_maps_path)
         graph_cmp = compare_attribution_graphs(
@@ -1550,7 +1639,7 @@ def main() -> None:
         metrics["graph_comparison"] = graph_cmp
 
     # ---- Save metrics ----
-    metrics_path = out_root / "metrics.json"
+    metrics_path = out_root / "info.json"
     with open(metrics_path, "w") as f:
         json.dump(metrics, f, indent=2, default=str)
     log.info("Saved metrics to %s", metrics_path)
@@ -1582,7 +1671,14 @@ def _load_small_model(
     # Infer architecture from checkpoint
     vocab_size = _get("embed.W_E").shape[0]
     d_model = _get("embed.W_E").shape[1]
-    n_ctx = _get("pos_embed.W_pos").shape[0]
+
+    # RoPE models store rotary_sin/cos per block instead of a learned pos_embed
+    use_rope = any(k.endswith("attn.rotary_sin") for k in sd)
+    if use_rope:
+        # rotary_sin shape: (n_ctx, d_head/2) — first dim is max sequence length
+        n_ctx = _get("blocks.0.attn.rotary_sin").shape[0]
+    else:
+        n_ctx = _get("pos_embed.W_pos").shape[0]
 
     # Count layers robustly
     prefix = "model.blocks." if has_prefix else "blocks."
@@ -1596,6 +1692,7 @@ def _load_small_model(
         vocab_size=vocab_size,
         max_seq_len=n_ctx,
         device=device,
+        use_rope=use_rope,
     )
 
     # Load correctly
@@ -1605,8 +1702,6 @@ def _load_small_model(
         m.model.load_state_dict(sd)
 
     m.to(device)
-    return m
-
     # Restore QuantaMaths tokenizer attributes if this is a hub model
     hub_model_id = getattr(args, "hub_model", "").strip()
     if hub_model_id and vocab_size == 15:  # QuantaMaths vocab is always 15
