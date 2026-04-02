@@ -6,8 +6,8 @@ This script loads or trains a small addition model and outputs JSON with:
 2. 10 output token predictions with probabilities
 
 Usage:
-    python experiments/stitching/visualize_small_model_predictions.py --hub-model PhilipQuirke/QuantaMaths_add_d5_l1_h3_t15K_s372001
-    python experiments/stitching/visualize_small_model_predictions.py --train-from-scratch
+    python experiments/stitching/visualize_small_model_predictions.py --hub-model PhilipQuirke/QuantaMaths_add_d5_l1_h3_t15K_s372001 --output-file runs/stitching/qm/metrics.json
+    python experiments/stitching/visualize_small_model_predictions.py --model-path runs/stitching/small_model.pt --output-file runs/stitching/rope/metrics.json --use-rope
 """
 
 import argparse
@@ -28,7 +28,6 @@ from experiments.stitching.run import (  # noqa: E402
     SmallAdditionTransformer,
     _qm_make_sample,
     _qm_tokenize,
-    get_small_model_tokenizer,
     load_quanta_maths_model,
     train_small_model,
 )
@@ -182,9 +181,21 @@ def main():
         help="HuggingFace model ID (empty for training from scratch)",
     )
     parser.add_argument(
+        "--model-path",
+        type=Path,
+        default=None,
+        help="Path to a local .pt model file",
+    )
+    parser.add_argument(
         "--train-from-scratch", action="store_true", help="Train model from scratch"
     )
     parser.add_argument("--num-digits", type=int, default=5, help="Number of digits for addition")
+    parser.add_argument("--n-layers", type=int, default=2, help="Number of layers")
+    parser.add_argument("--n-heads", type=int, default=4, help="Number of heads")
+    parser.add_argument("--d-model", type=int, default=256, help="Model dimension")
+    parser.add_argument(
+        "--use-rope", action="store_true", default=True, help="Use RoPE positional embeddings"
+    )
     parser.add_argument("--n-examples", type=int, default=10, help="Number of examples to analyze")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", default=None)
@@ -198,23 +209,67 @@ def main():
     device = torch.device(args.device) if args.device else get_default_device()
 
     # Load or train model
-    if args.train_from_scratch or not args.hub_model:
+    if args.model_path:
+        print(f"=== Loading local model: {args.model_path} ===", file=sys.stderr)
+        small_model = SmallAdditionTransformer(
+            n_layers=args.n_layers,
+            n_heads=args.n_heads,
+            d_model=args.d_model,
+            device=device,
+            use_rope=args.use_rope,
+        )
+        sd = torch.load(args.model_path, map_location=device)
+        small_model.load_state_dict(sd)
+        small_model.model.eval()
+
+        # QuantaMaths vocab
+        vocab = [str(i) for i in range(10)] + ["+", "-", "=", "P", "M"]
+        tokenize = _qm_tokenize
+        n_digits = args.num_digits
+
+        # Generate samples
+        import random
+
+        random.seed(args.seed)
+        max_val = 10**n_digits - 1
+        samples = []
+        for _ in range(args.n_examples):
+            a = random.randint(0, max_val)
+            b = random.randint(0, max_val)
+            sample_dict = _qm_make_sample(a, b, n_digits)
+            samples.append(sample_dict)
+
+    elif args.train_from_scratch or not args.hub_model:
         print("=== Training small model from scratch ===", file=sys.stderr)
         small_model, train_samples, _, _ = train_small_model(
-            n_layers=2,
-            n_heads=3,
-            d_model=256,
+            n_layers=args.n_layers,
+            n_heads=args.n_heads,
+            d_model=args.d_model,
             epochs=100,
             lr=1e-3,
             device=device,
             dtype=torch.float32,
             num_digits=args.num_digits,
             dry_run=False,
+            use_rope=args.use_rope,
         )
 
         # Create vocab
-        vocab = ["<PAD>", "<BOS>", "<EOS>"] + [str(i) for i in range(10)] + ["+", "=", " "]
-        tokenize = get_small_model_tokenizer(small_model)
+        vocab = [str(i) for i in range(10)] + ["+", "-", "=", "P", "M"]
+        tokenize = _qm_tokenize
+        n_digits = args.num_digits
+
+        # Generate samples
+        import random
+
+        random.seed(args.seed)
+        max_val = 10**n_digits - 1
+        samples = []
+        for _ in range(args.n_examples):
+            a = random.randint(0, max_val)
+            b = random.randint(0, max_val)
+            sample_dict = _qm_make_sample(a, b, n_digits)
+            samples.append(sample_dict)
 
         # Generate samples
         import random
@@ -282,6 +337,7 @@ def main():
     }
 
     if args.output_file:
+        args.output_file.parent.mkdir(parents=True, exist_ok=True)
         with open(args.output_file, "w") as f:
             json.dump(output, f, indent=2)
         print(f"=== JSON output written to {args.output_file} ===", file=sys.stderr)

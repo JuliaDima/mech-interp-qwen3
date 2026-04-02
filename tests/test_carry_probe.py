@@ -238,8 +238,10 @@ def test_probe_dataset():
     mock_model.tokenizer.convert_ids_to_tokens.return_value = ["1", "+", "1", "="]
 
     # Mock get_activations
-    mock_act = torch.randn(10, 3, d_transcoder)  # [n_layers, seq_len, d_transcoder]
-    mock_logits = torch.randn(1, 3, 100)
+    # tokenize_qwen_input prepends pad_token_id (0) since tokens[0]=1 ∉ all_special_ids,
+    # so the effective seq_len seen by get_activations is 4, not 3.
+    mock_act = torch.randn(10, 4, d_transcoder)  # [n_layers, seq_len, d_transcoder]
+    mock_logits = torch.randn(1, 4, 100)
     mock_model.get_activations.return_value = (mock_logits, mock_act)
 
     # Test dataset without caching
