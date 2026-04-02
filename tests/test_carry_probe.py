@@ -225,11 +225,20 @@ def test_probe_dataset():
     # Mock model
     mock_model = MagicMock()
     mock_model.cfg.n_layers = 10
-    # Mock extract_activations_online return value
-    mock_model.tokenize_qwen_input.return_value = torch.tensor([1, 2, 3])
+    mock_model.cfg.device = "cpu"
+
+    # Mock tokenizer output so tokenize_qwen_input works
+    mock_tokenizer_out = MagicMock()
+    mock_tokenizer_out.input_ids = torch.tensor([[1, 2, 3]])
+    mock_model.tokenizer.return_value = mock_tokenizer_out
+    mock_model.tokenizer.all_special_ids = [0]
+    mock_model.tokenizer.pad_token_id = 0
+    mock_model.tokenizer.bos_token_id = None
+    mock_model.tokenizer.eos_token_id = None
+    mock_model.tokenizer.convert_ids_to_tokens.return_value = ["1", "+", "1", "="]
 
     # Mock get_activations
-    mock_act = torch.randn(11, 3, d_transcoder)  # [n_layers, seq_len, d_transcoder]
+    mock_act = torch.randn(10, 3, d_transcoder)  # [n_layers, seq_len, d_transcoder]
     mock_logits = torch.randn(1, 3, 100)
     mock_model.get_activations.return_value = (mock_logits, mock_act)
 
