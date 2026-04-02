@@ -215,7 +215,7 @@ Initial results with the **QuantaMaths d5 expert** showed low alignment (R² ≈
 
 **1. Positional Stiffness**
 
-.. figure:: ../runs/stitching/shift_sensitivity.png
+.. figure:: _static/images/shift_sensitivity.png
    :width: 600
    :alt: Shift Sensitivity Plot
    :align: center

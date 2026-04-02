@@ -217,7 +217,7 @@ full ranked list with ``max_activation`` and ``mean_activation`` over the
 Example: ``L23_F067377``
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. figure:: ../runs/addition/2026-03-23_1427/operand_plots/L23_F067377.png
+.. figure:: _static/images/L23_F067377.png
    :width: 480px
    :align: center
    :alt: Operand plot for layer 23, feature 67377

@@ -1,3 +1,15 @@
+/* Widen the RTD content area. The theme hard-codes max-width on several
+   nested elements; override all of them. */
 .wy-nav-content {
+    max-width: none !important;
+}
+
+.wy-nav-content-wrap {
+    max-width: none !important;
+}
+
+/* Keep readable line length by constraining the inner document */
+.rst-content {
     max-width: 1200px;
+    margin: 0 auto;
 }
