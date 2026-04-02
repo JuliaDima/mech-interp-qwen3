@@ -22,6 +22,7 @@ from experiments.addition.dataset_generation.generate_dataset_with_predictions i
 from experiments.addition.prompts import CALC_GRID  # noqa: E402
 from mechinterp_qwen3.attribution_model import AttributionModel  # noqa: E402
 from mechinterp_qwen3.utils.hf_utils import load_transcoder_from_hub  # noqa: E402
+from mechinterp_qwen3.utils.token_utils import tokenize_qwen_input  # noqa: E402
 
 # 2. Configuration
 model_name = "Qwen/Qwen3-4B"
@@ -59,7 +60,7 @@ def run_benchmark():
             target_token_id = model.to_tokens(target_str, prepend_bos=False)[0, 0].item()
 
             # Tokenize using the standardized tokenize_qwen_input
-            tokens = model.tokenize_qwen_input(prompt).to(device)
+            tokens = tokenize_qwen_input(prompt, model.tokenizer, device)
             if tokens.ndim == 1:
                 tokens = tokens.unsqueeze(0)
 

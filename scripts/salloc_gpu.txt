@@ -34,3 +34,12 @@ python experiments/addition/run.py --graph
 
 export PYTHONPATH=$PYTHONPATH:. && python -u scripts/plot_stitching_improvement.py
 export PYTHONPATH=$PYTHONPATH:. && python -u scripts/plot_stitching_failures.py
+
+miq generate-dataset \
+     --model Qwen/Qwen3-4B \
+     --output_path data/addition_grid.jsonl \
+     --sampling_strategy grid \
+     --max_value 30 \
+     --templates T0
+
+miq visualize-dataset data/addition_grid.jsonl --output_dir plots/grid --template T0

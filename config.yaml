@@ -61,12 +61,18 @@ addition_experiment:
 stitching_experiment:
   # Small model architecture (trained from scratch on addition)
   # Following Quirke & Barez (ICLR 2024): N-digit numbers, autoregressive training
+  # Paper trains on ~1.5M datums: 50K samples × 30 epochs = 1.5M
   small_model_layers: 2
-  small_model_heads: 3
-  small_model_d_model: 256
-  small_model_epochs: 2000
+  small_model_heads: 4  # Changed from 3 to 4 for RoPE compatibility (d_model=256, d_head=64)
+  # Note: if using a pretrained hub_model, small_model_d_model is dynamically overwritten
+  # with the actual model dimension to avoid mismatches during SAE creation.
+  small_model_d_model: 256  # 256 / 4 heads = 64 d_head (even, required for RoPE)
+  small_model_epochs: 30
   small_model_lr: 1e-3
   small_model_num_digits: 5
+  # Train from scratch with RoPE instead of using pretrained model
+  hub_model: ""  # Empty string = train from scratch
+  small_model_use_rope: true  # Use RoPE positional embeddings (matches Qwen architecture)
 
   # Small SAE (SingleLayerTranscoder) hyperparameters
   # d_transcoder=4096, which does 16× expansion on d_model=256

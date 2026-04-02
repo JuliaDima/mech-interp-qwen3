@@ -100,7 +100,7 @@ Generates all possible (a, b) pairs over [0..N] × [0..N].
 
 .. code-block:: bash
 
-   python -m mechinterp_qwen3.dataset_generation \
+   miq generate-dataset \
      --model Qwen/Qwen3-4B \
      --output_path data/addition_grid_20.jsonl \
      --sampling_strategy grid \
@@ -123,7 +123,7 @@ Samples by carry patterns to ensure balanced representation:
 
 .. code-block:: bash
 
-   python -m mechinterp_qwen3.dataset_generation \
+   miq generate-dataset \
      --model Qwen/Qwen3-4B \
      --output_path data/addition_stratified.jsonl \
      --sampling_strategy stratified \
@@ -145,7 +145,7 @@ Pure random sampling with specified sample count.
 
 .. code-block:: bash
 
-   python -m mechinterp_qwen3.dataset_generation \
+   miq generate-dataset \
      --model Qwen/Qwen3-4B \
      --output_path data/addition_random.jsonl \
      --sampling_strategy random \
@@ -280,7 +280,7 @@ The visualization suite provides 6 analysis types inspired by Anthropic's work:
 
 .. code-block:: bash
 
-   python -m mechinterp_qwen3.visualize_dataset \
+   miq visualize-dataset \
      data/addition_grid.jsonl \
      --output_dir plots/grid \
      --template T0
@@ -435,29 +435,31 @@ Example: Carry Circuit Discovery
 .. code-block:: bash
 
    # 1. Generate dataset
-   python -m mechinterp_qwen3.dataset_generation \
+   miq generate-dataset \
      --output_path data/addition_grid.jsonl \
      --sampling_strategy grid \
      --max_value 20 \
      --templates T0
 
    # 2. Visualize carry structure
-   python -m mechinterp_qwen3.visualize_dataset \
+   miq visualize-dataset \
      data/addition_grid.jsonl \
      --output_dir plots/carry_analysis
 
    # 3. Identify carry vs no-carry examples from visualization
 
    # 4. Build attribution graphs
-   miq-build-graph \
+   miq attribute \
      --prompt "calc: 8+9=" \
      --slug carry_example_8_9 \
-     --layers 4,12,20
+     --graph_file_dir graphs/ \
+     -t mwhanna/qwen3-4b-transcoders
 
-   miq-build-graph \
+   miq attribute \
      --prompt "calc: 1+2=" \
      --slug no_carry_example_1_2 \
-     --layers 4,12,20
+     --graph_file_dir graphs/ \
+     -t mwhanna/qwen3-4b-transcoders
 
    # 5. Compare graphs to find carry-specific features
 
@@ -468,7 +470,7 @@ Complete options for dataset generation:
 
 .. code-block:: bash
 
-   python -m mechinterp_qwen3.dataset_generation \
+   miq generate-dataset \
      --model Qwen/Qwen3-4B \
      --output_path data/dataset.jsonl \
      --sampling_strategy {grid,stratified,random} \

@@ -32,6 +32,8 @@ from typing import TYPE_CHECKING
 import torch
 import torch.nn.functional as F
 
+from mechinterp_qwen3.utils.token_utils import tokenize_qwen_input
+
 _log = _logging.getLogger(__name__)
 
 if TYPE_CHECKING:
@@ -517,8 +519,10 @@ def run_interventions(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Tokenize prompts
-    tokens_clean = model.tokenize_qwen_input(prompt).unsqueeze(0)
-    tokens_perturbed = model.tokenize_qwen_input(perturbed_prompt).unsqueeze(0)
+    tokens_clean = tokenize_qwen_input(prompt, model.tokenizer, model.cfg.device).unsqueeze(0)
+    tokens_perturbed = tokenize_qwen_input(
+        perturbed_prompt, model.tokenizer, model.cfg.device
+    ).unsqueeze(0)
 
     # Baseline
     baseline_logits = model(tokens_clean)

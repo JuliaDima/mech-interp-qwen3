@@ -13,7 +13,8 @@
 #   sbatch scripts/sbatch_run.sh miq attribute -p "calc: 1+1="
 #   sbatch scripts/sbatch_run.sh miq attribute -p "You are solving a simple comparison task. Two numbers are given: A and B. Answer with a single character: 'A' if A is larger, otherwise 'B'. A = 864, B = 394, Answer:"
 #   sbatch scripts/sbatch_run.sh python experiments/addition/run.py --all
-#
+#   sbatch --mail-user=[ACCOUNT] --mail-type=BEGIN scripts/sbatch_run.sh command args...
+
 # To use a custom config file:
 #   sbatch scripts/sbatch_run.sh miq --config my_config.yaml attribute ...
 
@@ -21,10 +22,12 @@
 #SBATCH -A MPHIL-DIS-SL2-GPU
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
-#SBATCH --time=00:30:00
+#SBATCH --time=01:00:00
 #SBATCH --job-name=miq_run
 #SBATCH --output=/dev/null
 #SBATCH --error=/dev/null
+##SBATCH --mail-type=BEGIN
+##SBATCH --mail-user=[EMAIL_ADDRESS]
 
 # ---- Repo root ----
 if [ -n "${SLURM_SUBMIT_DIR:-}" ]; then

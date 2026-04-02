@@ -7,6 +7,7 @@ from tqdm import tqdm
 from .attribution_model import AttributionModel
 from .graph import Graph, compute_partial_influences
 from .utils.model_utils import compute_salient_logits, offload_modules
+from .utils.token_utils import tokenize_qwen_input
 
 
 def attribute(
@@ -74,7 +75,7 @@ def _run_attribution(
     if verbose:
         print("Phase 0: Precomputing activations and vectors")
     phase_start = time.time()
-    input_ids = model.tokenize_qwen_input(prompt)
+    input_ids = tokenize_qwen_input(prompt, model.tokenizer, model.cfg.device)
 
     ctx = model.setup_attribution(input_ids)
     activation_matrix = ctx.activation_matrix

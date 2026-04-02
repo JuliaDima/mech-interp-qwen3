@@ -1,5 +1,4 @@
 import contextlib
-import warnings
 import weakref
 from collections.abc import Callable
 from functools import partial
@@ -16,6 +15,7 @@ from .transcoder import TranscoderSet
 from .transcoder.cross_layer_transcoder import CrossLayerTranscoder
 from .utils.hf_utils import load_transcoder_from_hub
 from .utils.model_utils import get_default_device
+from .utils.token_utils import tokenize_qwen_input
 
 
 class AttributionMLP(nn.Module):
@@ -333,47 +333,13 @@ class AttributionModel(HookedTransformer):
         finally:
             self.cfg.output_logits_soft_cap = current_softcap
 
-    def tokenize_qwen_input(self, prompt: str | torch.Tensor | list[int]) -> torch.Tensor:
-        """Convert prompt to 1-D tensor of token ids with proper special token handling."""
-
-        if isinstance(prompt, str):
-            tokens = self.tokenizer(
-                prompt, return_tensors="pt", add_special_tokens=False
-            ).input_ids.squeeze(0)  # type: ignore
-        elif isinstance(prompt, torch.Tensor):
-            tokens = prompt.squeeze()
-        elif isinstance(prompt, list):
-            tokens = torch.tensor(prompt, dtype=torch.long).squeeze()
-        else:
-            raise TypeError(f"Unsupported prompt type: {type(prompt)}")
-
-        if tokens.ndim > 1:
-            raise ValueError(f"Tensor must be 1-D, got shape {tokens.shape}")
-
-        if tokens[0] in self.tokenizer.all_special_ids:  # type: ignore
-            return tokens.to(self.cfg.device)
-
-        candidate_bos_token_ids = [
-            self.tokenizer.pad_token_id,  # Prefer PAD as it's the standard attention sink for Qwen
-            self.tokenizer.bos_token_id,
-            self.tokenizer.eos_token_id,
-        ]
-        candidate_bos_token_ids += self.tokenizer.all_special_ids  # type: ignore
-
-        dummy_bos_token_id = next(filter(None, candidate_bos_token_ids))
-        if dummy_bos_token_id is None:
-            warnings.warn(
-                "No suitable special token found for BOS token replacement. The first token will be ignored.",
-                stacklevel=2,
-            )
-        else:
-            tokens = torch.cat([torch.tensor([dummy_bos_token_id], device=tokens.device), tokens])
-
-        return tokens.to(self.cfg.device)
-
     @torch.no_grad()
     def setup_attribution(self, inputs: str | torch.Tensor):
-        tokens = self.tokenize_qwen_input(inputs) if isinstance(inputs, str) else inputs.squeeze()
+        tokens = (
+            tokenize_qwen_input(inputs, self.tokenizer, device=self.cfg.devic)
+            if isinstance(inputs, str)
+            else inputs.squeeze()
+        )
 
         assert isinstance(tokens, torch.Tensor), "Tokens must be a tensor"
         assert tokens.ndim == 1, "Tokens must be a 1D tensor"

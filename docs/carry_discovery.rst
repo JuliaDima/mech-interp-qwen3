@@ -179,4 +179,51 @@ error modes.
 Usage Guide
 -----------
 
-For detailed CLI options and log output descriptions, see the :doc:`addition_experiment` section or the project's root ``config.yaml``.
+For detailed CLI options and log output descriptions, see the project's root ``config.yaml``.
+
+Feature Selection and Naming
+-----------------------------
+
+Feature Discovery (Top-K)
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When ``--operand-plots`` runs without an explicit feature list, it performs a
+**discovery pass** on the focus prompt (default: ``"calc: 36+59= "``).  The
+model is run once and all non-zero SAE feature activations at the ``=`` token
+position are collected across all layers.  These are sorted globally by
+activation value (descending) and the top ``top_k_global`` (default **50**)
+are selected for plotting.
+
+Because features from later layers tend to have larger raw activation values,
+the selected set is typically concentrated in the final layers (L23–L35 for
+Qwen3-4B).
+
+Feature Naming Convention
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Each plot is saved as ``L{layer:02d}_F{feat_idx:06d}.png``.  For example:
+
+* ``L23_F067377`` — layer **23**, feature index **67,377** (out of 163,840).
+* ``L31_F035637`` — layer **31**, feature index **35,637**.
+
+The six-digit zero-padded feature index is the position in that layer's SAE
+weight matrices (``W_enc``, ``W_dec``, ``b_enc``), all of shape
+``(d_transcoder, ...)`` with ``d_transcoder = 163,840`` for Qwen3-4B.
+
+The ``operand_plots_summary.json`` written alongside the images contains the
+full ranked list with ``max_activation`` and ``mean_activation`` over the
+100×100 grid, which can be used to prioritise features for manual inspection.
+
+Example: ``L23_F067377``
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. figure:: ../runs/addition/2026-03-23_1427/operand_plots/L23_F067377.png
+   :width: 480px
+   :align: center
+   :alt: Operand plot for layer 23, feature 67377
+
+   **L23_F067377** — a sum-sensitive feature (layer 23, feature 67,377).
+   The bright diagonal stripe shows that activation peaks when :math:`a + b`
+   is small (bottom-left corner), and the repeating horizontal/vertical bands
+   reflect sensitivity to the individual operands' ones-digit values.  This
+   feature was the highest-ranked on the focus prompt ``"calc: 36+59= "``.

@@ -7,6 +7,8 @@ from huggingface_hub.utils import disable_progress_bars as disable_hf_progress_b
 from transformer_lens import HookedTransformer
 from transformers.utils.logging import disable_progress_bar as disable_transformers_progress_bars
 
+from mechinterp_qwen3.utils.token_utils import tokenize_qwen_input
+
 
 @dataclass
 class TokenizationInfo:
@@ -44,7 +46,9 @@ def tokenize_and_pad(
         device = model.cfg.device
 
     if hasattr(model, "tokenize_qwen_input"):
-        tokens_list = [model.tokenize_qwen_input(p).squeeze(0) for p in prompts]
+        tokens_list = [
+            tokenize_qwen_input(p, model.tokenizer, model.cfg.device).squeeze(0) for p in prompts
+        ]
     else:
         tokens_list = [model.to_tokens(p, prepend_bos=True).squeeze(0) for p in prompts]
     lengths = [len(t) for t in tokens_list]

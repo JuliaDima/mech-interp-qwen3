@@ -7,6 +7,8 @@ from typing import Literal
 import torch
 from tqdm import tqdm
 
+from mechinterp_qwen3.utils.token_utils import tokenize_qwen_input
+
 
 def extract_activations_online(
     model,
@@ -68,7 +70,9 @@ def extract_activations_online(
         # Process batch
         with torch.no_grad():
             # Tokenize
-            batch_tokens = [model.tokenize_qwen_input(p) for p in batch_prompts]
+            batch_tokens = [
+                tokenize_qwen_input(p, model.tokenizer, model.cfg.device) for p in batch_prompts
+            ]
 
             # Get activations for each prompt individually
             # (batching tokenized sequences requires padding which complicates position selection)

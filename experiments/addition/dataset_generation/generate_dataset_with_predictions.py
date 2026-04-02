@@ -20,6 +20,7 @@ from tqdm import tqdm
 from transformer_lens import HookedTransformer
 
 from mechinterp_qwen3.utils.inference_utils import batched_greedy_generate, silence_libraries
+from mechinterp_qwen3.utils.token_utils import tokenize_qwen_input
 from mechinterp_qwen3.utils_seed import seed_everything
 
 # Silence Hugging Face Hub downloads and Transformers loading progress
@@ -272,7 +273,7 @@ def score_teacher_forced(
     # Tokenize prompt and answer
     if hasattr(model, "tokenize_qwen_input"):
         # tokenize_qwen_input adds the sink token
-        prompt_tokens = model.tokenize_qwen_input(prompt_str).cpu()
+        prompt_tokens = tokenize_qwen_input(prompt_str, model.tokenizer, model.cfg.device).cpu()
     else:
         prompt_tokens = model.tokenizer(
             prompt_str, return_tensors="pt", add_special_tokens=False

@@ -70,6 +70,41 @@ By default, the experiment downloads a pretrained model from the **QuantaMaths**
 
 **Output**: ``runs/stitching/small_model.pt``
 
+Positional Encoding: Absolute vs RoPE
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**The Positional Mismatch Problem**
+
+By default, QuantaMaths models and scratch-trained models use **absolute positional embeddings**, while Qwen uses **Rotary Position Embeddings (RoPE)**. This mismatch can cause low R² scores (< 0.10) during stitching because the models represent position information differently.
+
+**Solution: Train with RoPE to match Qwen's positional encoding**
+
+.. code-block:: bash
+
+    # Train small model with RoPE for better alignment
+    python experiments/stitching/run.py \
+        --train-small \
+        --hub-model '' \
+        --small_model_use_rope \
+        --small_model_epochs 2000
+
+- **Higher R² scores**: Positional representations align with Qwen's encoding strategy
+- **Better CCA scores**: Subspace similarity improves when both models use RoPE
+- **More effective transfer**: Carry circuits stitch more faithfully across architectures
+- **Scientific insight**: Isolates positional encoding as a transfer learning variable
+
+**When to Use RoPE**:
+
+- Training small model from scratch for better alignment with Qwen
+- Experiencing low R² scores in stitching experiments
+- Testing whether positional encoding affects circuit transfer
+
+**Technical Details**:
+
+- **Absolute embeddings**: Each position has a learned vector added to token embeddings
+- **RoPE**: Rotation-based relative encoding applied to attention Q/K matrices
+- **TransformerLens**: Controlled via ``positional_embedding_type`` parameter
+
 Step 2: Train Small SAE
 ~~~~~~~~~~~~~~~~~~~~~~
 
@@ -155,9 +190,20 @@ All settings are in ``config.yaml`` under ``stitching_experiment``:
 .. code-block:: yaml
 
     stitching_experiment:
-      hub_model: "PhilipQuirke/QuantaMaths_add_d5_l1_h3_t15K_s372001"
+      # Small model options
+      hub_model: "PhilipQuirke/QuantaMaths_add_d5_l1_h3_t15K_s372001"  # or "" to train from scratch
+      small_model_use_rope: false  # Set true to use RoPE instead of absolute positions
+      small_model_layers: 2
+      small_model_heads: 3
+      small_model_d_model: 256
+      small_model_epochs: 2000
+      small_model_num_digits: 5
+
+      # SAE options
       small_sae_d_transcoder: 4096
       small_sae_epochs: 500
+
+      # Stitching options
       stitch_layer_pairs: [14, 16, 18]
       num_verify_samples: 1000
       cascading_carry_threshold: 2
@@ -165,7 +211,9 @@ All settings are in ``config.yaml`` under ``stitching_experiment``:
 Discussion: Why Fixed-Width Experts Fail
 ----------------------------------------
 
-Initial results with the **QuantaMaths d5 expert** showed low alignment (R² ≈ 0.10) with Qwen3-4B. Based on our analysis, this is due to **Positional Stiffness**.
+Initial results with the **QuantaMaths d5 expert** showed low alignment (R² ≈ 0.10) with Qwen3-4B. Based on our analysis, there are two key issues:
+
+**1. Positional Stiffness**
 
 .. figure:: ../runs/stitching/shift_sensitivity.png
    :width: 600
@@ -173,6 +221,32 @@ Initial results with the **QuantaMaths d5 expert** showed low alignment (R² ≈
    :align: center
 
    **Positional Stiffness**: The d5 expert fails badly if the input tokens are shifted, even by 1 position.
+
+**2. Positional Encoding Mismatch**
+
+The second major issue is the difference in positional encoding strategies:
+
+- **QuantaMaths models**: Use **absolute positional embeddings** where each position has a learned vector
+- **Qwen models**: Use **RoPE (Rotary Position Embeddings)** for relative positional information
+
+This fundamental architectural difference makes it difficult for the affine stitching map to align representations, even when the models are solving the same arithmetic problems.
+
+**Testing the Hypothesis**
+
+To test whether positional encoding is the bottleneck, train a small model with RoPE:
+
+.. code-block:: bash
+
+    # Compare: Absolute positions (baseline)
+    python experiments/stitching/run.py --all --hub-model '' \
+        --out_root runs/stitching_absolute
+
+    # Compare: RoPE positions (test)
+    python experiments/stitching/run.py --all --hub-model '' \
+        --small_model_use_rope \
+        --out_root runs/stitching_rope
+
+If RoPE significantly improves R² scores, this confirms that positional encoding mismatch was a primary factor limiting transfer.
 
 Probability Improvement
 ----------------------
