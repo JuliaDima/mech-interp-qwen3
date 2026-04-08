@@ -170,3 +170,89 @@ def binary_cross_entropy_loss(
         return bce
     else:
         raise ValueError(f"Unknown reduction: {reduction}")
+
+
+@dataclass
+class MulticlassMetrics:
+    """Container for multiclass probe evaluation metrics.
+
+    Attributes:
+        accuracy: Top-1 classification accuracy
+        loss: Cross-entropy loss
+        n_samples: Number of samples evaluated
+        n_classes: Number of classes
+        per_class_accuracy: Per-class accuracy (list of length n_classes)
+    """
+
+    accuracy: float
+    loss: float
+    n_samples: int
+    n_classes: int
+    per_class_accuracy: list[float]
+
+    def __str__(self) -> str:
+        lines = [
+            "Multiclass Probe Metrics",
+            "=" * 50,
+            f"Samples:     {self.n_samples:6d}",
+            f"Classes:     {self.n_classes}",
+            f"Accuracy:    {self.accuracy:.4f}",
+            f"CE Loss:     {self.loss:.4f}",
+        ]
+        for i, acc in enumerate(self.per_class_accuracy):
+            lines.append(f"  Class {i}:   {acc:.4f}")
+        return "\n".join(lines)
+
+    def to_dict(self) -> dict:
+        return {
+            "accuracy": self.accuracy,
+            "loss": self.loss,
+            "n_samples": self.n_samples,
+            "n_classes": self.n_classes,
+            "per_class_accuracy": self.per_class_accuracy,
+        }
+
+
+def compute_metrics_multiclass(
+    predictions: torch.Tensor,
+    labels: torch.Tensor,
+    logits: torch.Tensor | None = None,
+) -> MulticlassMetrics:
+    """Compute evaluation metrics for multiclass classification.
+
+    Args:
+        predictions: Class predictions [batch] (integer class indices)
+        labels: Ground truth class labels [batch] (integer class indices)
+        logits: Raw logits [batch, n_classes], used for loss computation.
+
+    Returns:
+        MulticlassMetrics object
+    """
+    import torch.nn.functional as F
+
+    preds_np = predictions.cpu().long().numpy()
+    labels_np = labels.cpu().long().numpy()
+
+    accuracy = accuracy_score(labels_np, preds_np)
+
+    n_classes = int(labels_np.max()) + 1 if logits is None else logits.shape[-1]
+    per_class_accuracy = []
+    for c in range(n_classes):
+        mask = labels_np == c
+        if mask.sum() == 0:
+            per_class_accuracy.append(float("nan"))
+        else:
+            per_class_accuracy.append(float((preds_np[mask] == c).mean()))
+
+    if logits is not None:
+        loss = F.cross_entropy(logits.cpu().float(), labels.cpu().long()).item()
+    else:
+        loss = float("nan")
+
+    return MulticlassMetrics(
+        accuracy=accuracy,
+        loss=loss,
+        n_samples=len(labels),
+        n_classes=n_classes,
+        per_class_accuracy=per_class_accuracy,
+    )

@@ -11,7 +11,7 @@ from tqdm import tqdm
 
 from .carry_probe import CarryProbe
 from .dataset_utils import ProbeDataset
-from .metrics import ProbeMetrics, compute_metrics
+from .metrics import ProbeMetrics, compute_metrics, compute_metrics_multiclass
 
 
 class ProbeTrainer:
@@ -75,19 +75,25 @@ class ProbeTrainer:
 
         Args:
             activations: Dict mapping layer to activation tensor [batch, d_transcoder]
-            labels: Binary labels [batch]
+            labels: Class labels [batch] — long for multiclass, float for binary
 
         Returns:
-            Tuple of (total_loss, base_loss, probabilities)
+            Tuple of (total_loss, base_loss, logits_or_probs)
+            For binary: logits_or_probs are sigmoid probabilities [batch]
+            For multiclass: logits_or_probs are raw logits [batch, n_classes]
         """
-        # Forward pass returning [batch] logits
-        logits = self.probe(activations, return_logits=True)
-        probabilities = torch.sigmoid(logits)
-
-        # labels is [batch], logits is [batch] - direct BCE
         import torch.nn.functional as F
 
-        base_loss = F.binary_cross_entropy_with_logits(logits, labels.float())
+        logits = self.probe(activations, return_logits=True)
+
+        if self.probe.n_classes > 1:
+            # Multiclass: logits [batch, n_classes], labels [batch] long
+            base_loss = F.cross_entropy(logits, labels.long())
+            out = logits  # return raw logits for argmax later
+        else:
+            # Binary: logits [batch], labels [batch] float
+            base_loss = F.binary_cross_entropy_with_logits(logits, labels.float())
+            out = torch.sigmoid(logits)
 
         # L1 regularization
         l1_loss = 0.0
@@ -96,10 +102,9 @@ class ProbeTrainer:
                 l1_loss += torch.sum(torch.abs(param))
             l1_loss = self.l1_penalty * l1_loss
 
-        # Total loss (L2 is handled by weight_decay in optimizer)
         total_loss = base_loss + l1_loss
 
-        return total_loss, base_loss, probabilities
+        return total_loss, base_loss, out
 
     def train_epoch(
         self,
@@ -133,7 +138,7 @@ class ProbeTrainer:
         total_loss = 0.0
 
         all_predictions = []
-        all_probabilities = []
+        all_logits_or_probs = []
         all_labels = []
 
         iterator = range(n_batches)
@@ -149,7 +154,7 @@ class ProbeTrainer:
             activations = {k: v.to(self.device) for k, v in activations.items()}
             labels = labels.to(self.device)
             self.optimizer.zero_grad()
-            loss, base_loss, probabilities = self.compute_loss(activations, labels)
+            loss, base_loss, logits_or_out = self.compute_loss(activations, labels)
             loss.backward()
             if self.gradient_clip is not None:
                 nn.utils.clip_grad_norm_(self.probe.parameters(), self.gradient_clip)
@@ -158,16 +163,24 @@ class ProbeTrainer:
             total_loss += base_loss.item() * len(batch_indices)
 
             with torch.no_grad():
-                predictions = (probabilities > 0.5).float()
+                if self.probe.n_classes > 1:
+                    predictions = torch.argmax(logits_or_out, dim=-1)
+                else:
+                    predictions = (logits_or_out > 0.5).long()
                 all_predictions.append(predictions.cpu())
-                all_probabilities.append(probabilities.cpu())
+                all_logits_or_probs.append(logits_or_out.detach().cpu())
                 all_labels.append(labels.cpu())
         all_predictions = torch.cat(all_predictions)
-        all_probabilities = torch.cat(all_probabilities)
+        all_logits_or_probs = torch.cat(all_logits_or_probs)
         all_labels = torch.cat(all_labels)
 
         avg_loss = total_loss / n_samples
-        metrics = compute_metrics(all_predictions, all_labels, all_probabilities)
+        if self.probe.n_classes > 1:
+            metrics = compute_metrics_multiclass(all_predictions, all_labels, all_logits_or_probs)
+        else:
+            metrics = compute_metrics(
+                all_predictions.float(), all_labels.float(), all_logits_or_probs
+            )
 
         return avg_loss, metrics
 
@@ -196,7 +209,7 @@ class ProbeTrainer:
 
         total_loss = 0.0
         all_predictions = []
-        all_probabilities = []
+        all_logits_or_probs = []
         all_labels = []
 
         iterator = range(n_batches)
@@ -212,26 +225,37 @@ class ProbeTrainer:
             activations = {k: v.to(self.device) for k, v in activations.items()}
             labels = labels.to(self.device)
 
-            logits = self.probe(activations, return_logits=True)
-            probabilities = torch.sigmoid(logits)
-
             import torch.nn.functional as F
 
-            loss = F.binary_cross_entropy_with_logits(logits, labels.float())
+            logits = self.probe(activations, return_logits=True)
+
+            if self.probe.n_classes > 1:
+                loss = F.cross_entropy(logits, labels.long())
+                predictions = torch.argmax(logits, dim=-1)
+                logits_or_probs = logits
+            else:
+                loss = F.binary_cross_entropy_with_logits(logits, labels.float())
+                probs = torch.sigmoid(logits)
+                predictions = (probs > 0.5).long()
+                logits_or_probs = probs
 
             total_loss += loss.item() * len(batch_indices)
 
-            predictions = (probabilities > 0.5).float()
             all_predictions.append(predictions.cpu())
-            all_probabilities.append(probabilities.cpu())
+            all_logits_or_probs.append(logits_or_probs.cpu())
             all_labels.append(labels.cpu())
 
         all_predictions = torch.cat(all_predictions)
-        all_probabilities = torch.cat(all_probabilities)
+        all_logits_or_probs = torch.cat(all_logits_or_probs)
         all_labels = torch.cat(all_labels)
 
         avg_loss = total_loss / n_samples
-        metrics = compute_metrics(all_predictions, all_labels, all_probabilities)
+        if self.probe.n_classes > 1:
+            metrics = compute_metrics_multiclass(all_predictions, all_labels, all_logits_or_probs)
+        else:
+            metrics = compute_metrics(
+                all_predictions.float(), all_labels.float(), all_logits_or_probs
+            )
 
         return avg_loss, metrics
 
@@ -284,7 +308,8 @@ class ProbeTrainer:
             if verbose:
                 print(f"Train Loss: {train_loss:.4f}")
                 print(f"Train Accuracy: {train_metrics.accuracy:.4f}")
-                print(f"Train F1: {train_metrics.f1:.4f}")
+                if hasattr(train_metrics, "f1"):
+                    print(f"Train F1: {train_metrics.f1:.4f}")
 
             if val_dataset is not None:
                 val_loss, val_metrics = self.evaluate(
@@ -297,7 +322,8 @@ class ProbeTrainer:
                 if verbose:
                     print(f"Val Loss: {val_loss:.4f}")
                     print(f"Val Accuracy: {val_metrics.accuracy:.4f}")
-                    print(f"Val F1: {val_metrics.f1:.4f}")
+                    if hasattr(val_metrics, "f1"):
+                        print(f"Val F1: {val_metrics.f1:.4f}")
 
                 # Early stopping
                 if val_loss < best_val_loss:

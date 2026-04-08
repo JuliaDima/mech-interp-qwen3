@@ -223,7 +223,7 @@ class ProbeDataset:
             raise ValueError(f"Mismatched lengths: {len(prompts)} prompts vs {len(labels)} labels")
 
         self.prompts = prompts
-        self.labels = torch.tensor(labels, dtype=torch.float32)
+        self.labels = torch.tensor(labels, dtype=torch.long)
         self.model = model
         self.layers = layers
         self.token_position = token_position

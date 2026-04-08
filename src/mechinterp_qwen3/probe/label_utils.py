@@ -8,6 +8,27 @@ from typing import Literal
 import numpy as np
 
 
+def compute_unit_digit_label(a: int, b: int) -> int:
+    """Compute the unit digit (ones place) of a + b.
+
+    Args:
+        a: First operand
+        b: Second operand
+
+    Returns:
+        (a + b) % 10
+
+    Examples:
+        >>> compute_unit_digit_label(3, 5)  # 3 + 5 = 8
+        8
+        >>> compute_unit_digit_label(7, 6)  # 7 + 6 = 13
+        3
+        >>> compute_unit_digit_label(14, 26)  # 14 + 26 = 40
+        0
+    """
+    return (a + b) % 10
+
+
 def compute_carry_label(a: int, b: int) -> int:
     """Compute binary carry label for addition a + b.
 

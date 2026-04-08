@@ -35,6 +35,7 @@ class CarryProbe(nn.Module):
         device: torch.device | None = None,
         dtype: torch.dtype = torch.float32,
         n_layers: int | None = None,
+        n_classes: int = 1,
     ):
         """Initialize the carry probe.
 
@@ -45,6 +46,8 @@ class CarryProbe(nn.Module):
             device: Device to place parameters on
             dtype: Data type for parameters
             n_layers: Total number of layers. Used if layers is None.
+            n_classes: Number of output classes. 1 for binary (sigmoid+BCE),
+                >1 for multiclass (softmax+CrossEntropy).
         """
         super().__init__()
 
@@ -61,9 +64,13 @@ class CarryProbe(nn.Module):
         self.d_transcoder = d_transcoder
         self.max_seq_len = max_seq_len  # Kept for compatibility
         self.n_layers = len(layers)
+        self.n_classes = n_classes
 
-        # Simple linear layer: [d_transcoder * num_layers] -> [1]
-        self.linear = nn.Linear(d_transcoder * self.n_layers, 1, device=device, dtype=dtype)
+        out_features = n_classes if n_classes > 1 else 1
+        # Linear layer: [d_transcoder * num_layers] -> [out_features]
+        self.linear = nn.Linear(
+            d_transcoder * self.n_layers, out_features, device=device, dtype=dtype
+        )
 
     def forward(
         self,
@@ -116,13 +123,18 @@ class CarryProbe(nn.Module):
         # Convert dtype if needed
         x = x.to(self.linear.weight.dtype)
 
-        # Linear layer: [batch, d_transcoder * n_layers] -> [batch, 1]
-        logits = self.linear(x).squeeze(-1)  # [batch]
-
-        if return_logits:
-            return logits
-
-        return torch.sigmoid(logits)
+        if self.n_classes > 1:
+            # Multiclass: [batch, d_transcoder * n_layers] -> [batch, n_classes]
+            logits = self.linear(x)
+            if return_logits:
+                return logits
+            return torch.softmax(logits, dim=-1)
+        else:
+            # Binary: [batch, d_transcoder * n_layers] -> [batch]
+            logits = self.linear(x).squeeze(-1)
+            if return_logits:
+                return logits
+            return torch.sigmoid(logits)
 
     def get_layer_weights(self, layer: int | None = None) -> torch.Tensor:
         """Get weight vector for the probe's layer.
@@ -220,6 +232,7 @@ class CarryProbe(nn.Module):
             "layers": self.layers,
             "d_transcoder": self.d_transcoder,
             "max_seq_len": self.max_seq_len,
+            "n_classes": self.n_classes,
         }
 
     @classmethod
@@ -239,6 +252,7 @@ class CarryProbe(nn.Module):
             layers=checkpoint["layers"],
             d_transcoder=checkpoint["d_transcoder"],
             max_seq_len=checkpoint["max_seq_len"],
+            n_classes=checkpoint.get("n_classes", 1),
             device=device,
         )
         probe.load_state_dict(checkpoint["state_dict"])

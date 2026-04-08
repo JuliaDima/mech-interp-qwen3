@@ -72,21 +72,6 @@ logging.basicConfig(
 log = logging.getLogger("knowledge_editing.run")
 
 # ---------------------------------------------------------------------------
-# Defaults
-# ---------------------------------------------------------------------------
-
-_LARGE_MODEL = "Qwen/Qwen3-4B"
-_TRANSCODER_SET = "mwhanna/qwen3-4b-transcoders"
-_INJECT_LAYER = 30  # Qwen3-4B layer to patch (0-indexed)
-_D_MID = 256  # Bottleneck dimension
-_LAMBDA_ALIGN = 0.1  # Weight for alignment loss
-_LR = 3e-4
-_EPOCHS = 30
-_BATCH_SIZE = 64
-_MAX_SAMPLES = 5_000  # Samples used for setup / training
-_MAX_NEW_TOKENS = 6  # Greedy decode budget for evaluation
-
-# ---------------------------------------------------------------------------
 # Collection helpers
 # ---------------------------------------------------------------------------
 
@@ -853,9 +838,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     # Large model
-    parser.add_argument("--model", default=_LARGE_MODEL)
-    parser.add_argument("--transcoder_set", default=_TRANSCODER_SET)
-    parser.add_argument("--inject_layer", type=int, default=_INJECT_LAYER)
+    parser.add_argument("--model", default="Qwen/Qwen3-4B")
+    parser.add_argument("--transcoder_set", default="mwhanna/qwen3-4b-transcoders")
+    parser.add_argument("--inject_layer", type=int, default=35)
 
     # Alignment projection method
     parser.add_argument(
@@ -871,12 +856,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     # Module hyper-params
-    parser.add_argument("--d_mid", type=int, default=_D_MID)
-    parser.add_argument("--lambda_align", type=float, default=_LAMBDA_ALIGN)
-    parser.add_argument("--lr", type=float, default=_LR)
-    parser.add_argument("--epochs", type=int, default=_EPOCHS)
-    parser.add_argument("--batch_size", type=int, default=_BATCH_SIZE)
-    parser.add_argument("--max_samples", type=int, default=_MAX_SAMPLES)
+    parser.add_argument("--d_mid", type=int, default=256)
+    parser.add_argument("--lambda_align", type=float, default=0.1)
+    parser.add_argument("--lr", type=float, default=3e-4)
+    parser.add_argument("--epochs", type=int, default=30)
+    parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--max_samples", type=int, default=5_000)
     parser.add_argument("--num_eval_samples", type=int, default=500)
 
     # Misc
