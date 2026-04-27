@@ -54,24 +54,24 @@ if str(_REPO_ROOT / "src") not in sys.path:
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from experiments.addition.dataset_generation.generate_dataset_with_predictions import (
+from experiments.addition.dataset_generation.generate_dataset_with_predictions import (  # noqa: E402
     TemplateID,
     build_prompt,
 )
-from mechinterp_qwen3.attribution_model import AttributionModel
-from mechinterp_qwen3.probe import (
+from mechinterp_qwen3.attribution_model import AttributionModel  # noqa: E402
+from mechinterp_qwen3.probe import (  # noqa: E402
     CarryProbe,
     ProbeTrainer,
     compute_unit_digit_label,
     generate_addition_examples,
 )
-from mechinterp_qwen3.probe.dataset_utils import ProbeDataset
-from mechinterp_qwen3.utils.config_utils import (
+from mechinterp_qwen3.probe.dataset_utils import ProbeDataset  # noqa: E402
+from mechinterp_qwen3.utils.config_utils import (  # noqa: E402
     add_config_args,
     load_config,
     set_parser_defaults_from_config,
 )
-from mechinterp_qwen3.utils.model_utils import get_default_device
+from mechinterp_qwen3.utils.model_utils import get_default_device  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -141,6 +141,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Maximum number of layers to sweep (default: all)",
     )
+    train_group.add_argument(
+        "--start_layer",
+        type=int,
+        default=0,
+        help="First layer to include in the incremental sweep (default: 0)",
+    )
 
     output_group = p.add_argument_group("Output")
     output_group.add_argument("--output_dir", default="runs/digit_probe_incremental")
@@ -180,7 +186,7 @@ def main():
     log.info(f"Model loaded. Layers: {n_model_layers}, d_transcoder: {d_transcoder}")
 
     max_layers = args.max_layers if args.max_layers is not None else n_model_layers
-    all_layers = list(range(max_layers))
+    all_layers = list(range(args.start_layer, max_layers))
 
     # --- Dataset generation ---
     log.info("Generating addition examples...")
@@ -195,7 +201,7 @@ def main():
         n_classes = 1  # binary (sigmoid + BCE)
         log.info(f"Generated {len(operands_a)} examples (binary carry), label distribution:")
         for v in (0, 1):
-            log.info(f"  carry={v}: {sum(1 for l in labels if l == v)}")
+            log.info(f"  carry={v}: {sum(1 for lbl in labels if lbl == v)}")
     else:
         labels = [
             compute_unit_digit_label(a, b) for a, b in zip(operands_a, operands_b, strict=False)
@@ -203,7 +209,7 @@ def main():
         n_classes = 10
         log.info(f"Generated {len(operands_a)} examples (unit digit), label distribution:")
         for digit in range(10):
-            log.info(f"  digit {digit}: {sum(1 for l in labels if l == digit)}")
+            log.info(f"  digit {digit}: {sum(1 for lbl in labels if lbl == digit)}")
 
     template_id = getattr(TemplateID, args.template)
     prompts = [
@@ -246,18 +252,29 @@ def main():
     # --- Per-layer PCA (fit on train, apply to train+val) ---
     pca_dim = args.pca_dim
     if pca_dim > 0:
-        log.info(f"Fitting PCA (d={pca_dim}) per layer on train activations...")
+        log.info(f"Fitting PCA (d={pca_dim}) per layer on train activations (randomized SVD)...")
         pca_components: dict[int, torch.Tensor] = {}  # layer -> (pca_dim, d_transcoder)
         pca_means: dict[int, torch.Tensor] = {}
         for layer in all_layers:
             X = train_dataset._cached_activations[layer].float()  # (n_train, d_tc)
             mean = X.mean(0)
-            X_c = X - mean
-            # Thin SVD: we only need top-pca_dim right singular vectors
-            _, _, Vt = torch.linalg.svd(X_c, full_matrices=False)
-            components = Vt[:pca_dim]  # (pca_dim, d_tc)
+            X_c = (X - mean).to(device)  # move to GPU for speed
+
+            # Randomized SVD — only computes top-pca_dim components.
+            # Sketch: Y = X_c @ Omega, shape (n_train, pca_dim + oversampling)
+            # Much faster than full SVD: O(N * d_tc * k) vs O(N * d_tc * min(N,d_tc))
+            n_oversampling = 10
+            k = pca_dim + n_oversampling
+            Omega = torch.randn(X_c.shape[1], k, device=device, dtype=torch.float32)
+            Y = X_c @ Omega  # (n_train, k)
+            Q, _ = torch.linalg.qr(Y)  # (n_train, k)
+            B = Q.T @ X_c  # (k, d_tc)
+            _, _, Vt_B = torch.linalg.svd(B, full_matrices=False)  # Vt_B: (k, d_tc)
+            components = Vt_B[:pca_dim].cpu()  # (pca_dim, d_tc)
+
             pca_components[layer] = components.to(dtype=dtype)
             pca_means[layer] = mean.to(dtype=dtype)
+            log.info(f"  Layer {layer} PCA done")
 
         def _apply_pca(cached: dict[int, torch.Tensor]) -> dict[int, torch.Tensor]:
             return {
@@ -288,8 +305,8 @@ def main():
 
     target_reached_at = None
 
-    for k in range(max_layers):
-        layers_so_far = list(range(k + 1))
+    for k in range(len(all_layers)):
+        layers_so_far = all_layers[: k + 1]
 
         probe = CarryProbe(
             layers=layers_so_far,
