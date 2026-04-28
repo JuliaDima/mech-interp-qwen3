@@ -8,7 +8,7 @@
 
 This repository contains the pipeline for investigating the internal circuits and features of the **Qwen3-4B-Instruct** model using Sparse Autoencoders (SAEs) and Attribution Graphs.
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Installation
 
@@ -46,7 +46,7 @@ Transfer arithmetic circuits from a small specialized model into Qwen3-4B.
 python experiments/stitching/run.py --all
 ```
 
-## 📖 Key Documentation
+## Key Documentation
 
 For in-depth guides, visit the [Documentation Site](https://eid23-ab47b6.uniofcam.dev/) or explore the `docs/` folder:
 
@@ -56,14 +56,14 @@ For in-depth guides, visit the [Documentation Site](https://eid23-ab47b6.uniofca
 - **[Configuration System](docs/configuration.rst)**: Details on the hierarchical `config.yaml` architecture.
 - **[Visualization Guide](VISUALIZATION_GUIDE.md)**: 6 publication-quality figure types for behavior analysis.
 
-## 🛠 Project Architecture
+## Project Architecture
 
 - `src/mechinterp_qwen3/`: Core package containing attribution logic and dataset generation.
 - `experiments/addition/`: Specialized module for the Anthropic reproduction case study.
 - `docs/`: Sphinx site source files.
 - `scripts/`: Production sbatch and utility scripts.
 
-## ⚙️ Configuration System
+## Configuration System
 
 The project uses a centralized configuration system centered around the root **[config.yaml](config.yaml)** file:
 
