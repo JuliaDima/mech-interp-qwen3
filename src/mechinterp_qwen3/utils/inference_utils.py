@@ -1,4 +1,4 @@
-"""Utilities for batched inference, tokenization, and generation."""
+"""Batched inference helpers: tokenization, logit extraction, and greedy generation."""
 
 from dataclasses import dataclass
 
@@ -12,7 +12,7 @@ from mechinterp_qwen3.utils.token_utils import tokenize_qwen_input
 
 @dataclass
 class TokenizationInfo:
-    """Information about how an answer tokenizes."""
+    """Breakdown of how a single answer string tokenizes."""
 
     answer_str: str
     token_ids: list[int]
@@ -22,7 +22,7 @@ class TokenizationInfo:
 
 
 def silence_libraries():
-    """Disable noisy progress bars from Hugging Face and Transformers."""
+    """Suppress progress bar output from HuggingFace Hub and Transformers."""
     disable_hf_progress_bars()
     disable_transformers_progress_bars()
 
@@ -32,15 +32,17 @@ def tokenize_and_pad(
     prompts: list[str],
     device: str | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, list[int]]:
-    """Tokenize a batch of prompts and pad them to the same length.
+    """Tokenize a list of prompts and right-pad them to a common length.
 
     Args:
-        model: HookedTransformer model
-        prompts: List of prompt strings
-        device: Device to place tensors on (defaults to model.cfg.device)
+        model: HookedTransformer with an attached tokenizer
+        prompts: Input strings
+        device: Target device (defaults to model.cfg.device)
 
     Returns:
-        Tuple of (padded_tokens, attention_mask, original_lengths)
+        padded_tokens: (n_prompts, max_len) token id tensor
+        attention_mask: (n_prompts, max_len) binary mask (1 = real, 0 = pad)
+        lengths: original (unpadded) sequence lengths
     """
     if device is None:
         device = model.cfg.device
@@ -64,7 +66,6 @@ def tokenize_and_pad(
     for tokens in tokens_list:
         pad_len = max_len - len(tokens)
 
-        # Create padded sequence
         padded = torch.cat(
             [
                 tokens.to(device),
@@ -72,7 +73,6 @@ def tokenize_and_pad(
             ]
         )
 
-        # Create attention mask (1 for real tokens, 0 for padding)
         mask = torch.cat(
             [
                 torch.ones(len(tokens), device=device, dtype=torch.long),
@@ -91,15 +91,15 @@ def batched_get_last_logits(
     prompts: list[str],
     batch_size: int = 32,
 ) -> torch.Tensor:
-    """Get logits at the last non-padding position for a batch of prompts.
+    """Extract logits at the last real token position for each prompt.
 
     Args:
         model: HookedTransformer model
-        prompts: List of prompt strings
-        batch_size: Batch size for inference
+        prompts: Input strings
+        batch_size: Number of prompts per forward pass
 
     Returns:
-        Tensor of logits (num_prompts, vocab_size)
+        (num_prompts, vocab_size) logit tensor
     """
     all_logits = []
 
@@ -107,17 +107,10 @@ def batched_get_last_logits(
         batch = prompts[i : i + batch_size]
         tokens, mask, lengths = tokenize_and_pad(model, batch)
 
-        # Forward pass
-        # Transformer-Lens handles the attention mask internally if passed via stop_at_layer or hooks,
-        # but for a standard forward pass we usually just pass the tokens.
-        # However, to be safe with padding, we should be careful.
-        # HookedTransformer's forward doesn't take an attention_mask directly in a way that respects padding
-        # in the same way HF does, unless explicitly handled.
-        # For simple logit extraction at 'lengths', it usually doesn't matter for causal models.
-
+        # HookedTransformer doesn't natively use attention_mask, but causal masking
+        # means padding after the sequence end doesn't affect earlier positions.
         logits = model(tokens)  # (batch, seq_len, vocab_size)
 
-        # Extract last non-padding logit for each item in batch
         for j, length in enumerate(lengths):
             all_logits.append(logits[j, length - 1, :])
 
@@ -130,51 +123,42 @@ def batched_greedy_generate(
     max_tokens: int = 10,
     batch_size: int = 32,
 ) -> list[str]:
-    """Perform batched greedy generation using model.generate.
+    """Run batched greedy decoding and return the completion strings.
 
     Args:
         model: HookedTransformer model
-        prompts: List of prompt strings
-        max_tokens: Maximum tokens to generate
-        batch_size: Batch size for generation
+        prompts: Input strings
+        max_tokens: Maximum tokens to generate per prompt
+        batch_size: Number of prompts processed per call to model.generate
 
     Returns:
-        List of generated completion strings (excluding prompt)
+        Generated completions with the prompt stripped. For arithmetic outputs,
+        only the leading digit characters are retained.
     """
     completions = []
 
     for i in range(0, len(prompts), batch_size):
         batch = prompts[i : i + batch_size]
 
-        # Standard generation using Transformer-Lens wrap of model.generate
-        # Note: HookedTransformer.generate supports batching if tokens are passed.
-        # We'll use the underlying model.generate or HookedTransformer.generate
-
-        # TransformerLens generate usually takes a single prompt or tokens.
-        # For batching, we need to pass tokens.
         tokens, _, _ = tokenize_and_pad(model, batch)
 
-        # Generate
         generated_tokens = model.generate(
             tokens,
             max_new_tokens=max_tokens,
-            do_sample=False,  # Greedy
+            do_sample=False,  # greedy
             verbose=False,
-            prepend_bos=False,  # Already handled in tokenize_and_pad
+            prepend_bos=False,  # already handled in tokenize_and_pad
         )
 
-        # Decode and extract completions
         for j, prompt_str in enumerate(batch):
             full_text = model.tokenizer.decode(generated_tokens[j], skip_special_tokens=True)
 
-            # Extract completion (strip prompt)
             if full_text.startswith(prompt_str):
                 completion = full_text[len(prompt_str) :].strip()
             else:
-                # Fallback
                 completion = full_text.replace(prompt_str, "").strip()
 
-            # Clean up: stop at first non-digit if it's an arithmetic result
+            # Keep only leading digits (for arithmetic result extraction)
             final_completion = ""
             for char in completion:
                 if char.isdigit():

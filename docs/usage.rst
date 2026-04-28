@@ -11,7 +11,7 @@ The ``miq attribute`` command automates the process of running forward passes, e
 .. code-block:: bash
 
    miq attribute \
-     --prompt "calc: 36+59=" \
+     --prompt "calc: 36+59= " \
      --slug addition_36_59 \
      --transcoder_set mwhanna/qwen3-4b-transcoders \
      --dtype bfloat16 \

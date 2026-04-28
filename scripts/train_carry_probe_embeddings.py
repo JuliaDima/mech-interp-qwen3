@@ -19,7 +19,7 @@ Example usage:
     python scripts/train_carry_probe_embeddings.py --token_position answer --max_value 99
 
     # Balanced sampling with validation split
-    python scripts/train_carry_probe_embeddings.py --strategy balanced --n_train 2000 --val_split 0.2
+    python scripts/train_carry_probe_embeddings.py --strategy balanced --n_train 2000 --val_split 0.2 --max_value 999
 
     # Full grid
     python scripts/train_carry_probe_embeddings.py --strategy grid --max_value 99 --cache_activations

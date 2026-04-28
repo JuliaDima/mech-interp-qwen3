@@ -9,7 +9,7 @@ from torch import nn
 
 _offload_files = set()
 
-_TEMP_PREFIX = "safetensors-offload-YqKRr8m3-"
+_TEMP_PREFIX = "safetensors-offload-mq3-"
 
 
 @atexit.register
@@ -30,7 +30,7 @@ def cleanup_all_offload_files():
 
 
 def disk_offload_module(module):
-    org_device = next(module.parameters()).device
+    original_device = next(module.parameters()).device
     with tempfile.NamedTemporaryFile(prefix=_TEMP_PREFIX, delete=False) as f:
         save_file(module.state_dict(), f.name)
         _offload_files.add(f.name)
@@ -38,7 +38,7 @@ def disk_offload_module(module):
     module.to(device="meta")
 
     def reload_handle(device=None):
-        target_device = str(device or org_device)
+        target_device = str(device or original_device)
         module.load_state_dict(load_file(f.name, device=target_device), assign=True)
         os.remove(f.name)
         _offload_files.remove(f.name)
@@ -47,11 +47,11 @@ def disk_offload_module(module):
 
 
 def cpu_offload_module(module):
-    org_device = next(module.parameters()).device
+    original_device = next(module.parameters()).device
     module.to(device="cpu")
 
     def reload_handle():
-        module.to(device=org_device)
+        module.to(device=original_device)
 
     return reload_handle
 
@@ -60,15 +60,14 @@ def offload_modules(
     modules: list | nn.Module | nn.ModuleList | nn.ModuleDict | nn.Sequential,
     offload_type: Literal["cpu", "disk"],
 ) -> list:
-    """Offload one or more modules to CPU or disk.
+    """Move modules to CPU or disk to free GPU memory, returning reload handles.
 
     Args:
-        modules: A single module, list of modules, or PyTorch module container
-                 (ModuleList, ModuleDict, Sequential)
-        offload_type: Type of offload - "cpu" or "disk"
+        modules: A single module, list of modules, or any PyTorch module container
+        offload_type: "cpu" moves tensors to RAM; "disk" serializes to a temp file
 
     Returns:
-        List of reload handles, one per module
+        List of callables — invoke each to restore the module to its original device
     """
     offload_fn = disk_offload_module if offload_type == "disk" else cpu_offload_module
 
@@ -89,19 +88,18 @@ def compute_salient_logits(
     max_n_logits: int = 10,
     desired_logit_prob: float = 0.95,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Pick the smallest logit set whose cumulative prob >= *desired_logit_prob*.
+    """Select the minimal top-k tokens whose cumulative probability meets the threshold.
 
     Args:
-        logits: ``(d_vocab,)`` vector (single position).
-        unembed_proj: ``(d_model, d_vocab)`` unembedding matrix.
-        max_n_logits: Hard cap *k*.
-        desired_logit_prob: Cumulative probability threshold *p*.
+        logits: ``(d_vocab,)`` raw logit vector at a single position.
+        unembed_proj: Unembedding matrix, ``(d_model, d_vocab)`` or ``(d_vocab, d_model)``.
+        max_n_logits: Upper bound on k.
+        desired_logit_prob: Stop adding tokens once cumulative probability exceeds this.
 
     Returns:
-        tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-            * logit_indices - ``(k,)`` vocabulary ids.
-            * logit_probs   - ``(k,)`` softmax probabilities.
-            * demeaned_vecs - ``(k, d_model)`` unembedding columns, demeaned.
+        logit_indices: ``(k,)`` vocabulary ids of selected tokens.
+        logit_probs:   ``(k,)`` softmax probabilities.
+        demeaned_vecs: ``(k, d_model)`` demeaned unembedding columns.
     """
 
     probs = torch.softmax(logits, dim=-1)
@@ -110,22 +108,22 @@ def compute_salient_logits(
     top_p, top_idx = top_p[:cutoff], top_idx[:cutoff]
 
     if unembed_proj.shape[0] == logits.shape[0]:
-        # Shape is (d_vocab, d_model) – first axis is vocabulary.
-        cols = unembed_proj[top_idx]  # (k, d_model)
-        demean = unembed_proj.mean(dim=0, keepdim=True)  # (1, d_model)
-        demeaned_vecs = cols - demean  # (k, d_model)
+        # (d_vocab, d_model) layout — first axis is vocabulary
+        cols = unembed_proj[top_idx]
+        demean = unembed_proj.mean(dim=0, keepdim=True)
+        demeaned_vecs = cols - demean
 
     else:
-        # Shape is (d_model, d_vocab) – second axis is vocabulary.
-        cols = unembed_proj[:, top_idx]  # (d_model, k)
-        demean = unembed_proj.mean(dim=-1, keepdim=True)  # (d_model, 1)
-        demeaned_vecs = (cols - demean).T  # (k, d_model)
+        # (d_model, d_vocab) layout — second axis is vocabulary
+        cols = unembed_proj[:, top_idx]
+        demean = unembed_proj.mean(dim=-1, keepdim=True)
+        demeaned_vecs = (cols - demean).T
 
     return top_idx, top_p, demeaned_vecs
 
 
 def get_default_device() -> "torch.device":
-    """Get the default device, preferring CUDA if available."""
+    """Return a CUDA device if available, otherwise CPU."""
     import torch
 
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -139,20 +137,11 @@ DTYPE_MAP = {
 
 
 def parse_dtype(dtype_str: str, default: torch.dtype = torch.bfloat16) -> torch.dtype:
-    """Parse dtype string to torch.dtype.
-
-    Args:
-        dtype_str: String representation of dtype ("float32", "bfloat16", or "float16")
-        default: Default dtype to return if dtype_str is not recognized
-
-    Returns:
-        Corresponding torch.dtype
+    """Resolve a dtype string to a torch.dtype, using default for unrecognised inputs.
 
     Examples:
         >>> parse_dtype("float32")
         torch.float32
-        >>> parse_dtype("bfloat16")
-        torch.bfloat16
         >>> parse_dtype("unknown")
         torch.bfloat16
     """

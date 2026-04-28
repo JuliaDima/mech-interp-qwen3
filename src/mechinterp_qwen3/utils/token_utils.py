@@ -9,11 +9,10 @@ def tokenize_qwen_input(
     tokenizer: PreTrainedTokenizer | PreTrainedTokenizerFast,
     device: str | torch.device = "cpu",
 ) -> torch.Tensor:
-    """Convert prompt to 1-D tensor of token ids with proper special token handling (sink token).
+    """Convert a prompt to a 1-D token id tensor, prepending an attention-sink token.
 
-    Qwen models often benefit from an initial sink token (like PAD/endoftext) for
-    numerical stability in arithmetic tasks. This function prepends a suitable
-    special token if the input doesn't already start with one.
+    Qwen models use a special token (preferably PAD) at position 0 as an attention
+    sink. If the sequence doesn't already start with a special token, one is prepended.
     """
 
     if isinstance(prompt, str):
@@ -33,23 +32,23 @@ def tokenize_qwen_input(
     if tokens[0] in tokenizer.all_special_ids:
         return tokens.to(device)
 
-    candidate_bos_token_ids = [
-        tokenizer.pad_token_id,  # Prefer PAD as it's the standard attention sink for Qwen
+    # PAD is the preferred sink token for Qwen; fall back to BOS/EOS/any special
+    sink_candidates = [
+        tokenizer.pad_token_id,
         tokenizer.bos_token_id,
         tokenizer.eos_token_id,
     ]
-    candidate_bos_token_ids += tokenizer.all_special_ids
+    sink_candidates += tokenizer.all_special_ids
 
-    # Find the first not-None candidate
-    dummy_bos_token_id = next(filter(lambda x: x is not None, candidate_bos_token_ids), None)
+    sink_token_id = next(filter(lambda x: x is not None, sink_candidates), None)
 
-    if dummy_bos_token_id is None:
+    if sink_token_id is None:
         warnings.warn(
-            "No suitable special token found for BOS token replacement. The first token will be ignored.",
+            "No special token available for use as attention sink. Position 0 will be ignored.",
             stacklevel=2,
         )
     else:
-        dummy_bos_token_id = int(dummy_bos_token_id)
-        tokens = torch.cat([torch.tensor([dummy_bos_token_id], device=tokens.device), tokens])
+        sink_token_id = int(sink_token_id)
+        tokens = torch.cat([torch.tensor([sink_token_id], device=tokens.device), tokens])
 
     return tokens.to(device)

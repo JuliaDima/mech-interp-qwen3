@@ -450,13 +450,13 @@ Example: Carry Circuit Discovery
 
    # 4. Build attribution graphs
    miq attribute \
-     --prompt "calc: 8+9=" \
+     --prompt "calc: 8+9= " \
      --slug carry_example_8_9 \
      --graph_file_dir graphs/ \
      -t mwhanna/qwen3-4b-transcoders
 
    miq attribute \
-     --prompt "calc: 1+2=" \
+     --prompt "calc: 1+2= " \
      --slug no_carry_example_1_2 \
      --graph_file_dir graphs/ \
      -t mwhanna/qwen3-4b-transcoders

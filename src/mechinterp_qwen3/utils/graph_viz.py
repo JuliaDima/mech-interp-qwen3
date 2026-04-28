@@ -29,18 +29,18 @@ def process_token(token: str) -> str:
 
 
 def load_graph_data(file_path):
-    """Load graph data from a PyTorch file."""
+    """Load a Graph from a .pt file."""
     from ..graph import Graph
 
     start_time = time.time()
     graph = Graph.from_pt(file_path)
     time_ms = (time.time() - start_time) * 1000
-    print(f"INFO: Loading graph data: {time_ms=:.2f} ms")
+    print(f"graph loaded in {time_ms:.2f} ms")
     return graph
 
 
 def create_nodes(graph, node_mask, tokenizer, cumulative_scores):
-    """Create all nodes for the graph."""
+    """Build Node objects for every kept position in node_mask."""
     from ..graph import Node
 
     start_time = time.time()
@@ -82,13 +82,13 @@ def create_nodes(graph, node_mask, tokenizer, cumulative_scores):
             )
 
     total_time = (time.time() - start_time) * 1000
-    print(f"INFO: Total node creation: {total_time=:.2f} ms")
+    print(f"node creation: {total_time:.2f} ms")
 
     return nodes
 
 
 def create_used_nodes_and_edges(graph, nodes, edge_mask):
-    """Filter to only used nodes and create edges."""
+    """Return only nodes with at least one edge (plus all embedding/logit nodes) and their edges."""
     start_time = time.time()
     edges = edge_mask.numpy()
     dsts, srcs = edges.nonzero()
@@ -112,17 +112,18 @@ def create_used_nodes_and_edges(graph, nodes, edge_mask):
         if node.node_id in connected_ids or node.feature_type in ["embedding", "logit"]
     ]
     nodes_after = len(used_nodes)
-    print(f"INFO: Filtered {nodes_before - nodes_after} nodes")
+    print(f"dropped {nodes_before - nodes_after} unconnected nodes")
 
     time_ms = (time.time() - start_time) * 1000
-    print(f"INFO: Creating used nodes and edges: {time_ms=:.2f} ms")
-    print(f"INFO: Used nodes: {len(used_nodes)}, Used edges: {len(used_edges)}")
+    print(
+        f"edge/node filtering: {time_ms:.2f} ms  ({len(used_nodes)} nodes, {len(used_edges)} edges)"
+    )
 
     return used_nodes, used_edges
 
 
 def build_model(graph, used_nodes, used_edges, slug, scan, node_threshold, tokenizer):
-    """Build the full model object."""
+    """Assemble the serialisable Model object from nodes, edges, and metadata."""
     from ..graph import Metadata, Model, QParams
 
     start_time = time.time()
@@ -160,7 +161,7 @@ def build_model(graph, used_nodes, used_edges, slug, scan, node_threshold, token
     )
 
     time_ms = (time.time() - start_time) * 1000
-    print(f"INFO: Building model: {time_ms=:.2f} ms")
+    print(f"model assembly: {time_ms:.2f} ms")
 
     return full_model
 
@@ -204,24 +205,17 @@ def create_graph_files(
     used_nodes, used_edges = create_used_nodes_and_edges(graph, nodes, edge_mask)
     model = build_model(graph, used_nodes, used_edges, slug, scan, node_threshold, tokenizer)
 
-    # Write the output locally
     with open(os.path.join(output_path, f"{slug}.json"), "w") as f:
         f.write(model.model_dump_json(indent=2))
     add_graph_metadata(model.metadata.model_dump(), output_path)
-    print(f"INFO: Graph data written to {output_path}")
+    print(f"graph files written to {output_path}")
 
     total_time_ms = (time.time() - total_start_time) * 1000
-    print(f"INFO: Total execution time: {total_time_ms=:.2f} ms")
+    print(f"total: {total_time_ms:.2f} ms")
 
 
 def save_graph_stats(graph, path: str):
-    """Save graph statistics to a file (JSON or text).
-
-    Stats include:
-    - Number of layers, tokens, logits, features
-    - Total nodes and edges
-    - Per-layer statistics for activations and edges (mean, median, min, max, sum)
-    """
+    """Write graph statistics (node counts, edge weights, per-layer breakdown) to JSON or text."""
     import numpy as np
 
     n_layers = graph.cfg.n_layers
@@ -337,4 +331,4 @@ def save_graph_stats(graph, path: str):
                     f"max={e_in['max']:.4f}\n\n"
                 )
 
-    print(f"INFO: Graph statistics saved to {path}")
+    print(f"graph statistics saved to {path}")

@@ -19,7 +19,7 @@ from .utils.token_utils import tokenize_qwen_input
 
 
 class AttributionMLP(nn.Module):
-    """Wrapper for a TransformerLens MLP layer that adds in extra hooks"""
+    """TransformerLens MLP wrapper that exposes input and output hook points."""
 
     def __init__(self, old_mlp: nn.Module):
         super().__init__()
@@ -34,7 +34,7 @@ class AttributionMLP(nn.Module):
 
 
 class AttributionUnembed(nn.Module):
-    """Wrapper for a TransformerLens Unembed layer that adds in extra hooks"""
+    """TransformerLens Unembed wrapper that exposes pre- and post-projection hook points."""
 
     def __init__(self, old_unembed: nn.Module):
         super().__init__()
@@ -71,14 +71,14 @@ class AttributionModel(HookedTransformer):
         transcoders: TranscoderSet | CrossLayerTranscoder,  # Accept both
         **kwargs,
     ) -> "AttributionModel":
-        """Create an AttributionModel from a given HookedTransformerConfig and TranscoderSet
+        """Instantiate from an existing HookedTransformerConfig and a transcoder set.
 
         Args:
-            config (HookedTransformerConfig): the config of the HookedTransformer
-            transcoders (TranscoderSet): The transcoder set with configuration
+            config: HookedTransformerConfig for the underlying transformer
+            transcoders: Transcoder set to attach
 
         Returns:
-            AttributionModel: The loaded AttributionModel
+            Configured AttributionModel
         """
         model = cls(config, **kwargs)
         model._configure_attribution_model(transcoders)
@@ -91,14 +91,14 @@ class AttributionModel(HookedTransformer):
         transcoders: TranscoderSet | CrossLayerTranscoder,  # Accept both
         **kwargs,
     ) -> "AttributionModel":
-        """Create an AttributionModel from the name of HookedTransformer and TranscoderSet
+        """Load a pretrained HookedTransformer and attach a transcoder set.
 
         Args:
-            model_name (str): the name of the pretrained HookedTransformer
-            transcoders (TranscoderSet): The transcoder set with configuration
+            model_name: HuggingFace model identifier
+            transcoders: Transcoder set to attach
 
         Returns:
-            AttributionModel: The loaded AttributionModel
+            Configured AttributionModel
         """
         model = super().from_pretrained(
             model_name,
@@ -120,19 +120,17 @@ class AttributionModel(HookedTransformer):
         dtype: torch.dtype | None = torch.float32,
         **kwargs,
     ) -> "AttributionModel":
-        """Create an AttributionModel from model name and transcoder config
+        """Load model and transcoders by name, downloading transcoders from the hub.
 
         Args:
-            model_name (str): the name of the pretrained HookedTransformer
-            transcoder_set (str): Either a predefined transcoder set name, or a config file
-            device (torch.device | None): The device to load the model and transcoders on.
-                If None, uses the default device. Defaults to None.
-            dtype (torch.dtype): The dtype to use for the model and transcoders.
-                Defaults to torch.float32.
-            **kwargs: Additional keyword arguments passed to HookedTransformer.from_pretrained
+            model_name: HuggingFace model identifier
+            transcoder_set: Hub repo id or local config path for the transcoders
+            device: Target device; defaults to the best available if None
+            dtype: Weight dtype (default: float32)
+            **kwargs: Forwarded to HookedTransformer.from_pretrained
 
         Returns:
-            AttributionModel: The loaded AttributionModel
+            Configured AttributionModel
         """
         if device is None:
             device = get_default_device()
@@ -174,55 +172,54 @@ class AttributionModel(HookedTransformer):
         for layer in range(self.cfg.n_layers):
             self._configure_skip_connection(self.blocks[layer], self.transcoders, layer)
 
-        def stop_gradient(acts, hook):
+        def _detach_acts(acts, hook):
             return acts.detach()
 
         for block in self.blocks:
-            block.attn.hook_pattern.add_hook(stop_gradient, is_permanent=True)  # type: ignore
-            block.ln1.hook_scale.add_hook(stop_gradient, is_permanent=True)  # type: ignore
-            block.ln2.hook_scale.add_hook(stop_gradient, is_permanent=True)  # type: ignore
+            block.attn.hook_pattern.add_hook(_detach_acts, is_permanent=True)  # type: ignore
+            block.ln1.hook_scale.add_hook(_detach_acts, is_permanent=True)  # type: ignore
+            block.ln2.hook_scale.add_hook(_detach_acts, is_permanent=True)  # type: ignore
             if hasattr(block, "ln1_post"):
-                block.ln1_post.hook_scale.add_hook(stop_gradient, is_permanent=True)  # type: ignore
+                block.ln1_post.hook_scale.add_hook(_detach_acts, is_permanent=True)  # type: ignore
             if hasattr(block, "ln2_post"):
-                block.ln2_post.hook_scale.add_hook(stop_gradient, is_permanent=True)  # type: ignore
-            self.ln_final.hook_scale.add_hook(stop_gradient, is_permanent=True)  # type: ignore
+                block.ln2_post.hook_scale.add_hook(_detach_acts, is_permanent=True)  # type: ignore
+            self.ln_final.hook_scale.add_hook(_detach_acts, is_permanent=True)  # type: ignore
 
         for param in self.parameters():
             param.requires_grad = False
 
-        def enable_gradient(acts, hook):
+        def _enable_grad(acts, hook):
             acts.requires_grad = True
             return acts
 
-        self.hook_embed.add_hook(enable_gradient, is_permanent=True)  # type: ignore
+        self.hook_embed.add_hook(_enable_grad, is_permanent=True)  # type: ignore
 
     def _configure_skip_connection(
         self, block, transcoders: TranscoderSet | CrossLayerTranscoder, layer: int
     ):
-        cached = {}
+        _pre_hook_store = {}
 
         def cache_activations(acts, hook):
-            cached["acts"] = acts
+            _pre_hook_store["acts"] = acts
 
         def add_skip_connection(acts: torch.Tensor, hook: HookPoint, grad_hook: HookPoint):
-            # We add grad_hook because we need a way to hook into the gradients of the output
-            # of this function. If we put the backwards hook here at hook, the grads will be 0
-            # because we detached acts.
-            skip_input_activation = cached.pop("acts")
+            # grad_hook is a separate HookPoint so we can attach backward hooks to it.
+            # A backward hook on `hook` itself would see zero gradients because acts is detached.
+            skip_input_activation = _pre_hook_store.pop("acts")
             if transcoders.skip_connection:
                 skip = transcoders.compute_skip(layer, skip_input_activation)
             else:
                 skip = skip_input_activation * 0
             return grad_hook(skip + (acts - skip).detach())
 
-        # add feature input hook
+        # Cache the pre-transcoder activation at the feature input hook
         output_hook_parts = self.feature_input_hook.split(".")
         subblock = block
         for part in output_hook_parts:
             subblock = getattr(subblock, part)
         subblock.add_hook(cache_activations, is_permanent=True)
 
-        # add feature output hook and special grad hook
+        # Attach the skip-connection hook and its dedicated gradient hook point
         output_hook_parts = self.original_feature_output_hook.split(".")
         subblock = block
         for part in output_hook_parts:
@@ -234,27 +231,25 @@ class AttributionModel(HookedTransformer):
         )
 
     def _deduplicate_attention_buffers(self):
-        """
-        Share attention buffers across layers to save memory.
+        """Point all layers at the same causal mask and RoPE buffers to reduce memory.
 
-        TransformerLens makes separate copies of the same masks and RoPE
-        embeddings for each layer - This just keeps one copy
-        of each and shares it across all layers.
+        TransformerLens allocates per-layer copies of these read-only tensors,
+        so we replace them with shared references to a single copy.
         """
 
-        attn_masks = {}
+        shared_buffers = {}
 
         for block in self.blocks:
-            attn_masks[block.attn.attn_type] = block.attn.mask  # type: ignore
+            shared_buffers[block.attn.attn_type] = block.attn.mask  # type: ignore
             if hasattr(block.attn, "rotary_sin"):
-                attn_masks["rotary_sin"] = block.attn.rotary_sin  # type: ignore
-                attn_masks["rotary_cos"] = block.attn.rotary_cos  # type: ignore
+                shared_buffers["rotary_sin"] = block.attn.rotary_sin  # type: ignore
+                shared_buffers["rotary_cos"] = block.attn.rotary_cos  # type: ignore
 
         for block in self.blocks:
-            block.attn.mask = attn_masks[block.attn.attn_type]  # type: ignore
+            block.attn.mask = shared_buffers[block.attn.attn_type]  # type: ignore
             if hasattr(block.attn, "rotary_sin"):
-                block.attn.rotary_sin = attn_masks["rotary_sin"]  # type: ignore
-                block.attn.rotary_cos = attn_masks["rotary_cos"]  # type: ignore
+                block.attn.rotary_sin = shared_buffers["rotary_sin"]  # type: ignore
+                block.attn.rotary_cos = shared_buffers["rotary_cos"]  # type: ignore
 
     def _get_activation_caching_hooks(
         self,
@@ -301,16 +296,14 @@ class AttributionModel(HookedTransformer):
         sparse: bool = False,
         apply_activation_function: bool = True,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Get the transcoder activations for a given prompt
+        """Run a forward pass and return (logits, stacked transcoder activation cache).
 
         Args:
-            inputs (str | torch.Tensor): The inputs you want to get activations over
-            sparse (bool, optional): Whether to return a sparse tensor of activations.
-                Useful if d_transcoder is large. Defaults to False.
+            inputs: Prompt string or token tensor
+            sparse: Return the activation cache as a sparse tensor (useful for large d_tc)
 
         Returns:
-            tuple[torch.Tensor, torch.Tensor]: the model logits on the inputs and the
-                associated activation cache
+            (logits, activation_cache) where activation_cache is (n_layers, n_pos, d_tc)
         """
 
         activation_cache, activation_hooks = self._get_activation_caching_hooks(
@@ -375,7 +368,7 @@ class AttributionModel(HookedTransformer):
 
 
 class AttributionContext:
-    """Manage hooks for computing attribution rows."""
+    """Holds precomputed attribution state and manages hooks for gradient-based scoring."""
 
     def __init__(
         self,
@@ -454,20 +447,19 @@ class AttributionContext:
             if (layer_mask := nnz_layers == layer).any()
         ]
 
-        def error_offset(layer: int) -> int:
-            return self.activation_matrix._nnz() + layer * n_pos
+        nnz = self.activation_matrix._nnz()
 
         error_hooks = [
             self._compute_score_hook(
                 f"blocks.{layer}.{feature_output_hook}",
                 self.error_vectors[layer],
-                write_index=np.s_[error_offset(layer) : error_offset(layer + 1)],
+                write_index=np.s_[nnz + layer * n_pos : nnz + (layer + 1) * n_pos],
             )
             for layer in range(n_layers)
             if layer < len(self.error_vectors)
         ]
 
-        tok_start = error_offset(n_layers)
+        tok_start = nnz + n_layers * n_pos
         token_hook = [
             self._compute_score_hook(
                 "hook_embed",

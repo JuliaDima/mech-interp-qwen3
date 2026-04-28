@@ -1,25 +1,19 @@
-"""Core intervention methods for mechanistic interpretability.
+"""Feature inhibition and constrained patching for circuit validation.
 
-Implements constrained patching and feature inhibition protocols for validating
-circuit hypotheses by measuring causal effects on model behavior.
+Two intervention strategies for testing causal hypotheses in transformer circuits:
 
-Two primary intervention modes:
+1. **Direct inhibition** — Scale target features to zero (or by alpha) in a
+   standard forward pass. Fast, but potentially confounded: upstream activations
+   may already differ between clean and perturbed inputs.
 
-1. **Unconstrained inhibition** — Zero out or scale specific features and measure
-   the effect on downstream logits. Simple but may have confounding effects if
-   inhibited features depend on perturbed upstream activations.
+2. **Constrained patching** — Cache MLP inputs from a perturbed forward pass,
+   then re-run the clean prompt with:
+   - Layers < intervention_layer: MLP inputs replaced by the perturbed cache
+   - intervention_layer: feature scaling applied
+   - Layers above: run normally from the modified residual stream
 
-2. **Constrained patching** — Run a perturbed forward pass, cache intermediate
-   activations, then replay the clean prompt with:
-   - Layers < intervention_layer: clamped to perturbed activations
-   - intervention_layer: apply feature inhibition
-   - Layers > intervention_layer: run normally from modified residual
-
-This prevents upstream confounds by "fixing" all computation before the intervention.
-
-References:
-    - Anthropic's constrained patching protocol (addition case study, 2025)
-    - Pearl, J. (2009). Causality: Models, Reasoning and Inference
+   Clamping earlier layers holds upstream state fixed, isolating the effect
+   of the intervention at the chosen layer.
 """
 
 from __future__ import annotations
@@ -27,6 +21,7 @@ from __future__ import annotations
 import json as _json
 import logging as _logging
 from collections.abc import Callable
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import torch
@@ -42,7 +37,7 @@ if TYPE_CHECKING:
 
 
 # ---------------------------------------------------------------------------
-# Forward-pass helpers (activation caching)
+# activation caching utilities
 # ---------------------------------------------------------------------------
 
 
@@ -51,14 +46,14 @@ def collect_mlp_inputs(
     model: AttributionModel,
     tokens: torch.Tensor,
 ) -> dict[int, torch.Tensor]:
-    """Cache MLP input activations (pre-transcoder) for each layer.
+    """Run a forward pass and return the pre-transcoder hidden state for each layer.
 
     Args:
         model: AttributionModel instance
         tokens: Token IDs, shape (1, n_pos) or (n_pos,)
 
     Returns:
-        Dict mapping layer_idx → MLP input tensor (1, n_pos, d_model) on CPU
+        Mapping from layer index to MLP input tensor (1, n_pos, d_model), stored on CPU
     """
     if tokens.ndim == 1:
         tokens = tokens.unsqueeze(0)
@@ -80,7 +75,7 @@ def collect_mlp_inputs(
 
 
 # ---------------------------------------------------------------------------
-# Feature inhibition hooks
+# inhibition hook construction
 # ---------------------------------------------------------------------------
 
 
@@ -90,19 +85,18 @@ def make_inhibit_hook(
     feature_ids: list[int],
     alpha: float = 0.0,
 ) -> tuple[str, Callable]:
-    """Create hook to scale specified features by alpha at a given layer.
+    """Build a hook that scales selected feature activations by alpha at the given layer.
 
-    The hook modifies the transcoder output by re-encoding the MLP input,
-    scaling the specified feature activations, and re-decoding.
+    Re-encodes the MLP input, scales the targeted features, then decodes back to residual space.
 
     Args:
         model: AttributionModel instance
-        layer: Layer index
-        feature_ids: List of feature indices to inhibit
-        alpha: Scale factor (0.0 = full inhibition, 1.0 = no change)
+        layer: Layer at which to apply the scaling
+        feature_ids: Feature indices to scale
+        alpha: Multiplicative scale (0.0 = full suppression, 1.0 = no change)
 
     Returns:
-        Tuple of (hook_name, hook_function)
+        (hook_name, hook_fn) ready to pass to run_with_hooks
     """
     transcoder = model.transcoders[layer]  # type: ignore[index]
 
@@ -143,17 +137,17 @@ def make_capture_hook(
     layer: int,
     inhibit_hook_fn: Callable,
 ) -> tuple[str, Callable]:
-    """Create hook to capture MLP input and store on inhibit_hook_fn.
+    """Build a hook that saves the MLP input so the inhibit hook can use it.
 
-    This must be installed before the corresponding inhibit hook.
+    Must be registered before the corresponding inhibit hook.
 
     Args:
         model: AttributionModel instance
         layer: Layer index
-        inhibit_hook_fn: The inhibit hook function to attach input to
+        inhibit_hook_fn: The inhibit hook whose ``_last_mlp_in`` attribute will be populated
 
     Returns:
-        Tuple of (hook_name, hook_function)
+        (hook_name, hook_fn) ready to pass to run_with_hooks
     """
 
     def _capture(acts: torch.Tensor, hook) -> torch.Tensor:
@@ -164,7 +158,7 @@ def make_capture_hook(
 
 
 # ---------------------------------------------------------------------------
-# Core intervention functions
+# intervention implementations
 # ---------------------------------------------------------------------------
 
 
@@ -176,18 +170,16 @@ def inhibit_features(
     *,
     alpha: float = 0.0,
 ) -> torch.Tensor:
-    """Unconstrained feature inhibition.
-
-    Runs a forward pass with specified features scaled by alpha.
+    """Direct (unconstrained) feature inhibition: scale features and run a normal forward pass.
 
     Args:
         model: AttributionModel instance
         tokens: Token IDs, shape (1, n_pos) or (n_pos,)
-        feature_ids_by_layer: Mapping {layer_idx: [feature_indices]}
-        alpha: Scale factor (0.0 = full inhibition)
+        feature_ids_by_layer: Mapping {layer_idx: [feature_indices]} to scale
+        alpha: Scale factor applied to each listed feature (0.0 = full suppression)
 
     Returns:
-        Logits tensor, shape (1, n_pos, d_vocab)
+        Output logits, shape (1, n_pos, d_vocab)
     """
     if tokens.ndim == 1:
         tokens = tokens.unsqueeze(0)
@@ -212,37 +204,36 @@ def constrained_patch(
     *,
     alpha: float = 0.0,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Constrained patching with upstream activation clamping.
+    """Run constrained patching with upstream activation clamping.
 
-    Protocol:
-      1. Run perturbed prompt, cache MLP inputs for each layer
-      2. Run clean prompt with:
-         - Layers < intervention_layer: replace MLP inputs with perturbed cache
-         - intervention_layer: apply feature inhibition
-         - Layers > intervention_layer: run normally
-      3. Also run unconstrained inhibition for comparison
+    Steps:
+      1. Forward pass on the perturbed prompt to cache MLP inputs per layer
+      2. Re-run the clean prompt with:
+         - Layers < intervention_layer: MLP inputs replaced by the perturbed cache
+         - intervention_layer: feature scaling applied
+         - Layers above: run normally from the modified residual
+      3. Also run unconstrained inhibition (no clamping) for comparison
 
     Args:
         model: AttributionModel instance
-        tokens_clean: Clean prompt tokens, shape (1, n_pos)
-        tokens_perturbed: Perturbed prompt tokens, shape (1, n_pos)
-        intervention_layer: Layer where inhibition is applied
+        tokens_clean: Clean prompt token ids, shape (1, n_pos)
+        tokens_perturbed: Perturbed prompt token ids, shape (1, n_pos)
+        intervention_layer: Layer at which feature scaling is applied
         feature_ids_by_layer: Mapping {layer_idx: [feature_indices]}
-        alpha: Feature scale factor (0.0 = full inhibition)
+        alpha: Feature scale factor (0.0 = full suppression)
 
     Returns:
-        Tuple of (constrained_logits, unconstrained_logits)
-        Both have shape (1, n_pos, d_vocab)
+        (constrained_logits, unconstrained_logits), each shape (1, n_pos, d_vocab)
     """
     if tokens_clean.ndim == 1:
         tokens_clean = tokens_clean.unsqueeze(0)
     if tokens_perturbed.ndim == 1:
         tokens_perturbed = tokens_perturbed.unsqueeze(0)
 
-    # Step 1: Cache perturbed activations
+    # Cache MLP inputs from the perturbed run
     perturbed_acts = collect_mlp_inputs(model, tokens_perturbed)
 
-    # Step 2: Build inhibition hooks
+    # Build feature-inhibition hooks
     inhibit_hooks: list[tuple[str, Callable]] = []
     for layer, feat_ids in feature_ids_by_layer.items():
         inhibit_name, inhibit_fn = make_inhibit_hook(model, layer, feat_ids, alpha)
@@ -250,7 +241,7 @@ def constrained_patch(
         inhibit_hooks.append((capture_name, capture_fn))
         inhibit_hooks.append((inhibit_name, inhibit_fn))
 
-    # Step 3: Build clamping hooks for layers < intervention_layer
+    # Build clamping hooks for all layers before the intervention point
     clamp_hooks: list[tuple[str, Callable]] = []
     for layer in range(intervention_layer):
         if layer not in perturbed_acts:
@@ -262,17 +253,17 @@ def constrained_patch(
 
         clamp_hooks.append((f"blocks.{layer}.{model.feature_input_hook}", _clamp))
 
-    # Step 4: Run constrained forward pass
+    # Run the constrained forward pass with both sets of hooks active
     constrained_logits = model.run_with_hooks(tokens_clean, fwd_hooks=clamp_hooks + inhibit_hooks)
 
-    # Step 5: Run unconstrained for comparison
+    # Run unconstrained inhibition for comparison
     unconstrained_logits = inhibit_features(model, tokens_clean, feature_ids_by_layer, alpha=alpha)
 
     return constrained_logits, unconstrained_logits
 
 
 # ---------------------------------------------------------------------------
-# Measurement utilities
+# logit measurement
 # ---------------------------------------------------------------------------
 
 
@@ -282,16 +273,16 @@ def compute_logit_diff(
     target_token_id: int,
     pos: int = -1,
 ) -> tuple[float, float]:
-    """Compute change in logit and probability for target token.
+    """Measure the change in raw logit and softmax probability for a target token.
 
     Args:
-        baseline_logits: Baseline logits, shape (1, n_pos, d_vocab)
-        intervention_logits: Logits after intervention, same shape
-        target_token_id: Token ID to measure
-        pos: Position index (default: -1 for last position)
+        baseline_logits: Pre-intervention logits, shape (1, n_pos, d_vocab)
+        intervention_logits: Post-intervention logits, same shape
+        target_token_id: Vocabulary index of the token to track
+        pos: Sequence position to evaluate (default: last position)
 
     Returns:
-        Tuple of (delta_logit, delta_prob)
+        (delta_logit, delta_prob) — signed differences (intervention minus baseline)
     """
     bl = baseline_logits[0, pos, target_token_id].item()
     il = intervention_logits[0, pos, target_token_id].item()
@@ -305,7 +296,7 @@ def compute_logit_diff(
 
 
 # ---------------------------------------------------------------------------
-# Node list extraction (from pruned graph)
+# node serialization
 # ---------------------------------------------------------------------------
 
 
@@ -313,7 +304,7 @@ def _node_list(
     graph: Graph,
     node_mask: torch.Tensor,
 ) -> list[dict]:
-    """Serialize nodes in the pruned graph to a list of dicts."""
+    """Flatten kept nodes from a pruned graph into a list of attribute dicts."""
     from mechinterp_qwen3.graph import Graph  # noqa: F401 (type only)
 
     nodes: list[dict] = []
@@ -404,7 +395,7 @@ def _node_list(
 
 
 # ---------------------------------------------------------------------------
-# Supernode proposal (addition-style heuristics)
+# feature grouping (supernode assignment)
 # ---------------------------------------------------------------------------
 
 
@@ -412,17 +403,16 @@ def propose_supernodes(
     nodes: list[dict],
     n_layers: int,
 ) -> dict[str, list[str]]:
-    """Assign each node to a conceptual group.
+    """Assign nodes to named functional groups based on type and layer depth.
 
-    Grouping rules (heuristic, based on Anthropic's addition case study):
-
-    - ``embedding_inputs``:    feature_type == "embedding"
-    - ``error_nodes``:         feature_type == "mlp_error"
-    - ``logit_nodes``:         feature_type == "logit"
-    - ``low_precision_sum``:   CLT features in the *first third* of layers
-    - ``ones_digit_lookup``:   CLT features in the *middle third* of layers
-    - ``sum_near_X``:          CLT features in the *last third* of layers
-    - ``say_number_ending_Y``: CLT features in the *last two layers*
+    Groups:
+    - ``embedding_inputs``:    token embedding nodes
+    - ``error_nodes``:         transcoder error nodes
+    - ``logit_nodes``:         output logit nodes
+    - ``low_precision_sum``:   CLT features in the first third of layers
+    - ``ones_digit_lookup``:   CLT features in the middle third of layers
+    - ``sum_near_X``:          CLT features in the last third of layers
+    - ``say_number_ending_Y``: CLT features in the final two layers
     """
     third = max(1, n_layers // 3)
     last_two = max(1, n_layers - 2)
@@ -468,7 +458,7 @@ def propose_supernodes(
 
 
 # ---------------------------------------------------------------------------
-# Intervention orchestrator
+# main orchestrator
 # ---------------------------------------------------------------------------
 
 
@@ -486,36 +476,35 @@ def run_interventions(
     alpha: float = 0.0,
     top_n_groups: int = 4,
 ) -> list[dict]:
-    """Run constrained patching on supernode groups from an attribution graph.
+    """Test causal importance of supernode groups via direct inhibition and constrained patching.
 
-    For each of the top-N groups (by feature count) this tests:
-      1. Baseline logits
-      2. Unconstrained inhibition
-      3. Constrained patching (clamping upstream layers to the perturbed run)
+    For each of the top-N groups (ranked by feature count):
+      - Baseline: plain forward pass on the clean prompt
+      - Direct inhibition: scale group features by alpha
+      - Constrained patch: clamp upstream layers to the perturbed run, then inhibit
 
-    Results are written to:
-      - out_dir/intervention_results.json
-      - out_dir/intervention_table.md
+    Writes results to:
+      - ``out_dir/intervention_results.json``
+      - ``out_dir/intervention_table.md``
 
     Args:
         model: AttributionModel instance
-        graph: Attribution graph (from ``miq attribute`` / ``run_attribution.attribute``)
+        graph: Attribution graph produced by ``run_attribution.attribute``
         out_dir: Output directory (str or Path)
-        prompt: Clean/target prompt
-        perturbed_prompt: Perturbed variant (one operand changed)
-        target_token_id: Token to track. If None, uses the argmax of the clean
-            baseline at the last position.
-        node_threshold: Node pruning threshold (fraction of influence kept)
-        edge_threshold: Edge pruning threshold
-        alpha: Feature scale factor (0.0 = full inhibition)
-        top_n_groups: Number of supernode groups to test
+        prompt: Clean prompt to analyse
+        perturbed_prompt: A variant with one input operand changed
+        target_token_id: Vocabulary index to track. Defaults to argmax at the last position.
+        node_threshold: Fraction of total influence to retain when pruning nodes
+        edge_threshold: Fraction of total influence to retain when pruning edges
+        alpha: Feature scale factor for inhibition (0.0 = full suppression)
+        top_n_groups: How many supernode groups to evaluate
 
     Returns:
-        List of result dicts (one per group tested)
+        List of per-group result dicts
     """
     from mechinterp_qwen3.graph import prune_graph
 
-    out_dir = _pathlib_path(out_dir)
+    out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Tokenize prompts
@@ -536,20 +525,20 @@ def run_interventions(
         model.tokenizer.decode([target_token_id]),
     )
 
-    # Prune graph and extract supernodes
+    # Prune the graph and extract node/supernode assignments
     prune_result = prune_graph(graph, node_threshold=node_threshold, edge_threshold=edge_threshold)
     node_mask = prune_result.node_mask
 
     nodes = _node_list(graph, node_mask)
     supernodes = propose_supernodes(nodes, n_layers=graph.cfg.n_layers)  # type: ignore[attr-defined]
 
-    # Build reverse index: node_id → (layer, feat_idx)
+    # Index CLT nodes by node_id for fast lookup
     nid_to_lf: dict[str, tuple[int, int]] = {}
     for node in nodes:
         if node["feature_type"] == "CLT":
             nid_to_lf[node["node_id"]] = (int(node["layer"]), int(node["feature"]))
 
-    # Select CLT groups only
+    # Focus on CLT groups only (exclude embedding, error, and logit groups)
     clt_groups = {
         k: v
         for k, v in supernodes.items()
@@ -627,21 +616,13 @@ def run_interventions(
     return results
 
 
-def _pathlib_path(p):
-    from pathlib import Path
-
-    return Path(p)
-
-
 # ---------------------------------------------------------------------------
-# Markdown output
+# output formatting
 # ---------------------------------------------------------------------------
 
 
 def _write_markdown_table(results: list[dict], path, target_token_id: int) -> None:
-    """Write intervention results as a markdown table."""
-    from pathlib import Path
-
+    """Render intervention results as a markdown table and write to disk."""
     lines = [
         f"# Intervention Results (target token id: {target_token_id})\n",
         "",
@@ -659,8 +640,8 @@ def _write_markdown_table(results: list[dict], path, target_token_id: int) -> No
         )
     lines.append("")
     lines.append(
-        "> **Constrained patching** clamps MLP inputs for layers < intervention_layer "
-        "to the perturbed run, preventing upstream leakage. "
-        "A '✓' means constrained and unconstrained results differ."
+        "> **Constrained patching** replaces MLP inputs at layers before intervention_layer "
+        "with cached perturbed activations, holding upstream state fixed. "
+        "A '✓' indicates that constrained and unconstrained outcomes diverge."
     )
     Path(path).write_text("\n".join(lines))

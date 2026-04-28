@@ -10,7 +10,7 @@
 #
 # Examples:
 #   sbatch scripts/sbatch_run.sh miq generate-dataset --output_path results.jsonl
-#   sbatch scripts/sbatch_run.sh miq attribute -p "calc: 1+1="
+#   sbatch scripts/sbatch_run.sh miq attribute -p "calc: 1+1= "
 #   sbatch scripts/sbatch_run.sh miq attribute -p "You are solving a simple comparison task. Two numbers are given: A and B. Answer with a single character: 'A' if A is larger, otherwise 'B'. A = 864, B = 394, Answer:"
 #   sbatch scripts/sbatch_run.sh python experiments/addition/run.py --all
 #   sbatch --mail-user=[ACCOUNT] --mail-type=BEGIN scripts/sbatch_run.sh command args...

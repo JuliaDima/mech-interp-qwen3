@@ -9,13 +9,12 @@ log = logging.getLogger(__name__)
 
 
 def get_project_root() -> Path:
-    """Return the root directory of the project."""
-    # This file is in src/mechinterp_qwen3/utils/config_utils.py
+    """Return the project root (four directories above this file)."""
     return Path(__file__).resolve().parent.parent.parent.parent
 
 
 def load_yaml(path: Path) -> dict[str, Any]:
-    """Load a YAML file, returning a dictionary."""
+    """Read a YAML file into a dict, returning an empty dict on missing file or parse error."""
     if not path.exists():
         return {}
     with open(path) as f:
@@ -27,7 +26,7 @@ def load_yaml(path: Path) -> dict[str, Any]:
 
 
 def merge_configs(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
-    """Recursively merge two dictionaries."""
+    """Deep-merge two dicts; override takes precedence on conflicts."""
     merged = base.copy()
     for key, value in override.items():
         if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
@@ -41,25 +40,22 @@ def load_config(
     config_path: str | None = None,
     use_root_default: bool = True,
 ) -> dict[str, Any]:
-    """
-    Load and merge configurations from multiple sources.
+    """Load and merge configuration from root config.yaml and an optional explicit path.
 
-    Priority:
-    1. Root config.yaml (if use_root_default is True)
+    Load order (later entries win):
+    1. Root config.yaml (when use_root_default is True)
     2. Explicitly provided config_path
 
     Returns:
-        A dictionary containing the merged configuration.
+        Merged configuration dictionary.
     """
     config = {}
 
-    # 1. Root config.yaml
     if use_root_default:
         root_config_path = get_project_root() / "config.yaml"
         if root_config_path.exists():
             config = load_yaml(root_config_path)
 
-    # 2. Explicit config path
     if config_path:
         explicit_path = Path(config_path)
         if explicit_path.exists():
@@ -72,7 +68,7 @@ def load_config(
 
 
 def add_config_args(parser: argparse.ArgumentParser):
-    """Add standard configuration arguments to an ArgumentParser."""
+    """Attach a --config argument for YAML overrides to the given parser."""
     parser.add_argument(
         "--config",
         type=str,
@@ -84,29 +80,20 @@ def add_config_args(parser: argparse.ArgumentParser):
 def apply_config_to_args(
     args: argparse.Namespace, config: dict[str, Any], section: str | None = None
 ):
-    """
-    Apply configuration values to an argparse.Namespace.
-    If a section is provided, it only applies values from that section.
-    Does NOT override values that were explicitly set on the command line
-    (this is tricky with argparse, usually we do it before parsing).
-    """
-    # This is a bit complex to do AFTER parsing because we don't know what was default.
-    # Better approach is to set_defaults on the parser BEFORE parsing.
+    """Apply config to an already-parsed Namespace (tricky post-parse; prefer set_defaults)."""
     pass
 
 
 def set_parser_defaults_from_config(
     parser: argparse.ArgumentParser, config: dict[str, Any], section: str | None = None
 ):
-    """Set defaults on an ArgumentParser from a configuration dictionary."""
+    """Inject config values as parser defaults, optionally scoped to a named section."""
     relevant_config = config
     if section and section in config:
-        # Merge global defaults with section-specific ones
-        # This allows a section to inherit from the top-level
+        # Section values override top-level defaults
         relevant_config = merge_configs(config, config[section])
 
-    # Flatten the config for argparse (only one level deep for now, except for the section)
-    # Most argparse args are top-level
+    # Only flat (non-nested) keys map directly to argparse flags
     defaults = {}
     for k, v in relevant_config.items():
         if not isinstance(v, dict):
@@ -116,13 +103,11 @@ def set_parser_defaults_from_config(
 
 
 def print_config(args: argparse.Namespace, title: str = "Effective Run Configuration"):
-    """Print the effective configuration in a standardized format."""
+    """Print argument namespace as a formatted key-value table."""
     print("=" * 60)
     print(f"{title}:")
     args_dict = vars(args)
-    # Sort keys for consistent output, excluding internal/redundant ones if needed
     for key in sorted(args_dict.keys()):
-        # Skip 'command' as it's the subcommand name, not a config param
         if key == "command":
             continue
         value = args_dict[key]

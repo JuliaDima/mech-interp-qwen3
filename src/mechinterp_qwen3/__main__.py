@@ -21,11 +21,10 @@ def main():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
-    # Subparsers
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
     subparsers.required = True
 
-    # Add hidden config arg to parent for pre-parsing
+    # Attach --config to the root parser so it can be pre-parsed before subcommand dispatch
     add_config_args(parser)
 
     # Dataset generation subcommand
@@ -354,29 +353,23 @@ def main():
     config = load_config(config_file)
 
     if config:
-        log.info(
-            "Project configuration loaded (from %s or root config.yaml)", config_file or "root"
-        )
-        # Map common keys to subcommand-specific keys
+        log.info("Configuration loaded from %s", config_file or "root config.yaml")
+        # Alias graph_output_path → graph_path so intervene can find it
         if "graph_path" not in config and "graph_output_path" in config:
             config["graph_path"] = config["graph_output_path"]
         if "out_dir" not in config and "addition_experiment" in config:
-            # addition_experiment uses 'out_root', but we can allow it as a fallback if not set
             pass
 
-    # Apply config defaults to subparsers
+    # Push config values into each subparser as defaults so CLI args override them
     if "generate-dataset" in subparsers.choices:
         set_parser_defaults_from_config(
             subparsers.choices["generate-dataset"], config, section="generate_dataset"
         )
     if "attribute" in subparsers.choices:
-        # Attribution defaults are now mostly flat at top-level,
-        # but we check the section too if it exists.
         set_parser_defaults_from_config(
             subparsers.choices["attribute"], config, section="attribution"
         )
     if "intervene" in subparsers.choices:
-        # Intervene picks up defaults from both addition_experiment and intervention sections
         set_parser_defaults_from_config(
             subparsers.choices["intervene"], config, section="addition_experiment"
         )
@@ -388,15 +381,12 @@ def main():
             subparsers.choices["visualize-dataset"], config, section="visualize_dataset"
         )
 
-    # Final parse
     if pos_config and sys.argv[1] == pos_config:
         sys.argv.pop(1)
 
     args = parser.parse_args()
 
-    # --- Post-Parse Validation ---
-    # Since we removed required=True to allow config defaults to work,
-    # we must now verify that essential arguments are present either via CLI or config.
+    # Validate required arguments that couldn't use required=True (config defaults bypass it)
     if args.command == "attribute":
         if not args.transcoder_set:
             attr_parser.error(
@@ -419,8 +409,7 @@ def main():
                 "the following arguments are required: -t/--transcoder_set (or define in config.yaml)"
             )
 
-    # Standardized configuration printing
-    print_config(args, title=f"Effective {args.command.title()} Configuration")
+    print_config(args, title=f"{args.command.title()} configuration")
 
     if args.command == "attribute":
         run_attribution(args, attr_parser)
@@ -470,8 +459,7 @@ def run_plot_interventions(args):
 
 
 def run_dataset_generation(args):
-    """Bridge function for dataset generation."""
-    # Ensure repo root is on sys.path to find experiments
+    """Dispatch to the dataset generation pipeline."""
     repo_root = str(Path(__file__).resolve().parent.parent.parent)
     if repo_root not in sys.path:
         sys.path.insert(0, repo_root)
@@ -484,10 +472,8 @@ def run_dataset_generation(args):
         write_dataset,
     )
 
-    # Convert template strings to TemplateID enums
     templates = [TemplateID(t) for t in args.templates]
 
-    # Create configuration
     config = DatasetConfig(
         model=args.model,
         output_path=Path(args.output_path),
@@ -505,22 +491,17 @@ def run_dataset_generation(args):
         dtype=args.dtype,
     )
 
-    # Validate configuration
     if config.sampling_strategy == SamplingStrategy.RANDOM and config.n_samples is None:
         raise ValueError("--n_samples is required when using random sampling strategy")
 
-    # Generate dataset
     records, summary = generate_dataset(config)
-
-    # Write output
     write_dataset(records, summary, config.output_path)
 
     print("\nDataset generation complete!")
 
 
 def run_dataset_visualization(args):
-    """Bridge function for dataset visualization."""
-    # Ensure repo root is on sys.path to find experiments
+    """Dispatch to the dataset visualisation pipeline."""
     repo_root = str(Path(__file__).resolve().parent.parent.parent)
     if repo_root not in sys.path:
         sys.path.insert(0, repo_root)
@@ -537,7 +518,6 @@ def run_dataset_visualization(args):
 
 
 def run_attribution(args, parser):
-    # Check if one of slug/graph_file_dir is provided but not the other
     if bool(args.slug) != bool(args.graph_file_dir):
         which_one = "slug" if args.slug else "graph_file_dir"
         missing_one = "graph_file_dir" if args.slug else "slug"
@@ -550,7 +530,6 @@ def run_attribution(args, parser):
             stacklevel=2,
         )
 
-    # Determine if we're creating graph files
     create_graph_files_enabled = args.slug is not None and args.graph_file_dir is not None
 
     if not create_graph_files_enabled and not args.graph_output_path:
@@ -559,14 +538,12 @@ def run_attribution(args, parser):
             "(--slug and --graph_file_dir)"
         )
 
-    # Ensure graph output directory exists if needed
     if create_graph_files_enabled:
         os.makedirs(args.graph_file_dir, exist_ok=True)
 
     import torch
 
     dtype = args.dtype
-    # Convert short dtype string to long dtype string
     dtype_mapping = {
         "fp32": "float32",
         "bf16": "bfloat16",
@@ -577,16 +554,13 @@ def run_attribution(args, parser):
     dtype = getattr(torch, dtype)
 
     # Run attribution
-    print(f"INFO: Generating attribution graph for model: {args.model}")
-    print(f"INFO: Loading model with dtype: {dtype}")
-    print(f'INFO: Input prompt: "{args.prompt}"')
+    print(f"model:  {args.model}")
+    print(f"dtype:  {dtype}")
+    print(f'prompt: "{args.prompt}"')
     if args.graph_output_path:
-        print(f"INFO: Output will be saved to: {args.graph_output_path}")
-    print(
-        f"INFO: Including logits with cumulative probability >= {args.desired_logit_prob} "
-        f"(max {args.max_n_logits})"
-    )
-    print(f"INFO: Using batch size of {args.batch_size} for backward passes")
+        print(f"output: {args.graph_output_path}")
+    print(f"logit threshold: cumulative p >= {args.desired_logit_prob} (max {args.max_n_logits})")
+    print(f"backward batch size: {args.batch_size}")
 
     from .attribution_model import AttributionModel
     from .run_attribution import attribute
@@ -610,7 +584,7 @@ def run_attribution(args, parser):
         args.model, transcoder, dtype=dtype
     )
 
-    print("INFO: Running attribution...")
+    print("running attribution...")
     graph = attribute(
         prompt=args.prompt,
         model=model_instance,  # type:ignore
@@ -622,9 +596,8 @@ def run_attribution(args, parser):
         max_feature_nodes=args.max_feature_nodes,
     )
 
-    # Save to file if output path specified
     if args.graph_output_path:
-        print(f"INFO: Saving graph to {args.graph_output_path}")
+        print(f"saving graph → {args.graph_output_path}")
         graph.to_pt(args.graph_output_path)
 
     # Save stats if requested
@@ -633,29 +606,23 @@ def run_attribution(args, parser):
 
         save_graph_stats(graph, args.stats_file)
 
-    # Create graph files if both slug and graph_file_dir are provided
     if create_graph_files_enabled:
-        print(f"INFO: Creating graph files with slug: {args.slug}")
+        print(f"building graph files (slug={args.slug!r})")
         create_graph_files(
-            graph_or_path=graph,  # Use the graph object directly
+            graph_or_path=graph,
             slug=args.slug,
-            scan=None,  # No scan argument needed
+            scan=None,
             output_path=args.graph_file_dir,
             node_threshold=args.node_threshold,
             edge_threshold=args.edge_threshold,
         )
-        print(f"INFO: Graph JSON files written to {args.graph_file_dir}")
+        print(f"graph JSON files written to {args.graph_file_dir}")
 
 
 def run_intervene(args, parser):
-    """Bridge function for miq intervene.
-
-    Loads a Graph from a .pt file and runs constrained patching
-    using the addition experiment's intervention orchestrator.
-    """
+    """Load a saved graph and run constrained-patching interventions."""
     import torch
 
-    # Ensure repo root is on sys.path so experiments package is importable
     repo_root = str(Path(__file__).resolve().parent.parent.parent)
     if repo_root not in sys.path:
         sys.path.insert(0, repo_root)
@@ -669,15 +636,13 @@ def run_intervene(args, parser):
 
     dtype = getattr(torch, args.dtype)
 
-    # Load graph
     graph_path = Path(args.graph_path)
     if not graph_path.exists():
         parser.error(f"Graph file not found: {graph_path}")
-    print(f"INFO: Loading graph from {graph_path}")
+    print(f"loading graph from {graph_path}")
     graph = Graph.from_pt(str(graph_path))
 
-    # Load model
-    print(f"INFO: Loading transcoder from {args.transcoder_set!r} …")
+    print(f"loading transcoders from {args.transcoder_set!r}")
     transcoder, config = load_transcoder_from_hub(
         args.transcoder_set,
         dtype=dtype,
@@ -685,10 +650,10 @@ def run_intervene(args, parser):
         lazy_decoder=True,
     )
     model_name = args.model or config.get("model") or "Qwen/Qwen3-4B"
-    print(f"INFO: Loading model {model_name!r} (dtype={args.dtype}) …")
+    print(f"loading model {model_name!r}  dtype={args.dtype}")
     model = AttributionModel.from_pretrained_and_transcoders(model_name, transcoder, dtype=dtype)
 
-    # Resolve default prompts from the addition experiment
+    # Fall back to addition experiment defaults if prompts not supplied
     from experiments.addition.dataset_generation.generate_dataset_with_predictions import (
         TemplateID,
         build_prompt,
@@ -716,9 +681,7 @@ def run_intervene(args, parser):
 
 
 def main_generate_dataset():
-    """CLI entrypoint for the miq-generate-dataset script."""
-    # This is a simple wrapper that ensures we use the generate-dataset command
-    # logic even when called as a standalone script.
+    """CLI entry point for the miq-generate-dataset standalone script."""
     sys.argv.insert(1, "generate-dataset")
     main()
 
