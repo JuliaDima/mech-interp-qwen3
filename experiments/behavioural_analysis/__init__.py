@@ -1,1 +1,0 @@
-# Behavioural analysis experiment package
