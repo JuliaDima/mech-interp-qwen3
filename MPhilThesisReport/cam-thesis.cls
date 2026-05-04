@@ -91,7 +91,7 @@
         pdfborder={0 0 0},
         pdfusetitle=true,
         colorlinks=true,
-        citecolor=blueberrybluedeep
+        citecolor=red
     ]{hyperref}
 \fi
 \RequirePackage[all]{hypcap}        % Fixes links to floats (must be included after hyperref).

@@ -1,0 +1,45 @@
+\chapter*{Glossary}
+\addcontentsline{toc}{chapter}{Glossary}
+
+\begin{description}
+
+  \item[Attribution graph] A directed acyclic graph whose nodes represent model components
+    (token embeddings, SAE or CLT features, attention heads, output logits) and whose edges
+    represent gradient-weighted information flow between them.
+    Introduced as a methodology by \citet{lindsey2025biology}.
+
+  \item[Circuit] A subgraph of the model's computational graph comprising a small set of
+    components (attention heads, MLP layers, or individual features) that together implement a
+    specific behaviour.
+    The term is used in mechanistic interpretability to denote minimal, interpretable
+    sub-computations.
+
+  \item[CLT --- Cross-Layer Transcoder] A sparse dictionary-learning module, analogous to a
+    sparse autoencoder, that maps MLP inputs at one layer to residual-stream contributions,
+    potentially spanning across layers.
+
+  \item[FFN --- Feed-Forward Network] Synonym for MLP in the transformer literature.
+
+  \item[Grokking] The phenomenon whereby a neural network trained on a small dataset first
+    memorises the training examples (near-perfect training accuracy, poor generalisation) and
+    then, after many additional gradient steps, abruptly transitions to a generalising solution.
+    Mechanistically characterised for modular arithmetic by \citet{nanda2023progress}.
+
+  \item[LLM --- Large Language Model] A neural language model with a parameter count
+    large enough that emergent capabilities arise from scale alone, typically trained on
+    broad natural-language corpora via next-token prediction.
+
+  \item[MLP --- Multilayer Perceptron] In the transformer architecture, the feed-forward
+    sub-layer of each block, consisting of two learned linear projections with a pointwise
+    nonlinear activation in between.
+    Despite the name, transformer MLPs typically have only a single hidden layer.
+
+  \item[RMSNorm --- Root Mean Square Layer Normalisation] A variant of layer normalisation
+    that rescales activations by their root mean square without subtracting the mean.
+    Used in Qwen and other modern architectures in place of standard LayerNorm.
+
+  \item[SAE --- Sparse Autoencoder] A dictionary-learning module trained to decompose
+    neural network activations into a sparse linear combination of learned feature directions.
+    Used in mechanistic interpretability to identify human-interpretable features inside a model.
+
+\end{description}

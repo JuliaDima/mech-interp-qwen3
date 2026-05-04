@@ -22,7 +22,7 @@
 #SBATCH -A MPHIL-DIS-SL2-GPU
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
-#SBATCH --time=05:00:00
+#SBATCH --time=03:00:00
 #SBATCH --job-name=miq_run
 #SBATCH --output=/dev/null
 #SBATCH --error=/dev/null

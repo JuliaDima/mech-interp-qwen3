@@ -1,43 +1,38 @@
 \chapter{Introduction}
 
-Understanding what large language models (LLMs) actually compute, rather than what they output,
+Understanding what neural networks actually \textit{compute}, rather than what they \textit{output},
 is the central problem of mechanistic interpretability. A model that correctly solves arithmetic problems or chains
 reasoning steps coherently need not be implementing anything resembling the algorithm a human would use.
 Whether it does, where in the network that computation lives, and whether it can be manipulated predictably
 are empirical questions that evaluation benchmarks cannot answer.
 
-Anthropic's \emph{On the Biology of a Large Language Model}~\cite{lindsey2025biology} proposes
-a concrete methodology for approaching these questions. Combining sparse autoencoders (SAEs)
+\section{Mechanistic Interpretability}
+Anthropic's \textit{On the Biology of a Large Language Model}~\cite{lindsey2025biology} proposes
+a reproducible methodology for approaching such questions on a large language model (LLM). Combining sparse autoencoders (SAEs)
 with cross-layer transcoders (CLTs) and backward-pass attribution, it constructs dependency graphs
 that trace information flow from input tokens through intermediate features to output logits.
-The framework is specific enough to be reproduced and tested independently,
-which is the starting point of this work.
+The framework is the starting point of mechanistic interpretability work done in this thesis,
+focused on how mathematical primitives are implemented by LLMs, and how these implementations can be improved
+through insights from mechanistic interpretability.
 
-We take \texttt{Qwen3-4B-Instruct} as our subject model and integer addition as our primary task.
-Addition is a reasonable prototype due to having unambiguous ground truth,
-and being structured enough that prior work has identified non-trivial internal
+Prior mechanistic work has established that small transformers trained on arithmetic tasks converge
+on specific and inspectable algorithms rather than fitting statistical
+regularities~\cite{nanda2023progress, zhong2023clock, quirke2024understanding,
+quirkeneo2025understanding, musat2024clustering}.
+Whether analogous structure arises in a large instruction-tuned model, trained without an explicit
+arithmetic curriculum on substantially more diverse data, is considerably less clear and is a central concern
+of this work. Furthermore, since mechanistic interpretability offers relevant insights into how these models
+perform algorithmic tasks, we can make use of this knowledge to improve model performance on algorithmic tasks,
+which is the focus of the second part of this thesis.
+
+We take the open access model \texttt{Qwen3} as our subject model and integer addition as our primary task.
+Addition is a reasonable prototype due to having unambiguous ground truth and being structured enough that prior work has identified non-trivial internal
 mechanisms~\cite{nanda2023progress, quirke2024understanding}, and performance degrades in interpretable ways
-as digit magnitude increases. We first characterise that degradation quantitatively,
-then ask what the attribution graph methodology reveals about the underlying computation.
+as digit magnitude increases. We initially characterise the model's behaviour on addition using the existing attribution graph methodology given by \citet{lindsey2025biology}.
+Beyond reproducing the attribution graphs, we perform intervention studies such as constrained patching to validate hypotheses regarding the underlying computation. We also
+use linear probes to localise where arithmetic-relevant information is encoded across layers.
 
-Beyond reproducing the attribution graphs, we use linear probes to localise where
-arithmetic-relevant information is encoded across layers, and we test whether
-features identified by attribution are causally relevant through two intervention
-methods: activation steering and soft prompt optimisation. These experiments
-are complementary as probes establish correlation between layer representations
-and algorithmic quantities, while interventions test whether manipulating those
-representations changes model behaviour in the predicted direction.
+By drawing insights from our mechanistic analysis, we then proceed to improve model performance on mathematical primitives through modifying specific components of the model.
 
-\marginpar[Margin note.]{Margin par.} We also report a negative result.
-We attempted to transfer addition circuits from a small transformer trained
-from scratch to \texttt{Qwen3-4B} by learning an affine map between their
-MLP activations and patching at a target layer. The transfer failed.
-We argue this is informative: it suggests that independently trained models do not share activation geometry
-at the granularity required for naive circuit transplantation, which bears on broader questions
-about cross-model interpretability methods.
-
-The rest of this dissertation is structured as follows. Chapter~\ref{sec:background}
-covers the relevant background. Chapter~\ref{sec:setup} describes the experimental
-setup and behavioural baselines. Chapters~\ref{sec:attribution} through~\ref{sec:manipulation}
-present the mechanistic experiments. Chapter~\ref{sec:stitching} covers the transfer attempt.
-Chapter~\ref{sec:discussion} synthesises the findings.
+The rest of this dissertation is structured as follows. Chapter~\ref{sec:related}
+covers the relevant background. ......

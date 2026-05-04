@@ -1,0 +1,45 @@
+\chapter{Related Work}
+\label{sec:related}
+
+\section{Arithmetic algorithms in transformers}
+
+A productive line of mechanistic interpretability research has asked not merely whether transformers
+can perform arithmetic, but \textit{how} they do so: what internal representations they form and
+what computational steps those representations support.
+
+\citet{nanda2023progress} studied a one-layer transformer trained on modular addition and found
+that grokking, the phenomenon whereby generalisation appears suddenly after extended training on
+memorised data, corresponds to the emergence of a Fourier-based algorithm.
+The trained model encodes operands as superpositions of trigonometric features and composes them
+across layers to compute the result. The emergence of this structure can be tracked
+through interpretable progress measures even before the accuracy curve improves significantly.
+
+\citet{zhong2023clock} revisited modular addition and showed that the same task admits two
+qualitatively distinct algorithmic solutions: a Fourier-based strategy they term the ``clock''
+algorithm, and a lookup-table strategy they term the ``pizza'' algorithm.
+Which solution emerges depends on training configuration, demonstrating that identical supervision
+can produce structurally different circuits and that mechanistic diversity is not solely an
+artefact of random initialisation.
+
+For standard integer addition, \citet{quirke2024understanding} identified a carry-propagation
+circuit distributed across attention and MLP layers, bearing a structural resemblance to the
+long-addition algorithm familiar from elementary arithmetic.
+\citet{quirkeneo2025understanding} extended this account to subtraction, characterising how the
+same underlying circuit adapts to accommodate sign.
+
+\citet{musat2024clustering} approached the problem from the perspective of training dynamics,
+tracing how the internal representations of operands and results cluster and align over the course
+of training on modular addition.
+Their analysis shows that organised algorithmic structure is not installed gradually but emerges
+through identifiable phase transitions, reinforcing the view that grokking marks a qualitative
+change in the model's internal organisation rather than a smooth accumulation of generalising
+evidence.
+
+These results establish a strong prior that transformers trained specifically on arithmetic
+tasks do not merely interpolate over training examples but converge on discrete, inspectable
+computational procedures.
+All of the models studied, however, are small transformers trained from scratch on a single
+arithmetic task.
+The present work asks whether comparable structure is recoverable in \texttt{Qwen3}, a
+multi-billion-parameter instruction-tuned model trained on a broad natural-language corpus with
+no explicit arithmetic curriculum.
