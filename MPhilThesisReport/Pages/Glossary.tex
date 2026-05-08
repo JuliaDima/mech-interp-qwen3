@@ -42,4 +42,16 @@
     neural network activations into a sparse linear combination of learned feature directions.
     Used in mechanistic interpretability to identify human-interpretable features inside a model.
 
+  \item[Representation engineering] A methodology for extracting and analysing concept
+    directions in the activation space of a neural network by computing the mean difference
+    in hidden-state vectors between semantically contrasting inputs.
+    Proposed by \citet{zou2023representation} as a top-down approach to model transparency,
+    complementary to the bottom-up circuit-based programme.
+
+  \item[Sharpness index] A scalar summary of how tightly a concept delta's norm is concentrated
+    around its peak layer, defined as the fraction of total norm mass lying within a window of
+    width three centred at the layer of maximum norm.
+    Values close to one indicate a localised representation; values close to $3/L$ indicate
+    a representation that is uniformly distributed across the network's $L$ layers.
+
 \end{description}

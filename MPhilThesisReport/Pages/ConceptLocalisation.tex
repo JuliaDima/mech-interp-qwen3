@@ -1,0 +1,338 @@
+\chapter{Concept Localisation via Contrastive Residual-Stream Analysis}
+\label{sec:concept_localisation}
+
+The extraction procedure described in Chapter~\ref{sec:improving} partitions prompts by their
+log-probability margin. This signal reflects aggregate computational confidence rather than the
+state of any specific sub-operation within the arithmetic pipeline. The resulting steering vectors
+capture the mean difference between high- and low-confidence residual-stream distributions without
+isolating the contribution of individual sub-computations such as carry. Whether carry is encoded
+as a distinct, localised direction, and at what network depth this encoding first emerges, requires
+a more controlled experimental design than the confidence-based bucketing can provide.
+
+This chapter investigates that question through a contrastive analysis in which prompt pairs are
+matched so that the only systematically varying factor is whether a units-column carry occurs.
+The methodology draws on representation engineering~\citep{zou2023representation} and on
+contrastive activation addition~\citep{rimsky2023steering}, both of which extract concept
+directions by taking mean differences in activation space across semantically contrasting inputs.
+Here the technique serves as a diagnostic for concept localisation, using the layer-wise norm
+profile of the resulting delta vectors to characterise where the carry representation crystallises.
+
+Carry is a natural target for this analysis because it is a binary, locally determined event.
+Given the units digits of both operands, whether a carry propagates is fixed. \citet{quirke2024understanding}
+identified a dedicated carry-propagation circuit in a small transformer trained on integer
+addition, establishing that carry can be implemented as a localised, mechanistically distinct
+sub-computation. Whether an analogous structure exists in \texttt{Qwen3-4B} is an open question.
+A large instruction-tuned model receives no explicit arithmetic curriculum, and finding a localised
+carry representation would suggest that mechanistic modularity is a general organisational
+principle rather than an artefact of task-specific training.
+
+\section{Contrastive Pair Construction}
+\label{sec:concept_pairs}
+
+A carry pair consists of two prompts sharing the same first operand $a$ and all but the units
+digit of the second operand $b$. Letting $a_0 = a \bmod 10$, the carry variant uses $b^+$ with
+$a_0 + (b^+ \bmod 10) \geq 10$, while the no-carry variant uses $b^-$ with
+$a_0 + (b^- \bmod 10) < 10$. The two prompts produce token sequences of equal length differing
+at exactly one position, the units digit of $b$.
+
+To confine the signal to a single carry event and exclude cascading carries into the tens column,
+we impose the constraint
+\begin{equation}
+\bigl(\lfloor a / 10 \rfloor \bmod 10\bigr) + \bigl(\lfloor b / 10 \rfloor \bmod 10\bigr)
+\;\leq\; 8,
+\label{eq:no_cascade}
+\end{equation}
+so that the tens-column sum, even after receiving a units carry of 1, remains strictly below ten.
+Under this constraint the carry and no-carry prompts differ in exactly one computational event.
+The mean difference in residual-stream activations across many such pairs is therefore attributable
+to that single event rather than to higher-order carry interactions.
+
+The anchor position $t^*$ is identified by comparing the two tokenisations and taking the last
+index at which they differ. Because \texttt{Qwen3} represents each decimal digit as a single
+token, this corresponds to the units digit of $b$ without exception, requiring no auxiliary
+alignment step. It is the earliest position at which the model holds the units digits of both
+operands in context and can in principle determine whether a carry will occur.
+
+Pairs are generated for three prompt templates, T0 (\texttt{calc: \{a\}+\{b\}= }),
+T1 (\texttt{calc: \{a\} + \{b\} = }), and T2 (\texttt{What is \{a\}+\{b\}? Answer: }).
+The templates differ in whitespace and surface phrasing. Repeating the extraction across all
+three provides a check on whether the extracted direction reflects the model's carry
+representation or a pattern tied to one specific tokenisation.
+Table~\ref{tab:concept_config} summarises the configuration.
+
+\begin{table}[h]
+\centering
+\caption{Concept localisation experimental configuration.}
+\label{tab:concept_config}
+\begin{tabular}{ll}
+\hline
+\textbf{Parameter} & \textbf{Value} \\
+\hline
+Pairs per template              & 200 \\
+Templates                       & T0, T1, T2 \\
+Operand digits                  & 3 \\
+No-cascade constraint           & $\lfloor a/10\rfloor \bmod 10 + \lfloor b/10\rfloor \bmod 10 \leq 8$ \\
+Anchor detection                & Last differing token position \\
+Layers extracted                & 0--35 (all 36) \\
+Model precision                 & bfloat16 \\
+Top features reported per layer & 15 \\
+\hline
+\end{tabular}
+\end{table}
+
+\section{Layer-Wise Concept Deltas}
+\label{sec:concept_delta}
+
+Let $\mathcal{D}_+$ and $\mathcal{D}_-$ denote the sets of carry and no-carry prompts
+respectively. For each layer $l \in \{0, \ldots, L-1\}$, the carry concept direction is defined
+as the mean difference of residual-stream vectors at the anchor position,
+\begin{equation}
+\delta_l \;=\; \mathbb{E}_{x \in \mathcal{D}_+}\!\left[ h_{l,t^*}(x) \right]
+-\; \mathbb{E}_{x \in \mathcal{D}_-}\!\left[ h_{l,t^*}(x) \right],
+\label{eq:carry_delta}
+\end{equation}
+where $h_{l,t}(x) \in \mathbb{R}^d$ is the residual-stream vector at layer $l$ and position $t$
+for prompt $x$, consistent with the notation of Chapter~\ref{sec:improving}. Under the linear
+representation hypothesis~\citep{park2023linear}, $\delta_l$ approximates the axis along which
+carry is encoded at depth $l$, provided the concept is linearly separable and the matched-pair
+averaging suppresses nuisance variation. The construction in Section~\ref{sec:concept_pairs} is
+designed to make that nuisance small.
+
+The relationship between $\delta_l$ and the steering vectors $v_{k,l}$ of
+Chapter~\ref{sec:improving} is instructive. Both are mean-difference vectors in the residual
+stream, but they partition the prompt distribution along different axes. The steering vectors
+$v_{k,l}$ separate prompts by model confidence, capturing the direction that discriminates
+successful from unsuccessful computation. The concept deltas $\delta_l$ separate prompts by the
+presence or absence of a specific sub-operation, independently of whether the model ultimately
+produces the correct answer. The former is operationally motivated; the latter is conceptually
+motivated. Only the second admits a localisation analysis that is not confounded by aggregate
+performance.
+
+\section{Sharpness and Concept Localisation}
+\label{sec:sharpness}
+
+The sequence $\bigl\{\lVert \delta_l \rVert\bigr\}_{l=0}^{L-1}$ constitutes a norm trajectory
+tracking how the representational distance between carry and no-carry conditions evolves with
+depth. A steep rise at a single layer followed by a plateau suggests the carry concept
+crystallises there. Gradual growth throughout suggests a distributed encoding with no dominant
+localisation site.
+
+To quantify localisation, we define the sharpness index as the fraction of total norm mass
+concentrated within a window of width three centred at the peak layer
+$l^* = \arg\max_l \lVert \delta_l \rVert$,
+\begin{equation}
+\psi \;=\;
+\frac{\displaystyle\sum_{l=\max(0,\,l^*-1)}^{\min(L-1,\,l^*+1)} \lVert \delta_l \rVert}
+     {\displaystyle\sum_{l=0}^{L-1} \lVert \delta_l \rVert}.
+\label{eq:sharpness}
+\end{equation}
+A value of $\psi$ close to one indicates tight localisation around a single layer. A value close
+to $3/L$ indicates that the norm is approximately uniformly distributed with depth. The index
+thus provides a single scalar summary of the degree to which carry is encoded at a specific
+processing stage.
+
+Complementary to the norm trajectory, the inter-layer alignment
+$\rho_l = \cos(\delta_l,\, \delta_{l+1})$ measures whether the concept direction rotates between
+consecutive layers. Consistently high alignment would indicate a single direction that merely
+scales with depth. A sharp drop at a particular transition marks a qualitative reorientation,
+suggesting the carry concept is being re-encoded in a different subspace at that depth.
+
+\section{Feature-Space Interpretation}
+\label{sec:feature_projection}
+
+In the dictionary-learning framework applied to transformer internals, a \textit{feature} is a
+learned direction $\phi_f \in \mathbb{R}^d$ hypothesised to correspond to a single interpretable
+concept or computation, where $d$ is the residual-stream width of the transformer. 
+Because transformers represent more independent concepts than they have
+dimensions, they are believed to superpose many approximately orthogonal feature directions within
+the residual stream, with each activation being a sparse signed combination of active
+features~\citep{lindsey2025biology}. A transcoder operationalises this for MLP sub-layers as
+follows: an encoder $W_l^{\mathrm{enc}} \in \mathbb{R}^{F_l \times d}$ maps the pre-MLP residual-stream
+vector to a sparse bottleneck of feature activations, and a decoder $W_l^{\mathrm{dec}} \in
+\mathbb{R}^{d \times F_l}$ reconstructs the MLP output as a sum of active feature effects.
+Each encoder row $(W_l^{\mathrm{enc}})_f$ is therefore a \textit{detection direction} in $\mathbb{R}^d$.
+
+The delta vectors $\delta_l$ are dense in $\mathbb{R}^d$ and do not directly identify which
+model components encode carry at each layer. The transcoder architecture provides a more interpretable way to
+decompose them sparsely. Each transcoder at layer $l$ learns an encoder weight matrix
+$W_l^{\mathrm{enc}} \in \mathbb{R}^{F_l \times d}$, where $F_l$ is the number of learned
+features and $d$ the residual-stream dimension. The $f$-th row $(W_l^{\mathrm{enc}})_f$ is
+the direction to which feature $f$ responds most strongly.
+
+The cosine alignment between the carry delta and each encoder direction,
+\begin{equation}
+c_{l,f} \;=\;
+\frac{(W_l^{\mathrm{enc}})_f \cdot \delta_l}
+     {\lVert (W_l^{\mathrm{enc}})_f \rVert \cdot \lVert \delta_l \rVert},
+\label{eq:feature_cos}
+\end{equation}
+identifies the transcoder features most aligned with the concept delta at that layer. Features
+with $\lvert c_{l,f} \rvert$ close to one are the monosemantic components whose activation
+pattern best accounts for the carry versus no-carry difference. This projection connects the
+dense, direction-based view of representation engineering to the sparse, feature-based view of
+dictionary learning. The same concept direction can thus be understood both as a point in
+residual-stream space and as a weighted combination of interpretable transcoder features,
+bridging two perspectives that the broader interpretability programme has pursued in parallel.
+
+\section{Template Robustness}
+\label{sec:template_consistency}
+
+Per-template deltas $\delta_l^{(T)}$ are computed separately for each template
+$T \in \{T0, T1, T2\}$, and their pairwise cosine similarities are measured at each layer.
+This provides a direct check on whether the extracted direction is a stable property of the
+model's carry representation. Consistently high cross-template alignment at the layers where
+$\lVert \delta_l \rVert$ peaks would confirm that the same direction emerges regardless of
+surface form. Divergence at early layers would indicate that template-specific variation
+persists until mid-network processing assimilates the input into a common representational
+format, providing additional evidence about the depth at which template-invariant concept
+encoding begins. This consistency check is the analogue, at the level of individual
+sub-operations, of the cross-template steering evaluation in Chapter~\ref{sec:improving}.
+
+\section{Broader Concept Suite}
+\label{sec:concept_suite}
+
+The contrastive methodology described in the preceding sections is not specific to carry. To test
+whether concept localisation generalises beyond arithmetic sub-operations, the same pipeline was
+applied to six additional concepts drawn from two categories. The first category, modular
+arithmetic, consists of concepts that are binary and locally determined: given a fixed number of
+input tokens, the answer is fully specified. The second category, relational and physical
+reasoning, consists of concepts whose evaluation requires integrating information across a longer
+context or appealing to world knowledge.
+
+Table~\ref{tab:concept_suite} lists all seven concepts together with the positive and negative
+conditions used to construct contrastive pairs. In every case the two conditions differ at
+exactly one token position. The resulting delta vector is therefore attributable to the concept
+shown rather than to differences in token count, surface phrasing, or operand magnitude.
+
+\begin{table}[h]
+\centering
+\caption{Concept suite used in the localisation experiments. For each concept, one token
+position changes between the positive and negative prompt; all other positions are identical.
+The anchor is always the last token at which the two sequences diverge.}
+\label{tab:concept_suite}
+\small
+\begin{tabular}{@{}llll@{}}
+\toprule
+\textbf{Concept} & \textbf{Positive condition} & \textbf{Negative condition} & \textbf{Group} \\
+\midrule
+Carry (mod 10)       & units-digit sum $\geq 10$ (carry occurs)     & units-digit sum $< 10$ (no carry)          & Modular \\
+GCD divisibility     & $\gcd(a, 7) = 7$ (divisible)                 & $\gcd(a, 7) = 1$ (coprime)                 & Modular \\
+Residue class        & $a \equiv 1 \pmod{7}$                        & $a \equiv 6 \pmod{7}$                      & Modular \\
+Transitive ordering  & chain $a > b > c$ holds                      & chain broken ($c > b$)                     & Relational \\
+Energy conservation  & bounce height $<$ drop height (physical)     & bounce height $>$ drop height (violation)  & Relational \\
+Causal direction     & $A$ causes $B$ (correct direction)           & $B$ causes $A$ (reversed)                  & Relational \\
+Negation scope       & $m \leq n$ (negated comparison true)         & $m > n$ (negated comparison false)         & Relational \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The modular arithmetic concepts share a structural property with carry: the binary outcome is
+determined by a single arithmetic relation between small integers, and the concept is expressible
+as a test against a fixed modulus. The relational concepts require a different kind of evaluation.
+Transitive ordering and negation scope involve logical consistency across two or three values;
+energy conservation involves a physical plausibility judgment; causal direction involves the
+assignment of asymmetric roles to two entities. These distinctions motivate asking whether the
+two groups produce qualitatively different norm trajectories and whether their representations
+crystallise at similar depths.
+
+Figure~\ref{fig:concept_comparison} shows the layer-wise delta norm for all seven concepts on a
+shared axis. Modular arithmetic concepts are drawn as solid lines; relational concepts as dashed
+lines. The right panel normalises each curve by its maximum value so that the growth profiles are
+comparable across concepts with very different absolute magnitudes.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{../runs/concept_localization/concept_comparison.pdf}
+\caption{Layer-wise delta norm for all seven concepts. Left: raw norms. Right: norms divided by
+the per-concept maximum, so growth profiles are comparable. Modular arithmetic concepts (carry,
+GCD divisibility, residue class) are shown as solid lines; relational concepts (transitive
+ordering, energy conservation, causal direction, negation scope) as dashed lines. Vertical dashed
+lines mark the phase boundaries identified in the carry analysis.}
+\label{fig:concept_comparison}
+\end{figure}
+
+\section{Results}
+\label{sec:concept_results}
+
+\subsection{Norm Trajectory and Phase Structure}
+
+Figure~\ref{fig:phase_annotated} shows the layer-wise norm profile of the carry delta vector and the pairwise cross-template consistency on a shared axis, with three processing phases annotated. The norm trajectory reveals a clear three-stage structure that maps directly onto qualitatively distinct computational regimes.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{../runs/concept_localization/carry/phase_annotated.pdf}
+\caption{Top: norm of the carry concept delta $\lVert \delta_l \rVert$ with phase regions annotated and the peak at layer 34 marked. All four curves (pooled and per-template) are nearly indistinguishable, confirming template-invariant encoding throughout most of the network. Bottom: cross-template cosine similarity of the carry direction. The shaded red region marks the late-layer divergence zone where template-specific output preparation begins.}
+\label{fig:phase_annotated}
+\end{figure}
+
+In Phase I (layers 0--4), the norm rises slowly from 1.7 to 2.4 as the model processes the raw token embeddings without yet forming a strong carry-specific representation. The first transition at layers 4--5 marks the entry into Phase II (layers 5--18), where the norm jumps to 6.0 and plateaus around 8--12: carry information crystallises here into a stable intermediate representation. A second transition at layer 18--19 raises the norm abruptly to 16.5, opening Phase III (layers 19--35), in which the representation grows steadily to its peak of 38.0 at layer 34 before dropping to 34.75 at the final layer. This terminal drop is consistent with the accumulated carry direction being partially projected into output-logit space at the last transformer block.
+
+The sharpness index $\psi = 0.182$ quantifies the degree of localisation. For a 36-layer network, a uniform distribution would give $3/36 \approx 0.083$; the observed value is approximately twice this baseline, indicating that carry is a progressively enriched distributed representation rather than a sharply localised one, with growth concentrated at the two phase transitions.
+
+\subsection{Representational Geometry: Cross-Layer Similarity}
+
+To characterise how the carry direction evolves in representational geometry, Figure~\ref{fig:cross_layer_sim} shows the full $36 \times 36$ matrix of pairwise cosine similarities between delta vectors at all layer combinations.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.72\textwidth]{../runs/concept_localization/carry/cross_layer_sim.pdf}
+\caption{Cross-layer cosine similarity matrix $\cos(\delta_i, \delta_j)$ for all layer pairs. Dashed white lines mark the phase boundaries at layers 4--5 and 18--19. The block structure confirms that the carry direction is more similar within phases than across them, and that phases I and III share the least alignment, indicating a qualitative reorientation of the representation between early and late processing stages.}
+\label{fig:cross_layer_sim}
+\end{figure}
+
+The matrix reveals a clear block-diagonal structure aligned with the three phases. Within each phase, cosine similarities are high (above 0.90 on the diagonal band), confirming that the carry direction is stable and approximately non-rotating within a processing stage. Across phases, similarities are lower, particularly between Phase I and Phase III where the off-diagonal blocks approach 0.70--0.75. This quantifies the degree to which the early and late carry representations, while pointing in the same broad direction, differ meaningfully in subspace orientation. The carry concept is not re-encoded from scratch at each transition but is continuously refined, with the phase boundaries marking the most significant directional shifts. This geometry is consistent with the inter-layer alignment $\rho_l$ remaining above 0.88 everywhere while still producing substantial cumulative rotation across the full depth of the network.
+
+\subsection{Template Robustness and Output Preparation}
+
+The bottom panel of Figure~\ref{fig:phase_annotated} shows cross-template consistency throughout the network. All three template pairs remain above 0.97 through layer 24, confirming that the extracted carry direction is a genuine property of the model's internal computation rather than an artefact of any particular surface form. The same direction emerges independently of whether the operands are presented in calculator syntax or natural language.
+
+Beyond layer 24 a divergence emerges specifically between the natural-language template T2 and the two calculator-format templates T0 and T1 (which differ only in whitespace and stay aligned at 0.94 through layer 35). By layer 35, T1 vs T2 falls to 0.78. The divergence is driven not by a difference in carry computation itself but by how the late layers specialise the representation for the expected output format: T2 elicits a carry direction that begins to rotate toward token probabilities appropriate for natural-language continuation rather than a numeric calculator response.
+
+This establishes a clean separation between two regimes within Phase III. In layers 19--24, the representation is still template-invariant and conceptually interpretable. From approximately layer 25 onward, it becomes output-specific. The transition at layer 25 thus marks the boundary between \textit{concept encoding} and \textit{output preparation} in the model's arithmetic processing pipeline, a distinction that has practical implications for where interventions such as steering vectors are most likely to act on the underlying computation rather than on output formatting.
+
+\subsection{Feature-Space Decomposition}
+\label{sec:feature_projection_results}
+
+Figure~\ref{fig:feature_projections} shows the top-15 transcoder features most aligned with the carry delta $\delta_l$ at each layer. Each point represents a feature $f$ at layer $l$, with colour encoding the sign of $c_{l,f}$ (red positive, blue negative) and dot area proportional to $|c_{l,f}|^{1.5}$. The bottom strip repeats the carry delta norm for reference.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{../runs/concept_localization/carry/feature_projections_scatter.pdf}
+\caption{Top-15 transcoder features most aligned with the carry concept delta $\delta_l$ at each layer (equation~\ref{eq:feature_cos}). Dot area is proportional to $|c_{l,f}|^{1.5}$; red denotes positive alignment (feature activates more for carry), blue negative (activates more for no-carry). Phase boundaries are dashed vertical lines. Feature F73141 (outlined dots) is the only feature that recurs in the top-15 at more than one layer, appearing at layers 21 and 28 (annotations above and below the respective points). The bottom strip shows $\lVert\delta_l\rVert$ for context. Carry is encoded via a layer-specific sparse basis: the top-aligned features are almost entirely non-overlapping across layers, with no single monosemantic component persisting through the network.}
+\label{fig:feature_projections}
+\end{figure}
+
+Across all 36 layers, the 540 selected feature--layer pairs draw from 539 distinct feature identifiers. Only one feature, F73141, appears in the top-15 at more than one layer (layers 21 and 28), a persistence rate below 0.2 per cent of the full feature vocabulary of approximately 160{,}000 components. This near-complete non-overlap is a strong mechanistic result: carry is not encoded through a small, reused set of monosemantic components, but through a layer-specific sparse basis in which each depth selects a largely disjoint subset of the transcoder dictionary.
+
+The finding is consistent with the phase structure and cross-layer geometry described above. The block-diagonal similarity matrix in Figure~\ref{fig:cross_layer_sim} shows that within-phase directional alignment is high (above 0.90), predicting that features should be more stable within a phase than across phase transitions. The scatter confirms this qualitatively: visible banding in feature identity is apparent within each phase region, with the sharpest changeovers at the two transition boundaries.
+
+The result also informs the scope of feature-level intervention. If carry were implemented through a small set of persistent features, a transcoder-based surgical edit targeting those features would be a natural next step. The layer-specific basis implies instead that any feature-level intervention would need to target a different subset at each depth. This reinforces the conclusion of Chapter~\ref{sec:improving} that computation-mode layer selection, rather than individual feature targeting, is the more tractable lever for influencing carry processing in a large pre-trained model.
+
+\section{Relation to Steering Effectiveness}
+\label{sec:carry_steer_relation}
+
+The phase structure identified through contrastive activation analysis provides an independent, concept-level explanation for the layer-wise pattern of steering improvement reported in Chapter~\ref{sec:improving}. Figure~\ref{fig:carry_steer_correlation} aligns the three relevant signals on a shared layer axis: the carry concept delta norm $\lVert \delta_l \rVert$, the steering vector norms $\lVert v_{k,l} \rVert$ for all four arithmetic primitives, and the per-layer improvement in full-answer accuracy produced by the FSM-routed steering intervention at the best amplitude $\alpha = 5.0$.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{../runs/fsm_router/carry_steer_correlation.pdf}
+\caption{Three-panel comparison across all 36 layers. Top: carry concept delta norm $\lVert \delta_l \rVert$ (purple) with phase regions shaded and the peak at layer 34 marked. Middle: steering vector norms $\lVert v_{k,l} \rVert$ for addition and subtraction (carry-relevant, solid and dashed green) and for multiplication and modular (no carry event, red and orange). Bottom: layer-wise change in full-answer and first-token accuracy produced by local FSM steering at $\alpha = 5.0$, with the optimal injection layer $l^* = 11$ marked. Phase boundaries at layers 4--5 and 18--19 are shown as vertical dashed lines in all panels.}
+\label{fig:carry_steer_correlation}
+\end{figure}
+
+A naive comparison of the carry norm and the steering improvement curves yields no linear correlation (Pearson $r = -0.32$, Spearman $r = -0.12$, both non-significant), and the sign is informative. The carry norm grows monotonically to its peak at layer 34 precisely as the steering improvement collapses toward zero, so a global linear relationship between the two signals would be mechanistically misleading. The carry direction becoming \textit{larger} in Phase III does not make it a better target for intervention; as the template consistency analysis showed, Phase III is the regime in which the representation is being projected toward output-logit space rather than maintained as a computation-level encoding.
+
+The meaningful correspondence is structural rather than scalar. The three-phase boundary identified in the carry analysis predicts the effective steering window with high fidelity. In Phase I (layers 0--4) the carry representation has not yet crystallised, and the steering improvement is negligible across all amplitudes. The 4--5 transition, the first point at which carry information becomes linearly stable, coincides with the onset of meaningful steering gain. Phase II (layers 5--18) is the regime of stable, template-invariant carry encoding identified in Section~\ref{sec:template_consistency}: it is also the regime in which steering improvement rises sharply, peaking at layer 11 with a full-answer accuracy gain of $+47.3$ percentage points over the unsteered baseline. The 18--19 transition, the entry into Phase III, coincides with the onset of steering degradation: improvement falls continuously thereafter, and by layers 30--35 the intervention is marginally harmful.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{../runs/fsm_router/steer_best_alpha.pdf}
+\caption{Absolute accuracy at the best amplitude $\alpha = 5.0$ as a function of injection layer, for full-answer (green), first-token (blue), and digit (dashed orange) metrics. Dotted horizontal lines show the unsteered baseline for each metric. The bell-shaped profile peaks at layer 11 and falls to near-baseline levels by layer 30, matching the Phase II window of stable carry encoding.}
+\label{fig:steer_best_alpha}
+\end{figure}
+
+Figure~\ref{fig:steer_best_alpha} makes the bell-shaped layer profile of steering improvement explicit. The peak at layer 11 falls squarely within Phase II, and the return to baseline in Phase III is consistent with the output-preparation hypothesis: injecting a computation-mode steering vector into layers that are already projecting toward output tokens disrupts the formatting of the response without reinforcing the underlying arithmetic operation.
+
+A further observation concerns the steering vector norms shown in the middle panel of Figure~\ref{fig:carry_steer_correlation}. The norms for the four primitives are nearly indistinguishable and all grow monotonically, driven by residual-stream scale accumulation rather than by any primitive-specific structure. In particular, addition and subtraction, both subject to carry events, track multiplication and modular, which involve no carry, throughout the network. This confirms that the sv norm alone is an unreliable predictor of steering effectiveness: the relevant factor is the geometric orientation of the extracted direction relative to the computation being performed at that depth, not its Euclidean magnitude.
+
+Taken together, the carry localisation analysis and the steering evaluation are mutually consistent and mutually explanatory. The concept-level analysis predicts which layers are computation-mode layers and which are output-preparation layers; the intervention experiment confirms that only computation-mode layers admit effective steering. The two results are produced by entirely independent pipelines, contrastive activation averaging on matched carry pairs and confidence-bucketed extraction followed by causal injection, and their agreement strengthens the mechanistic interpretation of both.
