@@ -30,14 +30,13 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from experiments.addition.dataset_generation.generate_dataset_with_predictions import TemplateID
+from data.concept_datasets.carry_dataset import generate_carry_pairs
 from experiments.concept_localization.analyze import (
     compute_sharpness,
     compute_template_consistency,
     project_onto_features,
 )
-from experiments.concept_localization.dataset import generate_carry_pairs
-from experiments.concept_localization.extract_deltas import extract_layer_deltas
+from experiments.concept_localization.extract_deltas_generic import extract_layer_deltas_generic
 from experiments.concept_localization.visualize import (
     plot_feature_projections,
     plot_norm_and_alignment,
@@ -80,7 +79,7 @@ def main() -> None:
         "--top_k", type=int, default=_TOP_K, help="Top-k features to report per layer"
     )
     parser.add_argument(
-        "--templates", nargs="+", default=["T0", "T1", "T2"], choices=list(TemplateID)
+        "--templates", nargs="+", default=["T0", "T1", "T2"], choices=["T0", "T1", "T2"]
     )
     parser.add_argument("--out_dir", default=_OUT_DIR)
     parser.add_argument("--seed", type=int, default=42)
@@ -96,7 +95,7 @@ def main() -> None:
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    templates = [TemplateID(t) for t in args.templates]
+    templates = args.templates
 
     # ------------------------------------------------------------------ #
     # 1. Dataset
@@ -137,7 +136,9 @@ def main() -> None:
     # 3. Delta extraction
     # ------------------------------------------------------------------ #
     log.info("Extracting per-layer residual-stream deltas…")
-    layer_results = extract_layer_deltas(model, pairs, layers, device, dtype, per_template=True)
+    layer_results = extract_layer_deltas_generic(
+        model, pairs, layers, device, dtype, per_template=True
+    )
 
     # ------------------------------------------------------------------ #
     # 4. Sharpness
@@ -178,7 +179,7 @@ def main() -> None:
                 str(l): round(n, 4) for l, n in zip(sharpness.layers, sharpness.norms, strict=False)
             },
             "inter_layer_cos": {
-                f"{sharpness.layers[i]}-{sharpness.layers[i+1]}": round(v, 4)
+                f"{sharpness.layers[i]}-{sharpness.layers[i + 1]}": round(v, 4)
                 for i, v in enumerate(sharpness.inter_layer_cos)
             },
         },

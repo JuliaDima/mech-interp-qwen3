@@ -43,8 +43,8 @@ def analyze_carry_distribution(max_value=99):
             digit_patterns[key]["carry"] += has_carry
 
     print(f"Total pairs: {total}")
-    print(f"Carry pairs: {carry_count} ({100*carry_count/total:.2f}%)")
-    print(f"No-carry pairs: {total - carry_count} ({100*(total-carry_count)/total:.2f}%)")
+    print(f"Carry pairs: {carry_count} ({100 * carry_count / total:.2f}%)")
+    print(f"No-carry pairs: {total - carry_count} ({100 * (total - carry_count) / total:.2f}%)")
     print()
 
     # Analyze by last digit sum

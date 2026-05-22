@@ -68,7 +68,7 @@ def run_pipeline(pairs, transcoder_set="mwhanna/qwen3-4b-transcoders"):
         graph_path = graph_dir / "attribution_graph.pt"
         out_dir = Path(f"runs/addition/interventions/{slug}")
 
-        print(f"\n[{idx+1}/{len(pairs)}] Processing {slug} ({pair['type']})")
+        print(f"\n[{idx + 1}/{len(pairs)}] Processing {slug} ({pair['type']})")
         print(f"  Base prompt: calc: {a}+{b}=")
         print(f"  Perturbed  : calc: {a}+{b_perturb}=")
 

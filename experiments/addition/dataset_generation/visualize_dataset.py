@@ -49,6 +49,41 @@ def load_dataset(jsonl_path: Path) -> list[dict]:
     return records
 
 
+def load_accuracy_sweep(json_path: Path, template_id: str = "T0") -> list[dict]:
+    """Convert accuracy_sweep.json to the record format expected by visualize_dataset.
+
+    The accuracy sweep stores one entry per (a, b) pair with top-level fields
+    ``target_prob``, ``answer_str``, and ``predicted_str``.  This function
+    wraps each entry into the ``per_pos`` schema so existing plot functions
+    work unchanged.
+    """
+    with json_path.open() as f:
+        data = json.load(f)
+    results = data["results"]
+
+    records = []
+    for r in results:
+        tail = r["prompt"].replace("calc: ", "").replace("= ", "").strip()
+        a, b = map(int, tail.split("+"))
+        pred = r["predicted_str"].strip()
+        records.append(
+            {
+                "a": a,
+                "b": b,
+                "template_id": template_id,
+                "per_pos": [
+                    {
+                        "prob_true": r["target_prob"],
+                        "true_str": r["answer_str"][0] if r["answer_str"] else "",
+                        "topk_strs": [pred[0] if pred else ""],
+                        "topk_probs": [r.get("predicted_prob", 0.0)],
+                    }
+                ],
+            }
+        )
+    return records
+
+
 def classify_carry(a: int, b: int) -> Literal["no_carry", "single_carry", "multi_carry"]:
     """Classify addition by carry pattern."""
     carry_count = 0
@@ -502,15 +537,12 @@ def create_positional_cascade(
     """
     template_records = [r for r in records if r["template_id"] == template_id]
 
-    # Filter to records with at least max_positions tokens
-    long_records = [r for r in template_records if len(r["per_pos"]) >= max_positions]
-
-    if not long_records:
-        print(f"No records with {max_positions} positions found!")
+    if not template_records:
+        print(f"No records found for template {template_id}!")
         return None
 
-    max_a = max(r["a"] for r in long_records)
-    max_b = max(r["b"] for r in long_records)
+    max_a = max(r["a"] for r in template_records)
+    max_b = max(r["b"] for r in template_records)
 
     # Create subplots
     fig, axes = plt.subplots(1, max_positions, figsize=figsize)
@@ -524,8 +556,9 @@ def create_positional_cascade(
     for pos in range(max_positions):
         prob_grid = np.full((max_b + 1, max_a + 1), np.nan)
 
-        for rec in long_records:
-            prob_grid[rec["b"], rec["a"]] = rec["per_pos"][pos]["prob_true"]
+        for rec in template_records:
+            if pos < len(rec["per_pos"]):
+                prob_grid[rec["b"], rec["a"]] = rec["per_pos"][pos]["prob_true"]
 
         im = axes[pos].imshow(prob_grid, cmap=cmap, aspect="auto", origin="lower", vmin=0, vmax=1)
 
@@ -540,12 +573,13 @@ def create_positional_cascade(
         # Add mean probability annotation
         mean_prob = np.nanmean(prob_grid)
         axes[pos].text(
-            0.05,
+            0.95,
             0.95,
             f"μ={mean_prob:.3f}",
             transform=axes[pos].transAxes,
             fontsize=11,
             verticalalignment="top",
+            horizontalalignment="right",
             bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
         )
 
@@ -656,7 +690,9 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Visualize addition dataset")
-    parser.add_argument("dataset_path", type=Path, help="Path to JSONL dataset")
+    parser.add_argument(
+        "dataset_path", type=Path, help="Path to JSONL dataset or accuracy_sweep.json"
+    )
     parser.add_argument(
         "--output_dir",
         type=Path,
@@ -664,7 +700,45 @@ if __name__ == "__main__":
         help="Output directory for plots",
     )
     parser.add_argument("--template", type=str, default="T0", help="Template to visualize")
+    parser.add_argument(
+        "--accuracy_sweep",
+        action="store_true",
+        help="Load from accuracy_sweep.json format instead of JSONL",
+    )
 
     args = parser.parse_args()
 
-    create_comprehensive_report(args.dataset_path, args.output_dir, args.template)
+    if args.accuracy_sweep:
+        records = load_accuracy_sweep(args.dataset_path, template_id=args.template)
+        args.output_dir.mkdir(parents=True, exist_ok=True)
+        create_carry_structure_plot(
+            records,
+            template_id=args.template,
+            position=0,
+            output_path=args.output_dir / "carry_structure.png",
+        )
+        plt.close()
+        create_probability_heatmap(
+            records,
+            template_id=args.template,
+            position=0,
+            output_path=args.output_dir / "heatmap_pos0.png",
+        )
+        plt.close()
+        create_diagonal_analysis(
+            records,
+            template_id=args.template,
+            position=0,
+            output_path=args.output_dir / "diagonal_analysis.png",
+        )
+        plt.close()
+        create_error_analysis(
+            records,
+            template_id=args.template,
+            position=0,
+            output_path=args.output_dir / "error_analysis.png",
+        )
+        plt.close()
+        print(f"Saved plots to {args.output_dir}")
+    else:
+        create_comprehensive_report(args.dataset_path, args.output_dir, args.template)

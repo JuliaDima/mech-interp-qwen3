@@ -130,10 +130,9 @@ def collect_residuals(
                 fwd_hooks=[
                     (
                         f"blocks.{layer}.hook_resid_post",
-                        lambda act, hook, _p=eq_pos: cache.update(
-                            {"h": act[0, _p, :].detach().clone()}
-                        )
-                        or act,
+                        lambda act, hook, _p=eq_pos: (
+                            cache.update({"h": act[0, _p, :].detach().clone()}) or act
+                        ),
                     )
                 ],
             )

@@ -1,0 +1,354 @@
+\chapter{Reproducibility}
+\label{sec:repro}
+
+\section{Reproducing the Addition Arithmetic Circuit}
+
+\citet{lindsey2025biology} showed that Claude~3.5 Haiku, when presented
+with prompts of the form \texttt{calc:~$a$+$b$=}, does not implement a
+symbolic carry algorithm but instead activates a family of sparse
+\textit{lookup table} features whose firing concentrates on the cells of
+the operand space satisfying $a \bmod 10 = d_1$ and $b \bmod 10 = d_2$
+for a specific digit pair $(d_1, d_2)$.  These features encode the ones
+digit of $d_1 + d_2$ and route this information directly to the output.
+The present reproduction asks whether the same mechanistic signature
+appears in Qwen3-4B, trained independently on a different corpus and with
+a different tokeniser, and whether the attribution methodology transfers
+faithfully to a model for which it was not originally calibrated.
+
+\subsection{Transcoders and the Linearised Computation Graph}
+
+Let $\mathcal{M}$ be a transformer with $L$ layers, residual stream
+dimension $d$, and MLP sublayers $f_0, \ldots, f_{L-1}$.  Mechanistic
+analysis replaces each $f_\ell$ with a pretrained \textit{transcoder}
+$\mathcal{T}_\ell$, a sparse encoder--decoder whose weights are fit
+offline to reconstruct the MLP output while decomposing it into $K$
+interpretable directions.  For a residual-stream vector
+$\mathbf{x} \in \mathbb{R}^d$ entering layer $\ell$, the transcoder
+computes pre-activations
+
+\begin{equation}
+  z_{\ell,k}(\mathbf{x})
+    = \bigl(\mathbf{W}_\mathrm{enc}^{(\ell)}\,\mathbf{x}
+           + \mathbf{b}_\mathrm{enc}^{(\ell)}\bigr)_k,
+  \label{eq:preact}
+\end{equation}
+
+so that feature $k$ carries activation
+$a_{\ell,k}(\mathbf{x}) = \mathrm{ReLU}(z_{\ell,k}(\mathbf{x}))$,
+and the reconstructed MLP output is
+
+\begin{equation}
+  \hat{f}_\ell(\mathbf{x})
+    = \mathbf{W}_\mathrm{dec}^{(\ell)}\,\mathbf{a}_\ell(\mathbf{x})
+    + \mathbf{b}_\mathrm{dec}^{(\ell)},
+  \label{eq:recon}
+\end{equation}
+
+where $\mathbf{W}_\mathrm{dec}^{(\ell)} \in \mathbb{R}^{d \times K}$ and
+$\mathbf{a}_\ell(\mathbf{x})$ is the vector of all feature activations at
+layer $\ell$.  Throughout this section a double subscript $(\ell, k)$
+indexes features, with $\ell$ specifying the layer and $k$ the index within
+that layer's dictionary, in place of the flat index $f$ used in
+Chapter~\ref{sec:introduction}.
+
+Attribution is computed on the \textit{linearised} model, in which attention
+outputs are detached and treated as constants, so the residual stream
+propagates solely through the transcoder reconstruction path.  This
+linearisation is the necessary condition for the attribution scores to
+be additive and interpretable as influence flows; it is also what
+constrains their faithfulness, a point examined in Section~\ref{sec:faithfulness}.
+
+Let $T$ denote the position of the final input token, and let
+$y_j = \mathbf{v}_j^\top \mathbf{h}_T$ be the logit for output token
+$j$, where $\mathbf{h}_T$ is the pre-unembedding hidden state and
+$\mathbf{v}_j$ is the (demeaned) unembedding direction for token $j$.
+The \textit{attribution score} of feature $k$ at position $t$ in
+layer $\ell$ is defined as
+
+\begin{equation}
+  \alpha_{\ell,k,t}
+    \;=\; a_{\ell,k,t}
+          \cdot \frac{\partial y_j}{\partial a_{\ell,k,t}},
+  \label{eq:attr}
+\end{equation}
+
+the product of the feature activation $a_{\ell,k,t}$ with the gradient of
+the target logit with respect to that activation, consistent with
+Equation~\eqref{eq:attribution} of Chapter~\ref{sec:introduction}.
+Collecting all such scores over a given prompt yields a directed weighted
+graph, the \textit{attribution graph}, in which nodes are (layer, position,
+feature) triples and edges carry the influence $\alpha_{\ell,k,t}$ from
+earlier features to later ones.  The graph is then pruned by retaining only the nodes and edges
+that account for a fixed fraction of the total downstream influence on
+$y_j$, controlled by a node threshold $\tau_\mathrm{node}$ and an edge
+threshold $\tau_\mathrm{edge}$.
+
+\subsection{Operand Plots and Lookup Feature Identification}
+
+For a prompt $\texttt{calc:~}a\texttt{+}b\texttt{=~}$, let $T$ be the
+index of the \texttt{=} token.  The \textit{operand matrix} for feature
+$(\ell, k)$ is
+
+\begin{equation}
+  M_{\ell,k}[a, b]
+    \;=\; a_{\ell,k,T}
+          \!\left(\texttt{calc:~}a\texttt{+}b\texttt{=~}\right),
+    \qquad a, b \in \{0, \ldots, 99\},
+  \label{eq:operand-matrix}
+\end{equation}
+
+obtained by sweeping over the full $100 \times 100$ integer-pair grid.
+The geometry of $M_{\ell,k}$ encodes the feature's sensitivity in a
+directly interpretable form.  A feature that tracks the raw sum $a + b$
+produces diagonal stripes of constant activation; one that tracks a
+single operand produces horizontal or vertical bands; modular sensitivity
+to the ones digit of either operand produces a period-10 repeating
+structure.  A feature that fires selectively for a specific pair of ones
+digits $(d_1, d_2)$ produces a regular grid of isolated point clusters,
+concentrated on the $200$ cells where $a \bmod 10 \in \{d_1, d_2\}$ and
+$b \bmod 10 \in \{d_1, d_2\}$.  These \textit{lookup table features}
+constitute $2\%$ of the operand space; a uniform feature would achieve
+the same coverage by chance.
+
+To identify lookup candidates automatically, each feature is assigned the
+concentration score
+
+\begin{equation}
+  s_{\ell,k}(d_1, d_2)
+    \;=\;
+    \frac{%
+      \displaystyle\sum_{a,b}
+        M_{\ell,k}[a,b]\;
+        \mathbb{1}\!\left[
+          a \bmod 10 \in \{d_1, d_2\},\;
+          b \bmod 10 \in \{d_1, d_2\}
+        \right]
+    }{%
+      \displaystyle\sum_{a,b} M_{\ell,k}[a,b]
+    },
+  \label{eq:lookup-score}
+\end{equation}
+
+which measures the fraction of total activation mass that lies on the
+target grid.  Features are filtered by a minimum peak-activation
+threshold to exclude dormant features, then ranked by $s_{\ell,k}$.
+The top-ranked feature for the pair $(d_1, d_2) = (6, 9)$ -- the ones
+digits of the focus operands $36$ and $59$ -- is taken as the reference
+lookup feature and subjected to causal validation.  Two interventions are
+applied.  In the \textit{inhibition} experiment, the feature's activation
+is scaled by a factor $\beta \in \{1.0, 0.5, 0.0, -1.0, -5.0, -10.0\}$
+before the decoder output is computed; if the feature is causally
+necessary, driving $\beta$ below zero should monotonically weaken the
+logit for the token representing the correct ones digit of $6 + 9 = 15$.
+In the \textit{substitution} experiment, the MLP inputs at all layers
+preceding the lookup feature's layer are replaced by those from the
+prompt \texttt{calc:~39+59=~}, which has ones digits $(9, 9)$ rather than
+$(6, 9)$; if the identified feature mediates the computation, the output
+should shift from predicting ones digit $5$ to ones digit $8$.
+
+\subsection{Experimental Scope}
+\label{subsec:addition-dataset}
+
+The experiment is structured around four prompt collections,
+summarised in Table~\ref{tab:addition-dataset}.
+
+\begin{table}[ht]
+  \centering
+  \small
+  \caption{%
+    Prompt collections used in the addition circuit reproduction.
+    The operand grid drives the activation sweep; the focus prompt
+    anchors the attribution graph.
+  }
+  \label{tab:addition-dataset}
+  \begin{tabular}{@{}llrl@{}}
+    \toprule
+    Split & Template & $N$ & Purpose \\
+    \midrule
+    Operand grid
+      & \texttt{calc:~$a$+$b$=~}
+      & $10{,}000$
+      & Feature activation sweep; $a,b \in \{0,\ldots,99\}$ \\
+    Focus prompt
+      & \texttt{calc:~36+59=~}
+      & $1$
+      & Primary attribution graph; answer \texttt{95} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The $10{,}000$-prompt grid exhausts the integer-pair space
+$\{0,\ldots,99\}^2$, covering all $100$ distinct ones-digit
+combinations and providing sufficient support to identify modular
+activation patterns visually.  The focus prompt \texttt{calc:~36+59=}
+follows Anthropic's exact choice, enabling direct comparison of
+attribution graphs across models.
+
+\subsection{Behavioural Verification}
+\label{subsec:accuracy-sweep}
+
+Before committing mechanistic resources to a single focus prompt, it is
+necessary to establish that the model solves the task reliably across the
+operand space.  A circuit identified on a prompt the model cannot answer
+carries no mechanistic authority.  The accuracy sweep therefore records,
+for every pair $a, b \in \{0,\ldots,99\}$, the \textit{teacher-forced
+confidence} at each output position.  Let
+$\mathbf{y}^*(a,b) = (y^*_0, y^*_1, \ldots)$ denote the ground-truth
+answer tokens for $a + b$.  The teacher-forced confidence at position $k$
+is
+
+\begin{equation}
+  P_k(a, b)
+  = P\!\left(
+      y_k = y^*_k \;\middle|\;
+      y_0 = y^*_0,\, \ldots,\, y_{k-1} = y^*_{k-1},\;
+      \mathbf{x}(a,b)
+    \right),
+  \label{eq:teacher-forced}
+\end{equation}
+
+where $\mathbf{x}(a,b)$ is the token sequence for the prompt
+\texttt{calc:~$a$+$b$=} and preceding positions are forced to their
+correct tokens.  Equation~\eqref{eq:teacher-forced} isolates the residual
+difficulty at each generation step by removing uncertainty due to
+error accumulation in prior positions.
+
+Figure~\ref{fig:positional-cascade} plots $P_k(a,b)$ for
+$k \in \{0, 1, 2\}$.  At $k = 0$ the model must predict the leading
+output token from the prompt alone; the grid mean is $\mu_0 = 0.233$,
+reflecting genuine uncertainty over a substantial fraction of the operand
+space.  At $k = 1$, once the first token is teacher-forced to the correct
+value, mean confidence rises to $\mu_1 = 0.943$.  By $k = 2$ it reaches
+$\mu_2 = 0.988$, with the only uncertain region being the upper-right
+triangle where $a + b \geq 100$ and the answer carries into a third digit.
+The cascade reveals that the central computational burden falls entirely on
+predicting $y^*_0$: subsequent tokens resolve almost automatically given
+the correct leading digit, a pattern that is consistent with a mechanism
+that maps directly from the operand ones-digits to the output rather than
+propagating carries sequentially.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\textwidth]{../runs/addition/accuracy_sweep/plots/positional_cascade}
+  \caption{%
+    Teacher-forced confidence $P_k(a,b)$ (Eq.~\ref{eq:teacher-forced})
+    across the $100 \times 100$ operand grid for positions $k = 0, 1, 2$.
+    Each cell encodes the probability that Qwen3-4B assigns to the correct
+    $k$-th output token when all preceding tokens are forced to their
+    ground-truth values.  Grid means are $\mu_0 = 0.233$, $\mu_1 = 0.943$,
+    and $\mu_2 = 0.988$.  The leftmost panel reveals a period-10 grid structure
+    aligned with the decimal ones-digit boundaries: columns and rows separated
+    by ten units carry systematically different baseline confidence levels,
+    implying that $P_0$ depends primarily on $(a \bmod 10,\, b \bmod 10)$
+    rather than on operand magnitudes.  Empty cells in the middle panel
+    correspond to pairs with $a + b < 10$, whose single-digit sum has no
+    second output token; empty cells in the rightmost panel correspond to
+    pairs with $a + b < 100$, whose two-digit sum has no third digit.
+  }
+  \label{fig:positional-cascade}
+\end{figure}
+
+Rather than varying smoothly with operand magnitude, the $k = 0$ panel of
+Figure~\ref{fig:positional-cascade} shows that confidence is organised into
+a period-10 grid aligned with the decimal ones-digit boundaries.  Within
+each $10 \times 10$ block the within-block pattern repeats with the same
+geometry, and this periodicity implies that $P_0$ depends primarily on
+$(a \bmod 10,\, b \bmod 10)$ rather than on the absolute values of $a$ and
+$b$.  This is the behavioural signature one would expect if the computation
+were implemented by features selective to specific ones-digit pairs.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.62\textwidth]{../runs/addition/accuracy_sweep/plots/entropy_map}
+  \caption{%
+    Prediction entropy $H(a,b)$ (Eq.~\ref{eq:entropy}) at position $k = 0$.
+    Low-entropy cells (blue) form a period-10 grid aligned with the
+    high-confidence cells visible in the $k = 0$ panel of
+    Figure~\ref{fig:positional-cascade}, indicating that the model is both
+    decisive and correct on precisely the pairs where lookup features activate
+    strongly.  High-entropy cells (red) concentrate near carry boundaries and
+    for large operand values, reflecting genuine distributional indecision
+    rather than merely confident errors.
+  }
+  \label{fig:entropy-map}
+\end{figure}
+
+\paragraph{Prediction entropy.}
+Confidence $P_k(a,b)$ measures whether the top-ranked prediction is
+correct, but not how sharply the model has committed to any prediction.
+A cell with low confidence might correspond either to genuine
+distributional uncertainty or to a confident wrong prediction.  The
+Shannon entropy of the truncated output distribution at position $0$,
+
+\begin{equation}
+  H(a, b)
+  = -\sum_{j=1}^{K} p_{(j)}(a, b)\;\log_2 p_{(j)}(a, b),
+  \label{eq:entropy}
+\end{equation}
+
+where $p_{(1)}(a,b) \geq \cdots \geq p_{(K)}(a,b)$ are the top-$K$
+predicted probabilities, measures distributional spread independently of
+prediction correctness.  Figure~\ref{fig:entropy-map} plots $H(a,b)$
+across the grid.  Low-entropy cells (where the model commits decisively to
+a single token) form a period-10 grid aligned precisely with the
+high-confidence regions of the $k = 0$ panel of
+Figure~\ref{fig:positional-cascade}.
+High-entropy cells (where the model distributes probability across several
+candidates) are concentrated at and near carry boundaries and for large
+operand values.  The agreement between the two maps establishes that the
+model's decisiveness and its correctness are driven by the same underlying
+structure, rather than by one compensating for the other.
+
+\paragraph{Carry complexity.}
+Each pair $(a,b)$ can be classified by the number of digit-column carries
+arising in the sum.  Defining
+
+\begin{equation}
+  \kappa(a, b)
+  = \begin{cases}
+      0 & \text{no carry arises,} \\
+      1 & \text{exactly one carry arises,} \\
+      2 & \text{two or more carries arise,}
+    \end{cases}
+  \label{eq:carry-class}
+\end{equation}
+
+Figure~\ref{fig:carry-structure} overlays the partition induced by
+$\kappa$ on the confidence grid.  If Qwen3-4B were implementing a symbolic
+carry algorithm, accuracy should deteriorate with carry complexity:
+pairs with $\kappa = 2$ should be hardest and pairs with $\kappa = 0$
+easiest.  The right panel of Figure~\ref{fig:carry-structure} contradicts
+this prediction.  Regions of identical carry class exhibit substantial
+internal variation in $P_0$, and the drops in confidence cut across carry
+boundaries rather than aligning with them.  The period-10 grid structure
+of $P_0$ persists within each carry class, unmodulated by carry count.
+This dissociation between carry complexity and model accuracy constitutes
+behavioural evidence that the computation is not organised around carry
+propagation.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\textwidth]{../runs/addition/accuracy_sweep/plots/carry_structure}
+  \caption{%
+    Left: carry-class partition $\kappa(a,b)$
+    (Eq.~\ref{eq:carry-class}) of the operand grid, coloured by carry count.
+    Right: first-token confidence $P_0(a,b)$ with carry-boundary contours
+    superimposed.  The period-10 structure of $P_0$ persists within each
+    carry class, and drops in confidence do not align with the
+    no-carry/single-carry/multi-carry boundaries, ruling out a symbolic
+    carry algorithm as the underlying mechanism.
+  }
+  \label{fig:carry-structure}
+\end{figure}
+
+Taken together, the three diagnostics converge on the same conclusion.
+The teacher-forced cascade localises the computation to the first output
+token and reveals that the model's confidence is determined almost entirely
+at that step.  The confidence and entropy maps show that this determination
+is modular in the decimal ones digits of both operands, with a period-10
+structure that would be inexplicable under a positional carry algorithm.
+The carry-class overlay confirms that carry complexity does not predict
+accuracy, removing the most natural alternative hypothesis.  These
+behavioural observations are consistent with the lookup-table mechanism
+reported by \citet{lindsey2025biology}, and they motivate the mechanistic
+analysis of the following sections.

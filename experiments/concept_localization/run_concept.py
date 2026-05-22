@@ -37,8 +37,12 @@ from experiments.concept_localization.analyze import (
     compute_sharpness,
     project_onto_features,
 )
+from experiments.concept_localization.causal_analysis import run_causal_analysis
 from experiments.concept_localization.extract_deltas_generic import extract_layer_deltas_generic
 from experiments.concept_localization.visualize import (
+    plot_causal_efficiency,
+    plot_causal_overlay,
+    plot_causal_scores,
     plot_feature_projections,
     plot_norm_and_alignment,
 )
@@ -60,31 +64,27 @@ _TRANSCODER_SET = "mwhanna/qwen3-4b-transcoders"
 # ── concept registry ──────────────────────────────────────────────────────────
 def _load_concept(name: str, n_per_template: int, seed: int):
     if name == "gcd":
-        from experiments.concept_localization.gcd.dataset import generate_gcd_pairs
+        from data.concept_datasets.gcd_dataset import generate_gcd_pairs
 
         return generate_gcd_pairs(n_per_template, seed=seed)
     if name == "residue_class":
-        from experiments.concept_localization.residue_class.dataset import generate_residue_pairs
+        from data.concept_datasets.residue_class_dataset import generate_residue_pairs
 
         return generate_residue_pairs(n_per_template, seed=seed)
     if name == "transitive_ordering":
-        from experiments.concept_localization.transitive_ordering.dataset import (
-            generate_ordering_pairs,
-        )
+        from data.concept_datasets.transitive_ordering_dataset import generate_ordering_pairs
 
         return generate_ordering_pairs(n_per_template, seed=seed)
     if name == "conservation":
-        from experiments.concept_localization.conservation.dataset import (
-            generate_conservation_pairs,
-        )
+        from data.concept_datasets.conservation_dataset import generate_conservation_pairs
 
         return generate_conservation_pairs(n_per_template, seed=seed)
     if name == "causal_direction":
-        from experiments.concept_localization.causal_direction.dataset import generate_causal_pairs
+        from data.concept_datasets.causal_direction_dataset import generate_causal_pairs
 
         return generate_causal_pairs(n_per_template, seed=seed)
     if name == "negation_scope":
-        from experiments.concept_localization.negation_scope.dataset import generate_negation_pairs
+        from data.concept_datasets.negation_scope_dataset import generate_negation_pairs
 
         return generate_negation_pairs(n_per_template, seed=seed)
     raise ValueError(f"Unknown concept: {name!r}")
@@ -115,11 +115,33 @@ def main() -> None:
     )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
+        "--anchor_mode",
+        default="diff",
+        help=(
+            "diff (default): anchor at last token where pos/neg differ. "
+            "last: anchor at final token. "
+            "delimiter: anchor at the last '=', ':', or newline. "
+            "pos_from_end:<n>: anchor n tokens from the end — set this to the "
+            "sweep-determined best position after running run_positional_attribution --sweep "
+            "(e.g. pos_from_end:2 anchors at the third-to-last token)."
+        ),
+    )
+    parser.add_argument(
         "--skip_features", action="store_true", help="Skip transcoder feature projection (faster)"
+    )
+    parser.add_argument(
+        "--causal", action="store_true", help="Run activation patching + gradient-dot-delta"
+    )
+    parser.add_argument(
+        "--causal_pairs",
+        type=int,
+        default=None,
+        help="Max pairs for causal analysis (default: all, but 50 is usually enough)",
     )
     args = parser.parse_args()
 
-    out_dir = Path(args.out_dir or f"runs/concept_localization/{args.concept}")
+    suffix = f"_{args.anchor_mode}" if args.anchor_mode != "diff" else ""
+    out_dir = Path(args.out_dir or f"runs/concept_localization/{args.concept}{suffix}")
     out_dir.mkdir(parents=True, exist_ok=True)
 
     device = get_default_device()
@@ -153,8 +175,9 @@ def main() -> None:
 
     # ── 3. Delta extraction ───────────────────────────────────────────────────
     log.info("Extracting per-layer residual-stream deltas…")
+    log.info("Anchor mode: %s", args.anchor_mode)
     layer_results = extract_layer_deltas_generic(
-        model, pairs, layers, device, dtype, per_template=True
+        model, pairs, layers, device, dtype, per_template=True, anchor_mode=args.anchor_mode
     )
     ld = layer_results["all"]
 
@@ -178,11 +201,39 @@ def main() -> None:
                 consistency[k] = round(cos, 4)
                 log.info("  Template %s  cos with 'all' at peak L%d: %.3f", k, peak, cos)
 
-    # ── 5. Feature projection ─────────────────────────────────────────────────
+    # ── 5. Causal analysis ────────────────────────────────────────────────────
+    causal: object = None
+    if args.causal:
+        max_pairs = args.causal_pairs
+        log.info(
+            "Running causal analysis (max_pairs=%s)…",
+            max_pairs if max_pairs is not None else "all",
+        )
+        causal = run_causal_analysis(
+            model,
+            pairs,
+            ld.delta,
+            layers,
+            device,
+            dtype,
+            max_pairs=max_pairs,
+        )
+        log.info("Causal analysis done (n_pairs=%d)", causal["all"].n_pairs)
+
+    # ── 6. Feature projection ─────────────────────────────────────────────────
     projections: dict = {}
     if not args.skip_features:
         log.info("Projecting delta onto transcoder features…")
         projections = project_onto_features(model, ld, top_k=args.top_k)
+
+    # Normalised delta norms (‖δ_l‖ / E[‖h_l‖]) for plotting
+    mean_act_norms = {l: v for l, v in ld.mean_act_norm.items()} if ld.mean_act_norm else {}
+    delta_norms_raw = {l: ld.delta[l].norm().item() for l in layers if l in ld.delta}
+    delta_norms_plot = (
+        {l: delta_norms_raw[l] / mean_act_norms.get(l, 1.0) for l in delta_norms_raw}
+        if mean_act_norms
+        else delta_norms_raw
+    )
 
     # ── 6. Save ───────────────────────────────────────────────────────────────
     results_json = {
@@ -193,6 +244,7 @@ def main() -> None:
             "n_pairs_used": ld.n_pairs,
             "skipped": ld.skipped,
             "templates": tmpl_keys,
+            "anchor_mode": args.anchor_mode,
             "top_k": args.top_k,
         },
         "sharpness": {
@@ -202,17 +254,36 @@ def main() -> None:
                 str(l): round(v, 4) for l, v in zip(sharpness.layers, sharpness.norms, strict=False)
             },
             "inter_layer_cos": {
-                f"{sharpness.layers[i]}-{sharpness.layers[i+1]}": round(v, 4)
+                f"{sharpness.layers[i]}-{sharpness.layers[i + 1]}": round(v, 4)
                 for i, v in enumerate(sharpness.inter_layer_cos)
             },
         },
         "template_consistency": consistency,
+        "mean_act_norm": {str(l): round(v, 4) for l, v in mean_act_norms.items()},
         "top_features_by_layer": {
             str(layer): [
                 {"feature_id": m.feature_id, "cos_sim": round(m.cos_sim, 4)} for m in matches
             ]
             for layer, matches in projections.items()
         },
+        "causal": (
+            {
+                key: {
+                    "n_pairs": cs.n_pairs,
+                    "patching_mean": {str(l): round(v, 5) for l, v in cs.patching_mean.items()},
+                    "patching_std": {str(l): round(v, 5) for l, v in cs.patching_std.items()},
+                    "grad_dot_delta_mean": {
+                        str(l): round(v, 5) for l, v in cs.grad_dot_delta_mean.items()
+                    },
+                    "grad_dot_delta_std": {
+                        str(l): round(v, 5) for l, v in cs.grad_dot_delta_std.items()
+                    },
+                }
+                for key, cs in causal.items()
+            }
+            if causal is not None
+            else None
+        ),
     }
 
     results_path = out_dir / "results.json"
@@ -239,6 +310,31 @@ def main() -> None:
             concept=args.concept,
         )
         log.info("Saved feature projection plots")
+
+    if causal is not None:
+        plot_causal_scores(
+            causal,
+            delta_norms_raw,
+            out_dir / "causal_scores.png",
+            concept=args.concept,
+            mean_act_norms=mean_act_norms or None,
+        )
+        log.info("Saved causal_scores.png")
+        plot_causal_overlay(
+            causal,
+            delta_norms_raw,
+            out_dir / "causal_overlay.png",
+            concept=args.concept,
+            mean_act_norms=mean_act_norms or None,
+        )
+        log.info("Saved causal_overlay.png")
+        plot_causal_efficiency(
+            causal,
+            delta_norms_raw,
+            out_dir / "causal_efficiency.png",
+            concept=args.concept,
+        )
+        log.info("Saved causal_efficiency.png")
 
     log.info("Done. All outputs in %s", out_dir)
 

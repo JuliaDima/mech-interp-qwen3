@@ -66,7 +66,7 @@ def evaluate_pairs(
 
                 large_tokens_list.append(large_model.to_tokens(prompt)[0])
 
-                small_text = f"{a_str}+{b_str}={a+b}"
+                small_text = f"{a_str}+{b_str}={a + b}"
                 small_ids_list.append(tokenize_small(small_text))
 
                 ans_token = large_model.tokenizer.encode(ans_str[0], add_special_tokens=False)[0]
@@ -189,7 +189,7 @@ def main():
     results = []
     for i, (a, b) in enumerate(random_pairs):
         gain = (pa_rand[i] - pb_rand[i]) * 100
-        print(f"Sample {i+1}: {a}+{b} = {a+b} -> Gain: {gain:+.2f} pp")
+        print(f"Sample {i + 1}: {a}+{b} = {a + b} -> Gain: {gain:+.2f} pp")
         results.append(
             {
                 "problem": f"{a}+{b}",

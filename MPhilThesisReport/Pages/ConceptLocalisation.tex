@@ -97,7 +97,7 @@ representation hypothesis~\citep{park2023linear}, $\delta_l$ approximates the ax
 carry is encoded at depth $l$, provided the concept is linearly separable and the matched-pair
 averaging suppresses nuisance variation. The construction in Section~\ref{sec:concept_pairs} is
 designed to make that nuisance small.
-
+d
 The relationship between $\delta_l$ and the steering vectors $v_{k,l}$ of
 Chapter~\ref{sec:improving} is instructive. Both are mean-difference vectors in the residual
 stream, but they partition the prompt distribution along different axes. The steering vectors
@@ -142,7 +142,7 @@ suggesting the carry concept is being re-encoded in a different subspace at that
 
 In the dictionary-learning framework applied to transformer internals, a \textit{feature} is a
 learned direction $\phi_f \in \mathbb{R}^d$ hypothesised to correspond to a single interpretable
-concept or computation, where $d$ is the residual-stream width of the transformer. 
+concept or computation, where $d$ is the residual-stream width of the transformer.
 Because transformers represent more independent concepts than they have
 dimensions, they are believed to superpose many approximately orthogonal feature directions within
 the residual stream, with each activation being a sparse signed combination of active
@@ -192,39 +192,30 @@ sub-operations, of the cross-template steering evaluation in Chapter~\ref{sec:im
 \label{sec:concept_suite}
 
 The contrastive methodology described in the preceding sections is not specific to carry. To test
-whether concept localisation generalises beyond arithmetic sub-operations, the same pipeline was
-applied to six additional concepts drawn from two categories. The first category, modular
-arithmetic, consists of concepts that are binary and locally determined: given a fixed number of
-input tokens, the answer is fully specified. The second category, relational and physical
-reasoning, consists of concepts whose evaluation requires integrating information across a longer
-context or appealing to world knowledge.
+whether concept localisation generalises across qualitatively different domains, the same pipeline
+was applied to sixteen additional concepts spanning three categories. The \emph{mathematics}
+category contains concepts that are binary and locally determined by small integer inputs. The
+\emph{physics} category contains concepts whose positive instance satisfies a physical law or
+conservation principle. The \emph{logic and reasoning} category contains concepts requiring
+logical inference or structural consistency across multiple constituents.
 
-Table~\ref{tab:concept_suite} lists all seven concepts together with the positive and negative
-conditions used to construct contrastive pairs. In every case the two conditions differ at
-exactly one token position. The resulting delta vector is therefore attributable to the concept
-shown rather than to differences in token count, surface phrasing, or operand magnitude.
+Figure~\ref{fig:concept_datasets} shows a representative pair for each of the seventeen concepts.
+The positive instance appears above the negative instance, with \textbf{bold} tokens marking the
+single point of difference between them. Because exactly one or two tokens change within each
+pair, the resulting delta vector is attributable to the concept alone and not to differences in
+token count, operand magnitude, or surface phrasing. Each concept is evaluated under three
+template forms: T0 uses compact symbolic notation, T1 a natural-language description, and T2 an
+interrogative phrasing.
 
-\begin{table}[h]
+\begin{figure}[h]
 \centering
-\caption{Concept suite used in the localisation experiments. For each concept, one token
-position changes between the positive and negative prompt; all other positions are identical.
-The anchor is always the last token at which the two sequences diverge.}
-\label{tab:concept_suite}
-\small
-\begin{tabular}{@{}llll@{}}
-\toprule
-\textbf{Concept} & \textbf{Positive condition} & \textbf{Negative condition} & \textbf{Group} \\
-\midrule
-Carry (mod 10)       & units-digit sum $\geq 10$ (carry occurs)     & units-digit sum $< 10$ (no carry)          & Modular \\
-GCD divisibility     & $\gcd(a, 7) = 7$ (divisible)                 & $\gcd(a, 7) = 1$ (coprime)                 & Modular \\
-Residue class        & $a \equiv 1 \pmod{7}$                        & $a \equiv 6 \pmod{7}$                      & Modular \\
-Transitive ordering  & chain $a > b > c$ holds                      & chain broken ($c > b$)                     & Relational \\
-Energy conservation  & bounce height $<$ drop height (physical)     & bounce height $>$ drop height (violation)  & Relational \\
-Causal direction     & $A$ causes $B$ (correct direction)           & $B$ causes $A$ (reversed)                  & Relational \\
-Negation scope       & $m \leq n$ (negated comparison true)         & $m > n$ (negated comparison false)         & Relational \\
-\bottomrule
-\end{tabular}
-\end{table}
+\includegraphics[width=\textwidth]{../data/concept_datasets/concepts_figure}
+\caption{Representative contrastive pairs for all seventeen concepts, grouped by domain. Each
+entry shows the positive instance (top) and negative instance (bottom); tokens that differ
+between the two are highlighted. Concepts span three categories: mathematics (top), physics
+(middle), and logic and reasoning (bottom).}
+\label{fig:concept_datasets}
+\end{figure}
 
 The modular arithmetic concepts share a structural property with carry: the binary outcome is
 determined by a single arithmetic relation between small integers, and the concept is expressible

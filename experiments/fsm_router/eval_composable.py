@@ -152,7 +152,7 @@ def main():
         out_steer = decode_generated(model, prompt_ids, hooks=hooks, device=device)
         correct_steer = _correct(out_steer, expected)
 
-        print(f"\n  Unsteered: {out_base!r}  {'✓' if correct_base  else '✗'}")
+        print(f"\n  Unsteered: {out_base!r}  {'✓' if correct_base else '✗'}")
         print(f"  Steered:   {out_steer!r}  {'✓' if correct_steer else '✗'}")
         print("=" * 72)
 

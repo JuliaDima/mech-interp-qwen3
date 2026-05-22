@@ -118,7 +118,7 @@ def plot_sweep(results: list[dict], out_dir: Path) -> None:
         ax.grid(True, alpha=0.3)
 
     fig.suptitle(
-        "Steering vectors — live eval metrics" f"  (SV buckets: {_metric_label(bucket_metric)})",
+        f"Steering vectors — live eval metrics  (SV buckets: {_metric_label(bucket_metric)})",
         fontsize=12,
     )
     fig.tight_layout()

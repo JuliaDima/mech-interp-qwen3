@@ -1,38 +1,121 @@
 \chapter{Introduction}
 
-Understanding what neural networks actually \textit{compute}, rather than what they \textit{output},
+Understanding what neural networks \textit{compute}, not only what they \textit{output},
 is the central problem of mechanistic interpretability. A model that correctly solves arithmetic problems or chains
 reasoning steps coherently need not be implementing anything resembling the algorithm a human would use.
 Whether it does, where in the network that computation lives, and whether it can be manipulated predictably
 are empirical questions that evaluation benchmarks cannot answer.
 
 \section{Mechanistic Interpretability}
+
+As neural networks scale from toy models to systems executed in consequential and complex settings, 
+the gap between performance and understanding becomes untenable. A model achieving near-human accuracy on reasoning benchmarks
+cannot be straightforwardly understood. A system that has learned a spurious shortcut is indistinguishable from one that has learned the intended 
+algorithm until it fails at the margin.
+The interpretability methods that accompanied earlier machine learning, such as saliency maps,
+attribution scores, and probing classifiers, operate in the input or output space and offer
+correlational accounts but are not mechanistic, as they describe what the model attends to, not what it computes.
+
+Evidence for the tractability of mechanistic questions accumulated independently. Work on convolutional vision networks 
+identified low-level features, including edge detectors, curve analysers, and frequency filters, 
+that arise independently of architecture and training seed~\citep{olah2020zoom}. Analysis of transformer attention heads
+revealed heads implementing specific, describable operations, such as induction heads completing
+repeated token sequences and positional heads copying information from fixed offsets~\citep{elhage2021mathematical}.
+A direct demonstration of such mechanisms is the grokking phenomenon~\citep{power2022grokking}, which shows that small models 
+trained on modular arithmetic initially memorise their training data and later undergo a phase transition,
+developing compressed algorithms that generalise across all held-out operand pairs for the trained modulus. 
+The transition is invisible to accuracy metrics evaluated on the training set. However, Fourier decomposition
+of the learned weight matrices reveals that the converged model implements modular arithmetic through
+specific trigonometric identities encoded in the residual stream, an algorithm with no surface
+similarity to the training objective~\citep{nanda2023progress}.
+
+Further work has confirmed that small transformers trained on arithmetic tasks converge on specific,
+inspectable algorithms, independent of surface statistical regularities in the
+data~\cite{zhong2023clock, quirke2024understanding, quirkeneo2025understanding, musat2024clustering}.
+
+The same interpretability considerations apply to large language models (LLMs), yet at a scale that makes manual
+circuit analysis infeasible. As LLMs are trained on vastly more diverse data and without explicit algorithmic
+curricula, they nonetheless achieve high accuracy on structured reasoning tasks. However, whether this reflects stable, localisable internal computation or brittle surface associations
+cannot be determined from evaluation alone. This distinction matters wherever model outputs yield real consequences.
+
 Anthropic's \textit{On the Biology of a Large Language Model}~\cite{lindsey2025biology} proposes
-a reproducible methodology for approaching such questions on a large language model (LLM). Combining sparse autoencoders (SAEs)
-with cross-layer transcoders (CLTs) and backward-pass attribution, it constructs dependency graphs
-that trace information flow from input tokens through intermediate features to output logits.
-The framework is the starting point of mechanistic interpretability work done in this thesis,
-focused on how mathematical primitives are implemented by LLMs, and how these implementations can be improved
-through insights from mechanistic interpretability.
+a reproducible methodology for approaching interpretability on a large language model (LLM).
+Combining sparse autoencoders (SAEs) with cross-layer transcoders (CLTs) and backward-pass attribution,
+it constructs dependency graphs that trace information flow from input tokens through intermediate
+features to output logits. The framework forms the methodological foundation of this thesis, which
+examines how structured reasoning is implemented within large instruction-tuned models and what
+the geometry of those representations reveals about the nature of computation.
 
-Prior mechanistic work has established that small transformers trained on arithmetic tasks converge
-on specific and inspectable algorithms rather than fitting statistical
-regularities~\cite{nanda2023progress, zhong2023clock, quirke2024understanding,
-quirkeneo2025understanding, musat2024clustering}.
-Whether analogous structure arises in a large instruction-tuned model, trained without an explicit
-arithmetic curriculum on substantially more diverse data, is considerably less clear and is a central concern
-of this work. Furthermore, since mechanistic interpretability offers relevant insights into how these models
-perform algorithmic tasks, we can make use of this knowledge to improve model performance on algorithmic tasks,
-which is the focus of the second part of this thesis.
+\section{Interpretability Methods}
 
-We take the open access model \texttt{Qwen3} as our subject model and integer addition as our primary task.
-Addition is a reasonable prototype due to having unambiguous ground truth and being structured enough that prior work has identified non-trivial internal
-mechanisms~\cite{nanda2023progress, quirke2024understanding}, and performance degrades in interpretable ways
-as digit magnitude increases. We initially characterise the model's behaviour on addition using the existing attribution graph methodology given by \citet{lindsey2025biology}.
-Beyond reproducing the attribution graphs, we perform intervention studies such as constrained patching to validate hypotheses regarding the underlying computation. We also
-use linear probes to localise where arithmetic-relevant information is encoded across layers.
+All four methods employed in this thesis operate on the residual stream of the transformer. Let
+$h^{(l)}_t \in \mathbb{R}^d$ denote the residual-stream vector at layer $l \in \{0, \ldots, L{-}1\}$
+and token position $t$, with $d$ the model dimension and $L$ the total number of layers. Each layer
+contributes an additive update,
+\begin{equation}
+    h^{(l+1)}_t = h^{(l)}_t + \mathrm{Attn}^{(l)}\!\left(H^{(l)}\right)_t + \mathrm{MLP}^{(l)}\!\left(h^{(l)}_t\right),
+    \label{eq:residual}
+\end{equation}
+where $H^{(l)}$ denotes the full sequence of residual-stream vectors at layer $l$. This additive structure makes the residual stream a natural object for linear analysis, as each
+layer writes into a shared representation that accumulates across depth.
 
-By drawing insights from our mechanistic analysis, we then proceed to improve model performance on mathematical primitives through modifying specific components of the model.
+Cross-layer transcoders (CLTs) and sparse autoencoders (SAEs) decompose each MLP contribution into
+a sparse sum of interpretable directions~\citep{bricken2023monosemanticity, cunningham2023sparse}.
+Given a pre-MLP hidden state $h$, the transcoder encoder produces feature activations
+\begin{equation}
+    a_f(h) = \mathrm{ReLU}\!\left(w_f^\top h + b_f\right), \quad f \in \{1, \ldots, F\},
+    \label{eq:encoder}
+\end{equation}
+and the MLP output is approximated as $\sum_f a_f(h) \cdot d_f$, where $d_f \in \mathbb{R}^d$ are
+learned decoder directions. Sparsity ensures that at most a small active set
+$\mathcal{S}(h) \subset \{1, \ldots, F\}$ contributes for any given input, making each feature's
+role inspectable in isolation.
+
+Attribution graphs assign a scalar influence score to each (feature, layer, position) triple with
+respect to a target output logit $y_j$~\citep{lindsey2025biology}. Under the linearised backward
+pass, the attribution of feature $f$ at layer $l$ and position $t$ is
+\begin{equation}
+    \alpha_{f,l,t} = a_f\!\left(h^{(l)}_t\right) \cdot \left( d_f^\top \nabla_{h^{(l)}_t} y_j \right),
+    \label{eq:attribution}
+\end{equation}
+where $\nabla_{h^{(l)}_t} y_j$ is the gradient of the logit with respect to the residual stream.
+Composing attributions across layers yields a directed graph whose edges represent information flow
+from inputs to output.
+
+Activation patching establishes causal claims~\citep{conmy2023automated}. Given a clean prompt $x$
+and a counterfactual prompt $x'$, patching replaces the residual stream at layer $l$ and position $t$,
+\begin{equation}
+    \tilde{h}^{(l)}_t = h'^{(l)}_t,
+    \label{eq:patching}
+\end{equation}
+and measures the resulting shift in output logit, $\Delta_j = y_j(\tilde{h}) - y_j(h)$. A non-zero
+$\Delta_j$ confirms that the patched representation is causally sufficient to alter the prediction.
+Constrained patching restricts the replacement to a targeted subset of positions or components,
+enabling finer localisation of causal dependence.
+
+Steering vectors are extracted by contrasting two prompt sets, $D_+$ where a concept is present and
+$D_-$ where it is absent, and computing their mean difference at a designated anchor position $t^*$,
+\begin{equation}
+    \delta^{(l)} = \mathbb{E}_{x \in D_+}\!\left[h^{(l)}_{t^*(x)}\right]
+                 - \mathbb{E}_{x \in D_-}\!\left[h^{(l)}_{t^*(x)}\right].
+    \label{eq:delta}
+\end{equation}
+Under the linear representation hypothesis~\citep{park2023linear}, $\delta^{(l)}$ approximates the
+axis along which the concept is encoded at depth $l$. Injecting $\alpha\,\delta^{(l)}$ into the
+residual stream at inference time provides a continuous lever on the concept representation without
+modifying model weights. The norm profile $\lVert\delta^{(l)}\rVert$ across layers is the primary
+signal used for concept localisation throughout this thesis. In combination, these four methods support
+mechanistic claims about how a model computes, not only whether it succeeds on a given input.
+
+\section{This Thesis}
+
+We take the open-access model \texttt{Qwen3-4B} as our subject. The primary contribution is a
+systematic concept localisation study across a diverse set of concepts spanning three structural categories:
+modular arithmetic (carry propagation in integer addition, GCD divisibility, and residue class membership),
+relational reasoning (transitive ordering and negation scope), and physical and causal plausibility
+(energy conservation and causal direction). The central hypothesis is that modular concepts, 
+whose outcomes are determined by discrete thresholds or periodic relations, produce qualitatively different localisation signatures from relational and
+physical concepts, whose outcomes depend on monotone comparison or world knowledge.
 
 The rest of this dissertation is structured as follows. Chapter~\ref{sec:related}
 covers the relevant background. ......
