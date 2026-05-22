@@ -1,36 +1,37 @@
 \chapter{Concept Localisation and Intervention}
 \label{sec:concept_localization}
+\label{sec:improving}
 
-Mechanistic analysis of \texttt{Qwen3-4B} on integer arithmetic, following the methodology of \citet{lindsey2025biology}, 
-reveals that the residual stream at the position corresponding to the completed arithmetic expression 
-contains information relevant to downstream answer generation. Prior work has shown that simple linear probes trained on hidden representations can accurately decode both arithmetic outputs 
-and model correctness from internal activations, indicating that these representations are often linearly accessible 
-\citep{sun2025probing}. This observation motivates a concrete intervention. 
- The mean difference in hidden state between prompts on which the model succeeds and those on which 
- it fails defines a direction in representation space that, when added at inference time, 
- should reinforce correct computation. To act on this hypothesis precisely, we require a 
+Mechanistic analysis of \texttt{Qwen3-4B} on integer arithmetic, following the methodology of \citet{lindsey2025biology},
+reveals that the residual stream at the position corresponding to the completed arithmetic expression
+contains information relevant to downstream answer generation. Prior work has shown that simple linear probes trained on hidden representations can accurately decode both arithmetic outputs
+and model correctness from internal activations, indicating that these representations are often linearly accessible
+\citep{sun2025probingarithmeticerrorslanguage}. This observation motivates a concrete intervention.
+ The mean difference in hidden state between prompts on which the model succeeds and those on which
+ it fails defines a direction in representation space that, when added at inference time,
+ should reinforce correct computation. To act on this hypothesis precisely, we require a
  mechanism that identifies \textit{where} within a prompt a given primitive appears and
-  with what confidence, rather than applying a uniform perturbation to every token. 
-  We therefore design a \textit{PrimitiveRouter}, a set of four learnable soft finite-state 
-  machines trained jointly on synthetic arithmetic expressions to detect which primitive 
-  operation is active at each token position. The router converges to perfect accuracy 
-  on its held-out validation set within 30 epochs, providing a reliable positional signal. 
-  Its output gates the injection of contrastive steering vectors extracted from the model's own activations, 
-  producing a closed-loop intervention that requires no modification of model weights and that handles prompts 
+  with what confidence, avoiding a uniform perturbation across all token positions.
+  We therefore design a \textit{PrimitiveRouter}, a set of four learnable soft finite-state
+  machines trained jointly on synthetic arithmetic expressions to detect which primitive
+  operation is active at each token position. The router converges to perfect accuracy
+  on its held-out validation set within 30 epochs, providing a reliable positional signal.
+  Its output gates the injection of contrastive steering vectors extracted from the model's own activations,
+  producing a closed-loop intervention that requires no modification of model weights and that handles prompts
   containing multiple primitives simultaneously. Figure~\ref{fig:fsm_steering} gives an overview of the complete pipeline.
 
 \begin{figure}[h]
 \centering
 \includegraphics[width=\textwidth]{Pages/Figures/fsm_steering}
-\caption{Overview of FSM routing and local steering on the prompt \texttt{What is 36+59? Answer:}. 
+\caption{Overview of FSM routing and local steering on the prompt \texttt{What is 36+59? Answer:}.
 Tokens are mapped rule-based to predicates; consecutive identical predicates are collapsed (dedup)
- so that multi-digit numerals resolve to a single \texttt{NUM} step regardless of how many tokens 
- the tokeniser produces. The SoftFSM processes the predicate sequence and outputs per-position 
- activation values $A_{t,k}$ for the target primitive $k$. The position where the complete pattern 
+ so that multi-digit numerals resolve to a single \texttt{NUM} step regardless of how many tokens
+ the tokeniser produces. The SoftFSM processes the predicate sequence and outputs per-position
+ activation values $A_{t,k}$ for the target primitive $k$. The position where the complete pattern
  first fires (token \texttt{9}, the second operand) is identified as the anchor $t^*$; the prompt continues with three further tokens (\texttt{?}, \texttt{Answer}, \texttt{:})
   after the anchor, illustrating that the anchor need not coincide with the final token of the prompt.
-   At inference time the steering vector $v_{k,l}$ is injected into the residual stream of 
-   \texttt{Qwen3-4B} at layer $l$ and position $t^*$, scaled by $\alpha \cdot A_{t^*,k}$. 
+   At inference time the steering vector $v_{k,l}$ is injected into the residual stream of
+   \texttt{Qwen3-4B} at layer $l$ and position $t^*$, scaled by $\alpha \cdot A_{t^*,k}$.
    The final space token is added to encourage the model to generate the answer token, instead of closing punctuation marks.}
 \label{fig:fsm_steering}
 \end{figure}
@@ -152,7 +153,7 @@ We verify this empirically by running the trained router on several probe inputs
 \end{tabular}
 \end{table}
 
-The router reaches 0.906 only when an explicit \texttt{+} symbol is present between two numeric tokens, regardless of surrounding natural-language context. Prompts containing two numbers with no operator predicate between them produce activations indistinguishable from the baseline near-zero level (0.014), confirming that the FSM learned the strict pattern \texttt{NUMBER PLUS NUMBER} rather than a looser co-occurrence of numerals. In a mixed prompt such as \textit{The answer to 3 apples and 5 oranges is calc: 3+5=}, the router ignores the natural-language numbers entirely and fires only at the calculator expression.
+The router reaches 0.906 only when an explicit \texttt{+} symbol is present between two numeric tokens, regardless of surrounding natural-language context. Prompts containing two numbers with no operator predicate between them produce activations indistinguishable from the baseline near-zero level (0.014), confirming that the FSM learned the strict pattern \texttt{NUMBER PLUS NUMBER}, not a looser co-occurrence of numerals. In a mixed prompt such as \textit{The answer to 3 apples and 5 oranges is calc: 3+5=}, the router ignores the natural-language numbers entirely and fires only at the calculator expression.
 
 \section{Steering Vector Extraction}
 
@@ -162,7 +163,7 @@ For each input prompt, the FSM router maps the predicate sequence derived from t
 
 \subsection{Contrastive Extraction}
 
-For each primitive $k$, we generate $N = 3000$ single-primitive prompts of the form \texttt{calc: a OP b= } and run the model greedily to obtain logits for the first output token. Rather than using binary correctness as a bucketing signal, we compute a log-probability margin for each prompt,
+For each primitive $k$, we generate $N = 3000$ single-primitive prompts of the form \texttt{calc: a OP b= } and run the model greedily to obtain logits for the first output token. In place of binary correctness, we compute a log-probability margin as the bucketing signal for each prompt,
 
 \begin{equation}
 m_i = \log P\!\left( y^*_1 \mid x_i \right) - \max_{y \neq y^*_1} \log P\!\left( y \mid x_i \right),
@@ -178,7 +179,7 @@ v_{k,l} \;=\; \mathbb{E}\!\left[\, h_{l,t^*} \;\middle|\; m_i \geq \tau_{75} \,\
 \label{eq:svec}
 \end{equation}
 
-Steering vectors are extracted independently for all 36 transformer layers of \texttt{Qwen3-4B}, leaving the identification of the most effective layer to a subsequent evaluation sweep. The operand range for addition is drawn from $[1, 999]$, spanning one-, two- and three-digit numbers, to prevent the extracted direction from encoding the magnitude regime of the operands rather than the operation type. Table~\ref{tab:extraction} summarises the full extraction configuration.
+Steering vectors are extracted independently for all 36 transformer layers of \texttt{Qwen3-4B}, leaving the identification of the most effective layer to a subsequent evaluation sweep. The operand range for addition is drawn from $[1, 999]$, spanning one-, two- and three-digit numbers, so that the extracted direction captures operation type and not the magnitude regime of the operands. Table~\ref{tab:extraction} summarises the full extraction configuration.
 
 \begin{table}[h]
 \centering

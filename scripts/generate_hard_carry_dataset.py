@@ -156,8 +156,8 @@ def generate_stratified_dataset(
         n_carry = sum(dataset[split]["labels"])
         print(f"\n{split.upper()}:")
         print(f"  Total: {n}")
-        print(f"  Carry: {n_carry} ({100*n_carry/n:.1f}%)")
-        print(f"  No carry: {n - n_carry} ({100*(n-n_carry)/n:.1f}%)")
+        print(f"  Carry: {n_carry} ({100 * n_carry / n:.1f}%)")
+        print(f"  No carry: {n - n_carry} ({100 * (n - n_carry) / n:.1f}%)")
 
     print("\n" + "-" * 70)
     print("By Category:")
@@ -229,7 +229,7 @@ def generate_ood_test_set(
 
     print(f"\nGenerated {len(ood_dataset['a'])} OOD examples")
     n_carry = sum(ood_dataset["labels"])
-    print(f"  Carry: {n_carry} ({100*n_carry/len(ood_dataset['a']):.1f}%)")
+    print(f"  Carry: {n_carry} ({100 * n_carry / len(ood_dataset['a']):.1f}%)")
 
     return ood_dataset
 

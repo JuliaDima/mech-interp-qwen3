@@ -12,6 +12,8 @@ Or run individual phases:
   --operand-plots  Collect grid activations & plot 100x100 heatmaps
   --all            Run all phases in order
 
+Attribution graph: use miq directly (see README.md step 4).
+
 See experiments/addition/README.md for the full experiment description.
 """
 
@@ -297,7 +299,6 @@ def main() -> None:
     log.info("Run directory: %s", run_dir)
     _write_metadata(run_dir, args)
 
-    # Model is only needed for non-trivial phases
     model = None
     if do_plots:
         model = _load_model(args)

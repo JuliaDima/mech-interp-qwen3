@@ -110,9 +110,9 @@ def fig_prompt_templates(dataset: list[dict], out: Path) -> None:
         color = C_CORR if base_ok else C_WRONG
         ex_str = (
             f'Input:   "calc: {a}+{b}= "\n'
-            f'Target:   {true_ans}    [{carry_flag}]\n'
-            f'Baseline: {greedy.strip()[:6] or "?"}    '
-            f'[{"✓" if base_ok else "✗"}]'
+            f"Target:   {true_ans}    [{carry_flag}]\n"
+            f"Baseline: {greedy.strip()[:6] or '?'}    "
+            f"[{'✓' if base_ok else '✗'}]"
         )
         ax.text(
             x,
@@ -414,7 +414,7 @@ def fig_prefix_vectors(ckpt_path: Path, out: Path) -> None:
             ax_cos.text(
                 j,
                 i,
-                f"{cos_mat[i,j]:.2f}",
+                f"{cos_mat[i, j]:.2f}",
                 ha="center",
                 va="center",
                 fontsize=6,
@@ -743,7 +743,7 @@ def fig_prefix_nn(
     # ── Left: table of top-k neighbours per token ─────────────────────────
     ax = axes[0]
     ax.axis("off")
-    col_labels = [f"#{i+1} token  (cos)" for i in range(top_k)]
+    col_labels = [f"#{i + 1} token  (cos)" for i in range(top_k)]
     row_labels = [f"P{i}" for i in range(k)]
     cell_text = []
     for i in range(k):

@@ -110,20 +110,20 @@ def print_top_features(probe: CarryProbe, layer: int, k: int = 20):
         abs_weight = abs_weights[i].item()
         sign = "+" if weight > 0 else "-"
 
-        print(f"Rank {i+1:3d}: Feature {feat_id:6d}  Weight: {sign}{abs_weight:8.4f}")
+        print(f"Rank {i + 1:3d}: Feature {feat_id:6d}  Weight: {sign}{abs_weight:8.4f}")
 
     # Also show most positive and most negative
-    print(f"\nTop {min(k//2, 10)} Most Positive Features (pro-carry):")
+    print(f"\nTop {min(k // 2, 10)} Most Positive Features (pro-carry):")
     print("-" * 70)
     pos_indices, pos_weights = probe.get_top_features(layer, k=min(k // 2, 10), by="positive")
     for i, (feat_id, weight) in enumerate(zip(pos_indices, pos_weights, strict=False)):
-        print(f"  {i+1:2d}. Feature {feat_id.item():6d}  Weight: +{weight.item():.4f}")
+        print(f"  {i + 1:2d}. Feature {feat_id.item():6d}  Weight: +{weight.item():.4f}")
 
-    print(f"\nTop {min(k//2, 10)} Most Negative Features (anti-carry):")
+    print(f"\nTop {min(k // 2, 10)} Most Negative Features (anti-carry):")
     print("-" * 70)
     neg_indices, neg_weights = probe.get_top_features(layer, k=min(k // 2, 10), by="negative")
     for i, (feat_id, weight) in enumerate(zip(neg_indices, neg_weights, strict=False)):
-        print(f"  {i+1:2d}. Feature {feat_id.item():6d}  Weight: {weight.item():.4f}")
+        print(f"  {i + 1:2d}. Feature {feat_id.item():6d}  Weight: {weight.item():.4f}")
 
 
 def compute_layer_ablation_impact(
@@ -232,7 +232,7 @@ def export_feature_rankings_for_all_layers(
                 f.write(f"{'-' * 50}\n")
 
                 for i, (idx, w, aw) in enumerate(zip(indices, weights, abs_weights, strict=False)):
-                    f.write(f"{i+1:<6} {idx.item():<12} {w.item():<12.6f} {aw.item():<12.6f}\n")
+                    f.write(f"{i + 1:<6} {idx.item():<12} {w.item():<12.6f} {aw.item():<12.6f}\n")
 
     else:
         raise ValueError(f"Unknown format: {format}")

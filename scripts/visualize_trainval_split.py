@@ -42,9 +42,9 @@ train_carries = sum(has_carry(a, b) for a, b in train_pairs)
 val_carries = sum(has_carry(a, b) for a, b in val_pairs)
 
 print(
-    f"Train: {train_carries}/{len(train_pairs)} carries ({100*train_carries/len(train_pairs):.1f}%)"
+    f"Train: {train_carries}/{len(train_pairs)} carries ({100 * train_carries / len(train_pairs):.1f}%)"
 )
-print(f"Val:   {val_carries}/{len(val_pairs)} carries ({100*val_carries/len(val_pairs):.1f}%)")
+print(f"Val:   {val_carries}/{len(val_pairs)} carries ({100 * val_carries / len(val_pairs):.1f}%)")
 print()
 
 # Visualize

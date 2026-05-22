@@ -283,7 +283,7 @@ def main():
             samples.append(
                 {
                     "prompt": f"{a}+{b}=",
-                    "full": f"{a}+{b}={a+b}",
+                    "full": f"{a}+{b}={a + b}",
                     "a": a,
                     "b": b,
                     "answer": str(a + b),

@@ -17,14 +17,15 @@ from dataclasses import dataclass, field
 import torch
 from tqdm import tqdm
 
-from experiments.concept_localization.dataset import CarryPair
-
 log = logging.getLogger(__name__)
 
 
 @dataclass
 class LayerDeltas:
     delta: dict[int, torch.Tensor] = field(default_factory=dict)  # layer → (d_model,)
+    mean_act_norm: dict[int, float] = field(
+        default_factory=dict
+    )  # layer → mean ‖h‖ across all pairs
     n_pairs: int = 0
     skipped: int = 0
 
@@ -39,24 +40,25 @@ def _find_anchor(ids_a: list[int], ids_b: list[int]) -> int | None:
 
 def extract_layer_deltas(
     model,
-    pairs: list[CarryPair],
+    pairs: list,
     layers: list[int],
     device: torch.device,
     dtype: torch.dtype,
     per_template: bool = True,
 ) -> dict[str, LayerDeltas]:
-    """Capture residual stream at the anchor token; return mean carry − no-carry.
+    """Capture residual stream at the anchor token; return mean pos − neg delta.
 
     Keys in the returned dict:
       "all"        — aggregate over all pairs and templates
       "T0", "T1"…  — per-template (only if per_template=True)
+
+    Pairs must have prompt_pos and prompt_neg attributes (ConceptPair).
     """
     template_keys = [str(p.template) for p in pairs]
     all_keys = ["all"] + (list(dict.fromkeys(template_keys)) if per_template else [])
 
-    # buckets[key][layer]["carry"|"no_carry"] = list of (d_model,) tensors
     buckets: dict[str, dict[int, dict[str, list[torch.Tensor]]]] = {
-        key: {layer: {"carry": [], "no_carry": []} for layer in layers} for key in all_keys
+        key: {layer: {"pos": [], "neg": []} for layer in layers} for key in all_keys
     }
 
     model.eval()
@@ -64,17 +66,17 @@ def extract_layer_deltas(
 
     with torch.no_grad():
         for pair in tqdm(pairs, desc="Extracting deltas"):
-            ids_carry = model.tokenizer(pair.prompt_carry, add_special_tokens=False).input_ids
-            ids_no_carry = model.tokenizer(pair.prompt_no_carry, add_special_tokens=False).input_ids
+            ids_pos = model.tokenizer(pair.prompt_pos, add_special_tokens=False).input_ids
+            ids_neg = model.tokenizer(pair.prompt_neg, add_special_tokens=False).input_ids
 
-            anchor = _find_anchor(ids_carry, ids_no_carry)
+            anchor = _find_anchor(ids_pos, ids_neg)
             if anchor is None:
                 skipped += 1
                 continue
 
             tmpl_key = str(pair.template)
 
-            for ids, bucket_name in [(ids_carry, "carry"), (ids_no_carry, "no_carry")]:
+            for ids, bucket_name in [(ids_pos, "pos"), (ids_neg, "neg")]:
                 input_ids = torch.tensor([ids], dtype=torch.long, device=device)
                 cache: dict[int, torch.Tensor] = {}
 
@@ -104,14 +106,12 @@ def extract_layer_deltas(
     for key, layer_buckets in buckets.items():
         ld = LayerDeltas(skipped=skipped if key == "all" else 0)
         for layer in layers:
-            carry_vecs = layer_buckets[layer]["carry"]
-            no_carry_vecs = layer_buckets[layer]["no_carry"]
-            if not carry_vecs or not no_carry_vecs:
+            pos_vecs = layer_buckets[layer]["pos"]
+            neg_vecs = layer_buckets[layer]["neg"]
+            if not pos_vecs or not neg_vecs:
                 continue
-            n = min(len(carry_vecs), len(no_carry_vecs))
-            ld.delta[layer] = torch.stack(carry_vecs[:n]).mean(0) - torch.stack(
-                no_carry_vecs[:n]
-            ).mean(0)
+            n = min(len(pos_vecs), len(neg_vecs))
+            ld.delta[layer] = torch.stack(pos_vecs[:n]).mean(0) - torch.stack(neg_vecs[:n]).mean(0)
             ld.n_pairs = max(ld.n_pairs, n)
         results[key] = ld
 

@@ -22,12 +22,12 @@
 #SBATCH -A MPHIL-DIS-SL2-GPU
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
-#SBATCH --time=03:00:00
+#SBATCH --time=01:00:00
 #SBATCH --job-name=miq_run
 #SBATCH --output=/dev/null
 #SBATCH --error=/dev/null
 ##SBATCH --mail-type=BEGIN
-##SBATCH --mail-user=[EMAIL_ADDRESS]
+##SBATCH --mail-user=eid23@cam.ac.uk
 
 # ---- Repo root ----
 if [ -n "${SLURM_SUBMIT_DIR:-}" ]; then

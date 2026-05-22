@@ -41,7 +41,7 @@ COMPOUND_PROMPTS = [
 def show_weights(tok_strings, A_tok, threshold=0.05):
     cols = "  ".join(f"{p[:5]:>6}" for p in PRIM_NAMES)
     print(f"  {'token':>10}  {cols}")
-    print(f"  {'-'*50}")
+    print(f"  {'-' * 50}")
     for t, tok in enumerate(tok_strings):
         row = A_tok[t]
         if row.max().item() < threshold:
@@ -63,7 +63,7 @@ def main():
     print(f"\nPrimitives: {PRIM_NAMES}\n")
 
     for prompt, expected, desc in COMPOUND_PROMPTS:
-        print(f"{'─'*60}")
+        print(f"{'─' * 60}")
         print(f"  {desc}")
         print(f"  Prompt: {prompt!r}   expected: {expected!r}")
         ids = tok.encode(prompt, add_special_tokens=False)

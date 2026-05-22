@@ -296,7 +296,7 @@ def run_accuracy_sweep(
     if incorrect:
         print("\nFailure mode breakdown (top 10):")
         for mode, count in failure_modes.most_common(10):
-            print(f"  {mode!r:15s}: {count:5d} ({count/len(results):.2%})")
+            print(f"  {mode!r:15s}: {count:5d} ({count / len(results):.2%})")
 
     if n_correct > 0:
         correct_margins = [r.margin for r in results if r.is_correct]

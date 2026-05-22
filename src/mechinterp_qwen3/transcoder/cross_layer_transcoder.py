@@ -296,9 +296,9 @@ class CrossLayerTranscoder(torch.nn.Module):
         ).index_add_(0, flat_idx, decoder_vectors)
         recon = recon.reshape(self.n_layers, n_pos, self.d_model) + self.b_dec[:, None]
         if self.W_skip is not None:
-            assert (
-                input_acts is not None
-            ), "Transcoder has skip connection but no input_acts were provided"
+            assert input_acts is not None, (
+                "Transcoder has skip connection but no input_acts were provided"
+            )
             recon = recon + input_acts @ self.W_skip
         return recon
 

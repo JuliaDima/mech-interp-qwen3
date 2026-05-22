@@ -353,7 +353,7 @@ def main():
             flag = f"  <-- TARGET {args.target_accuracy:.0%} REACHED"
 
         log.info(
-            f"  0..{k:2d} ({k+1:2d} layers):  {val_metrics.accuracy:.4f}  {val_loss:.4f}{flag}"
+            f"  0..{k:2d} ({k + 1:2d} layers):  {val_metrics.accuracy:.4f}  {val_loss:.4f}{flag}"
         )
 
         # Save per-layer summary

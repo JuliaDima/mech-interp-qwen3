@@ -125,9 +125,9 @@ class SingleLayerTranscoder(nn.Module):
         W_dec = self.W_dec
         reconstruction = acts @ W_dec + self.b_dec
         if self.W_skip is not None:
-            assert (
-                input_acts is not None
-            ), "Transcoder has skip connection but no input_acts were provided"
+            assert input_acts is not None, (
+                "Transcoder has skip connection but no input_acts were provided"
+            )
             reconstruction = reconstruction + self.compute_skip(input_acts)
         return reconstruction
 
@@ -190,9 +190,9 @@ class SingleLayerTranscoder(nn.Module):
         )
         reconstruction = reconstruction.index_add_(0, pos_idx, scaled_decoders)
         if self.W_skip is not None:
-            assert (
-                input_acts is not None
-            ), "Transcoder has skip connection but no input_acts were provided"
+            assert input_acts is not None, (
+                "Transcoder has skip connection but no input_acts were provided"
+            )
             reconstruction = reconstruction + self.compute_skip(input_acts)
         reconstruction = reconstruction + self.b_dec
 
