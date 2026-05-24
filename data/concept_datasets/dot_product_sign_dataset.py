@@ -18,7 +18,7 @@ import random
 from experiments.concept_localization.concept_pair import ConceptPair
 
 TEMPLATES = {
-    "T0": ("({a1},{a2})·({b1},{b2})>0: ", "({a1},{a2})·({b1},{b2})>0: "),
+    "T0": ("calc: ({a1},{a2})·({b1},{b2})= ", "calc: ({a1},{a2})·({b1},{b2})= "),
     "T1": (
         "vectors ({a1},{a2}) and ({b1},{b2}) form an acute angle: ",
         "vectors ({a1},{a2}) and ({b1},{b2}) form an acute angle: ",

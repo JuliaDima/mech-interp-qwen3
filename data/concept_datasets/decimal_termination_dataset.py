@@ -78,7 +78,7 @@ _NEG = [
 ]
 
 TEMPLATES = {
-    "T0": ("1/{n} terminates: ", "1/{n} terminates: "),
+    "T0": ("calc: 1/{n}= ", "calc: 1/{n}= "),
     "T1": ("1 divided by {n} has a finite decimal: ", "1 divided by {n} has a finite decimal: "),
     "T2": ("does 1/{n} have a terminating decimal? ", "does 1/{n} have a terminating decimal? "),
 }

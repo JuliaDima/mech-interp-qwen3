@@ -168,11 +168,24 @@ CONCEPTS = [
     "wave_interference",
 ]
 
+SYMBOLIC_SUBSET = [
+    "carry",
+    "residue_class",
+    "gcd",
+    "perfect_square",
+    "decimal_termination",
+    "dot_product_sign",
+    "triangle_inequality",
+    "transitive_ordering",
+    "balanced_parentheses",
+    "syllogism",
+]
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument("--concept", required=True, choices=CONCEPTS + ["all"],
-                        help="Concept name, or 'all' to run every registered concept in sequence")
+    parser.add_argument("--concept", required=True, choices=CONCEPTS + ["all", "symbolic"],
+                        help="Concept name, 'all' to run every concept, or 'symbolic' for the symbolic subset")
     parser.add_argument("--model", default=_MODEL)
     parser.add_argument("--transcoder_set", default=_TRANSCODER_SET)
     parser.add_argument("--dtype", default="bfloat16")
@@ -208,8 +221,9 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if args.concept == "all":
-        for concept in CONCEPTS:
+    if args.concept in ("all", "symbolic"):
+        batch = CONCEPTS if args.concept == "all" else SYMBOLIC_SUBSET
+        for concept in batch:
             log.info("=" * 60)
             log.info("Running concept: %s", concept)
             log.info("=" * 60)

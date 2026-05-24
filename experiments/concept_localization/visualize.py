@@ -156,8 +156,9 @@ def plot_feature_projections(
 
     ps.apply()
     fig, ax = plt.subplots(figsize=(max(10, len(projections) * 0.5), 5))
-    sc = ax.scatter(xs, ys, c=cs, cmap=ps.CMAP_DIV, vmin=-1, vmax=1, s=30, alpha=0.8)
-    plt.colorbar(sc, ax=ax, label="cos_sim(δ, W_enc row)")
+    abs_max = max(abs(v) for v in cs) if cs else 1.0
+    sc = ax.scatter(xs, ys, c=cs, cmap=ps.CMAP_DIV, vmin=-abs_max, vmax=abs_max, s=30, alpha=0.8)
+    plt.colorbar(sc, ax=ax, label=f"cos_sim(δ, W_enc row)  [max={abs_max:.3f}]")
     ax.set_xlabel("Layer")
     ax.set_ylabel("Feature ID")
     ax.set_title(f"Top-{top_k} features aligned with {concept} delta")
