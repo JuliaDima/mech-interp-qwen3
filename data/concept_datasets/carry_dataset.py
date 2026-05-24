@@ -24,7 +24,7 @@ from experiments.concept_localization.concept_pair import ConceptPair
 
 TEMPLATES = {
     "T0": ("calc: {a}+{b}= ", "calc: {a}+{b}= "),
-    "T1": ("{a} plus {b} is ", "{a} plus {b} is "),
+    "T1": ("{a} plus {b} is: ", "{a} plus {b} is: "),
     "T2": ("what is {a}+{b}? ", "what is {a}+{b}? "),
 }
 

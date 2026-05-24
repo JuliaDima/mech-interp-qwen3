@@ -32,34 +32,56 @@ def plot_norm_and_alignment(
     Per-template curves are shown as thin lines; the aggregate "all" as bold.
     """
     ps.apply()
-    fig, (ax_norm, ax_cos) = plt.subplots(1, 2, figsize=(14, 5))
-
     ld_all = results.get("all")
     use_norm = bool(ld_all and ld_all.mean_act_norm)
-    ylabel = "‖δ‖ / ‖h‖  (normalised)" if use_norm else "‖δ‖  (raw)"
+    ncols = 3 if use_norm else 2
+    fig, axes = plt.subplots(1, ncols, figsize=(7 * ncols, 5))
+    ax_raw = axes[0]
+    ax_normed = axes[1] if use_norm else None
+    ax_cos = axes[-1]
 
     tmpl_keys = [k for k in results if k != "all"]
+
+    # peak of the "all" series — used to normalise every curve to [0, 1]
+    ld_all_obj = results.get("all")
+    all_raw = (
+        [ld_all_obj.delta[l].norm().item() for l in sorted(ld_all_obj.delta.keys())]
+        if ld_all_obj and ld_all_obj.delta
+        else []
+    )
+    peak_norm = max(all_raw) if all_raw else 1.0
+
     for i, key in enumerate(["all"] + tmpl_keys):
         ld = results.get(key)
         if ld is None or not ld.delta:
             continue
         layers = sorted(ld.delta.keys())
         raw = [ld.delta[l].norm().item() for l in layers]
-        if use_norm and ld.mean_act_norm:
-            norms = [r / ld.mean_act_norm.get(l, 1.0) for l, r in zip(layers, raw)]
-        else:
-            norms = raw
-        if key == "all":
-            ax_norm.plot(layers, norms, label="all templates", color=ps.VIOLET, linewidth=2.5)
-        else:
-            color = _TEMPLATE_COLORS[(i - 1) % len(_TEMPLATE_COLORS)]
-            ax_norm.plot(layers, norms, label=key, color=color, linewidth=1.0, alpha=0.7)
+        peak_normed = [r / peak_norm for r in raw]
+        is_agg = key == "all"
+        lw = 2.5 if is_agg else 0.9
+        ls = "-" if is_agg else "--"
+        alpha = 1.0 if is_agg else 0.65
+        color = ps.VIOLET if is_agg else _TEMPLATE_COLORS[(i - 1) % len(_TEMPLATE_COLORS)]
+        label = "all templates" if is_agg else key
 
-    ps.phase_vlines(ax_norm)
-    ax_norm.set_xlabel("Layer")
-    ax_norm.set_ylabel(ylabel)
-    ax_norm.set_title(f"Delta norm — {concept}")
-    ax_norm.legend()
+        ax_raw.plot(layers, peak_normed, label=label, color=color, linewidth=lw, linestyle=ls, alpha=alpha)
+
+        if use_norm and ax_normed is not None and ld.mean_act_norm:
+            normed = [r / ld.mean_act_norm.get(l, 1.0) for l, r in zip(layers, raw)]
+            ax_normed.plot(layers, normed, label=label, color=color, linewidth=lw, linestyle=ls, alpha=alpha)
+
+    ax_raw.set_xlabel("Layer")
+    ax_raw.set_ylabel("‖δ‖ / max(‖δ‖)")
+    ax_raw.set_title(f"Peak-normalised delta norm — {concept}")
+    ax_raw.set_ylim(bottom=0)
+    ax_raw.legend()
+
+    if use_norm and ax_normed is not None:
+        ax_normed.set_xlabel("Layer")
+        ax_normed.set_ylabel("‖δ‖ / ‖h‖  (normalised)")
+        ax_normed.set_title(f"Activation-normalised delta norm — {concept}")
+        ax_normed.legend()
 
     # Inter-layer cosine similarity for aggregate only
     if "all" in results and results["all"].delta:
@@ -75,7 +97,6 @@ def plot_norm_and_alignment(
 
         ax_cos.plot(mid_layers, cos_sims, color=ps.NAVY, linewidth=1.8)
         ax_cos.axhline(0, color=ps.GRAY, linestyle="--", linewidth=0.8)
-        ps.phase_vlines(ax_cos)
         ax_cos.set_xlabel("Layer (midpoint)")
         ax_cos.set_ylabel("cos_sim(δ_l, δ_{l+1})")
         ax_cos.set_title(f"Inter-layer delta alignment — {concept}")
@@ -106,7 +127,6 @@ def plot_template_consistency(
         ax.plot(layers, vals, label=pk, color=color, linewidth=1.5)
 
     ax.axhline(1.0, color=ps.GRAY, linestyle="--", linewidth=0.8)
-    ps.phase_vlines(ax)
     ax.set_xlabel("Layer")
     ax.set_ylabel("cos_sim")
     ax.set_title(f"Template consistency — {concept}")
@@ -138,7 +158,6 @@ def plot_feature_projections(
     fig, ax = plt.subplots(figsize=(max(10, len(projections) * 0.5), 5))
     sc = ax.scatter(xs, ys, c=cs, cmap=ps.CMAP_DIV, vmin=-1, vmax=1, s=30, alpha=0.8)
     plt.colorbar(sc, ax=ax, label="cos_sim(δ, W_enc row)")
-    ps.phase_vlines(ax)
     ax.set_xlabel("Layer")
     ax.set_ylabel("Feature ID")
     ax.set_title(f"Top-{top_k} features aligned with {concept} delta")
@@ -204,14 +223,14 @@ def plot_causal_overlay(
         zorder=2,
     )
 
-    # Per-template thin lines
+    # Per-template thin lines — each template gets its own colour
     for i, t in enumerate(tmpl_keys):
         cs = causal_results[t]
         pm_t = [cs.patching_mean.get(l, 0.0) / peak_pm for l in layers]
         gm_t = [cs.grad_dot_delta_mean.get(l, 0.0) / peak_gm for l in layers]
         c = _TEMPLATE_COLORS[i % len(_TEMPLATE_COLORS)]
-        ax.plot(layers, pm_t, color=ps.VIOLET, linewidth=0.9, alpha=0.5, linestyle="--")
-        ax.plot(layers, gm_t, color=ps.TEAL, linewidth=0.9, alpha=0.5, linestyle="--")
+        ax.plot(layers, pm_t, color=c, linewidth=0.9, alpha=0.5, linestyle="--")
+        ax.plot(layers, gm_t, color=c, linewidth=0.9, alpha=0.5, linestyle=":")
 
     # Aggregate bold lines
     ax.plot(
@@ -232,7 +251,6 @@ def plot_causal_overlay(
     )
 
     ax.axhline(0, color=ps.GRAY, linewidth=0.8, linestyle="--")
-    ps.phase_vlines(ax)
     ax.set_xlabel("Layer")
     ax.set_ylabel("Normalised signal  (each scaled to peak = 1)")
     ax.set_title(
@@ -371,24 +389,22 @@ def plot_causal_efficiency(
         label="Anti-causal",
     )
 
-    # Per-template thin lines
+    # Per-template thin lines — each template gets its own colour
     for i, t in enumerate(tmpl_keys):
         eff_t = _efficiency(causal_results[t], delta_norms)
         ax.plot(
             layers,
             eff_t,
-            color=ps.TEAL,
+            color=_TEMPLATE_COLORS[i % len(_TEMPLATE_COLORS)],
             linewidth=0.9,
-            alpha=0.5,
+            alpha=0.55,
             linestyle="--",
-            label=t if i == 0 else "_",
+            label=t,
         )
 
     # Aggregate bold
     ax.plot(layers, eff_all, color=ps.TEAL, linewidth=2.2, zorder=3, label="mean (all templates)")
     ax.axhline(0, color=ps.GRAY, linewidth=0.8, linestyle="--")
-    ps.phase_vlines(ax)
-
     ax.set_xlabel("Layer")
     ax.set_ylabel("(∇h logit · δ) / ‖δ‖")
     ax.set_title(
@@ -425,16 +441,16 @@ def plot_causal_scores(
     fig, axes = plt.subplots(1, 3, figsize=(18, 5))
 
     def _draw_panel(ax, attr, color, ylabel, title):
-        # Per-template thin lines
+        # Per-template thin lines — each template gets its own colour
         for i, t in enumerate(tmpl_keys):
             cs = causal_results[t]
             vals = [getattr(cs, attr + "_mean").get(l, 0.0) for l in layers]
-            ax.plot(layers, vals, color=color, linewidth=0.9, alpha=0.5, linestyle="--", label=t)
+            tc = _TEMPLATE_COLORS[i % len(_TEMPLATE_COLORS)]
+            ax.plot(layers, vals, color=tc, linewidth=0.9, alpha=0.55, linestyle="--", label=t)
         # Aggregate bold
         vals_all = [getattr(agg, attr + "_mean").get(l, 0.0) for l in layers]
         ax.plot(layers, vals_all, color=color, linewidth=2.2, label="all", zorder=3)
         ax.axhline(0, color=ps.GRAY, linestyle="--", linewidth=0.8)
-        ps.phase_vlines(ax)
         ax.set_xlabel("Layer")
         ax.set_ylabel(ylabel)
         ax.set_title(title)
@@ -447,21 +463,21 @@ def plot_causal_scores(
         axes[1], "grad_dot_delta", ps.TEAL, "∇h logit · δ", f"Gradient dot delta — {concept}"
     )
 
-    # Panel 3: delta norms (normalised by mean activation norm when available)
+    # Panel 3: raw delta norm (left axis) + normalised (right axis when available)
     ax = axes[2]
-    if mean_act_norms:
-        dn_vals = [delta_norms.get(l, 0.0) / mean_act_norms.get(l, 1.0) for l in layers]
-        dn_ylabel = "‖δ‖ / ‖h‖  (normalised)"
-        dn_title = f"Normalised delta norm — {concept}"
-    else:
-        dn_vals = [delta_norms.get(l, 0.0) for l in layers]
-        dn_ylabel = "‖δ‖"
-        dn_title = f"Delta norm (reference) — {concept}"
-    ax.plot(layers, dn_vals, color=ps.NAVY, linewidth=2.0)
-    ps.phase_vlines(ax)
+    dn_raw = [delta_norms.get(l, 0.0) for l in layers]
+    ax.plot(layers, dn_raw, color=ps.NAVY, linewidth=2.0, label="‖δ‖  (raw)")
     ax.set_xlabel("Layer")
-    ax.set_ylabel(dn_ylabel)
-    ax.set_title(dn_title)
+    ax.set_ylabel("‖δ‖  (raw)", color=ps.NAVY)
+    ax.tick_params(axis="y", labelcolor=ps.NAVY)
+    ax.set_title(f"Delta norm — {concept}")
+    if mean_act_norms:
+        ax2 = ax.twinx()
+        dn_norm = [delta_norms.get(l, 0.0) / mean_act_norms.get(l, 1.0) for l in layers]
+        ax2.plot(layers, dn_norm, color=ps.TEAL, linewidth=1.4, linestyle="--", label="‖δ‖/‖h‖  (norm.)")
+        ax2.set_ylabel("‖δ‖ / ‖h‖  (normalised)", color=ps.TEAL, fontsize=8)
+        ax2.tick_params(axis="y", labelcolor=ps.TEAL, labelsize=7)
+        ax2.spines["top"].set_visible(False)
 
     fig.suptitle(
         f"{concept}  —  causal analysis  (n={agg.n_pairs} pairs, {len(tmpl_keys)} templates)",

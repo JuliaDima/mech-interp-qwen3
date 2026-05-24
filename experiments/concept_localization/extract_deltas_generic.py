@@ -13,20 +13,57 @@ import torch
 from tqdm import tqdm
 
 from experiments.concept_localization.concept_pair import ConceptPair
-from experiments.concept_localization.extract_deltas import LayerDeltas, _find_anchor
+from experiments.concept_localization.extract_deltas import LayerDeltas
 
 log = logging.getLogger(__name__)
 
 # Token strings that mark "end of expression / about to answer".
 # The model compresses the computed result onto these tokens (per biology-of-LLMs paper).
-_DELIMITER_STRINGS = ("=", "Ġ=", ":", "Ġ:", "\n", "Ċ")
+_DELIMITER_STRINGS = (
+    "=", "Ġ=",
+    ":", "Ġ:",
+    "?", "Ġ?",
+    ")", "Ġ)",
+    ")=", "Ġ)=",
+    ")?", "Ġ)?",
+    ").", "Ġ).",
+    "),", "Ġ),",
+    "\n", "Ċ",
+)
 
 
-def _find_delimiter_anchor(ids: list[int], tokenizer) -> int | None:
+def resolve_anchor_token(prompt: str, tokenizer, anchor_mode: str) -> tuple[int, str]:
+    """Return (0-indexed position, decoded token string) for the resolved anchor.
+
+    Mirrors the per-pair anchor logic in extract_layer_deltas_generic so callers
+    can inspect and save the anchor without re-running the full extraction.
+    """
+    ids = tokenizer(prompt, add_special_tokens=False).input_ids
+    _fixed_pos: int | None = None
+    if anchor_mode not in ("delimiter", "last"):
+        try:
+            _fixed_pos = int(anchor_mode)
+        except ValueError:
+            pass
+
+    if _fixed_pos is not None:
+        pos = min(_fixed_pos, len(ids) - 1)
+    elif anchor_mode == "last":
+        pos = len(ids) - 1
+    else:
+        pos = _find_delimiter_anchor(ids, tokenizer)
+
+    tok_str = tokenizer.convert_tokens_to_string(
+        [tokenizer.convert_ids_to_tokens(ids[pos])]
+    )
+    return pos, tok_str
+
+
+def _find_delimiter_anchor(ids: list[int], tokenizer) -> int:
     """Return the position of the last expression-end delimiter token.
 
-    Searches for '=', ':', or newline — whichever appears last.  Falls back
-    to the final token if none found.
+    Searches backwards for structural punctuation.  Falls back to the final
+    token if none found.
     """
     delim_ids = {
         tokenizer.convert_tokens_to_ids(s)
@@ -46,39 +83,32 @@ def extract_layer_deltas_generic(
     device: torch.device,
     dtype: torch.dtype,
     per_template: bool = True,
-    anchor_mode: str = "diff",
+    anchor_mode: str = "delimiter",
 ) -> dict[str, LayerDeltas]:
     """Capture residual stream at the anchor token; return mean pos − neg delta.
 
-    anchor_mode="diff"      — last token where pos and neg differ. Works when
-                              the varying token comes after the full expression
-                              (most concepts). Broken when the varying token
-                              appears before a key operator (e.g. residue_class).
+    anchor_mode="delimiter" (default) — last structural delimiter token ('=', ':',
+                              '?', ')').  Per the biology-of-LLMs paper, models
+                              store computed results on punctuation tokens that
+                              close the expression.  Falls back to the last token
+                              when no delimiter is found.
     anchor_mode="last"      — absolute last token of the sequence.
-    anchor_mode="delimiter" — last '=', ':', or newline token. Per the
-                              biology-of-LLMs paper, models store computed
-                              results on punctuation/delimiter tokens. Use this
-                              when the concept is only fully determined after
-                              the expression-end marker (e.g. a%n=, gcd(a,n)=).
+    anchor_mode="<int>"     — explicit 0-indexed token position (e.g. "5" for the
+                              ones digit of the first operand in "calc: 36+59=").
 
     Pairs where tokenization lengths differ are always skipped.
 
     Returns a dict keyed by "all" (aggregate) and per template name if
     per_template=True and pairs have a non-empty template field.
     """
-    # Parse pos_from_end:<n> mode, e.g. "pos_from_end:2" anchors at seq[-3]
-    _pos_from_end: int | None = None
-    if anchor_mode.startswith("pos_from_end:"):
+    _fixed_pos: int | None = None
+    if anchor_mode not in ("delimiter", "last"):
         try:
-            _pos_from_end = int(anchor_mode.split(":")[1])
-        except (IndexError, ValueError):
+            _fixed_pos = int(anchor_mode)
+        except ValueError:
             raise ValueError(
-                f"anchor_mode 'pos_from_end:<n>' requires an integer n, got {anchor_mode!r}"
+                f"anchor_mode must be 'delimiter', 'last', or an integer position string, got {anchor_mode!r}"
             )
-    elif anchor_mode not in ("diff", "last", "delimiter"):
-        raise ValueError(
-            f"anchor_mode must be 'diff', 'last', 'delimiter', or 'pos_from_end:<n>', got {anchor_mode!r}"
-        )
 
     template_keys = list(dict.fromkeys(p.template for p in pairs)) if per_template else []
     all_keys = ["all"] + template_keys
@@ -99,20 +129,12 @@ def extract_layer_deltas_generic(
                 skipped += 1
                 continue
 
-            if _pos_from_end is not None:
-                anchor = len(ids_pos) - 1 - _pos_from_end
-                if anchor < 0:
-                    skipped += 1
-                    continue
+            if _fixed_pos is not None:
+                anchor = _fixed_pos
             elif anchor_mode == "last":
                 anchor = len(ids_pos) - 1
-            elif anchor_mode == "delimiter":
-                anchor = _find_delimiter_anchor(ids_pos, model.tokenizer)
             else:
-                anchor = _find_anchor(ids_pos, ids_neg)
-            if anchor is None:
-                skipped += 1
-                continue
+                anchor = _find_delimiter_anchor(ids_pos, model.tokenizer)
 
             tmpl_key = pair.template
 
@@ -124,8 +146,9 @@ def extract_layer_deltas_generic(
                     (
                         f"blocks.{layer}.hook_resid_post",
                         lambda act, hook, _l=layer, _pos=anchor: (
-                            cache.update({_l: act[0, _pos, :].detach().clone()}) or act
-                        ),
+                            cache.update({_l: act[0, _pos, :].detach().clone()})
+                            if _pos < act.shape[1] else None
+                        ) or act,
                     )
                     for layer in layers
                 ]
