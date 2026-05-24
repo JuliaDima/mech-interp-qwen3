@@ -56,6 +56,7 @@ _TRANSCODER_SET = "mwhanna/qwen3-4b-transcoders"
 _RUNS_DIR = _REPO_ROOT / "runs" / "concept_localization"
 _DEFAULT_LAYER = 18
 
+
 ALL_CONCEPTS = [
     "carry",
     "gcd",
@@ -207,20 +208,20 @@ def plot_positional_attribution(
 # ── full layer-sweep heatmap ──────────────────────────────────────────────────
 
 
-def plot_positional_sweep(
+def _draw_sweep_heatmap(
+    ax,
     concept: str,
     scores: dict[int, dict[int, list[float]]],
     token_labels: list[str],
-    out_path: Path,
+    prompt_example: str | None = None,
+    show_ylabel: bool = True,
+    show_colorbar: bool = True,
+    fig=None,
 ) -> None:
-    """Heatmap: rows=layers, cols=token positions, colour=mean cosine attribution.
-
-    Overlays a white curve showing the winning position at each layer.
-    """
+    """Draw a positional sweep heatmap onto an existing axis."""
     layers = sorted(scores.keys())
     n_tail = len(token_labels)
 
-    # Build matrix: rows=layers, cols=positions
     mat = np.zeros((len(layers), n_tail))
     for row, l in enumerate(layers):
         for col in range(n_tail):
@@ -228,9 +229,6 @@ def plot_positional_sweep(
             mat[row, col] = float(np.mean(vals)) if vals else 0.0
 
     winner_per_layer = mat.argmax(axis=1)
-
-    ps.apply()
-    fig, ax = plt.subplots(figsize=(max(6, n_tail * 1.1), 7))
 
     vmax = max(abs(mat).max(), 1e-6)
     im = ax.imshow(
@@ -241,16 +239,15 @@ def plot_positional_sweep(
         vmin=-vmax,
         vmax=vmax,
     )
-    fig.colorbar(im, ax=ax, label="cos(grad, Δh)")
+    if show_colorbar and fig is not None:
+        fig.colorbar(im, ax=ax, label="cos(grad, Δh)", shrink=0.9)
 
-    # Winning-position curve
     ax.plot(
         winner_per_layer,
         np.arange(len(layers)),
         color="white",
         linewidth=1.8,
         alpha=0.9,
-        label="winning position",
     )
     ax.scatter(winner_per_layer, np.arange(len(layers)), color="white", s=14, zorder=5, alpha=0.8)
 
@@ -259,20 +256,72 @@ def plot_positional_sweep(
         [f"{_clean_tok(token_labels[i])}\n[−{i}]" for i in range(n_tail)], fontsize=8
     )
     ax.set_yticks(range(0, len(layers), max(1, len(layers) // 12)))
-    ax.set_yticklabels(
-        [str(layers[i]) for i in range(0, len(layers), max(1, len(layers) // 12))], fontsize=8
-    )
-    ax.set_xlabel("Token position from end  (−0 = last)")
-    ax.set_ylabel("Layer")
-    ax.set_title(
-        f"{concept}  —  positional attribution sweep\nwhite curve = winning position per layer",
-        fontsize=10,
-    )
+    if show_ylabel:
+        ax.set_yticklabels(
+            [str(layers[i]) for i in range(0, len(layers), max(1, len(layers) // 12))],
+            fontsize=8,
+        )
+        ax.set_ylabel("Layer", fontsize=9)
+    else:
+        ax.set_yticklabels([])
 
-    fig.tight_layout()
-    fig.savefig(out_path, dpi=150)
+    ax.set_xlabel("Token position from end  (−0 = last)", fontsize=9)
+
+    title = f"{concept}\nwhite curve = winning position per layer"
+    if prompt_example:
+        # Truncate long prompts to keep the title readable
+        max_chars = 52
+        disp = prompt_example if len(prompt_example) <= max_chars else prompt_example[:max_chars - 1] + "…"
+        title = f"{concept}\n{disp}"
+    ax.set_title(title, fontsize=9)
+
+
+def plot_positional_sweep_combined(
+    concept: str,
+    template_results: dict[str, tuple[dict[int, dict[int, list[float]]], list[str]]],
+    template_prompts: dict[str, str],
+    out_path: Path,
+) -> None:
+    """One figure with three side-by-side heatmap subplots, one per template.
+
+    template_results: {tmpl: (scores, token_labels)}
+    template_prompts: {tmpl: example_prompt_pos string}
+    """
+    ps.apply()
+    tmpls = sorted(template_results.keys())
+    n = len(tmpls)
+    n_tail = len(next(iter(template_results.values()))[1])
+
+    fig, axes = plt.subplots(
+        1, n,
+        figsize=(max(5, n_tail * 1.0) * n + 0.5, 7),
+        gridspec_kw={"wspace": 0.06},
+    )
+    if n == 1:
+        axes = [axes]
+
+    for i, tmpl in enumerate(tmpls):
+        scores, token_labels = template_results[tmpl]
+        prompt_ex = template_prompts.get(tmpl)
+        _draw_sweep_heatmap(
+            axes[i],
+            tmpl,
+            scores,
+            token_labels,
+            prompt_example=prompt_ex,
+            show_ylabel=(i == 0),
+            show_colorbar=(i == n - 1),
+            fig=fig,
+        )
+
+    fig.suptitle(
+        f"{concept.replace('_', ' ')}  —  positional attribution by template",
+        fontsize=11,
+        y=1.01,
+    )
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
-    log.info("Saved sweep heatmap → %s", out_path)
+    log.info("Saved combined sweep figure → %s", out_path)
 
 
 # ── sweep summary chart ───────────────────────────────────────────────────────
@@ -348,7 +397,10 @@ def main() -> None:
         help="Single-layer fallback when no causal results exist (ignored with --sweep)",
     )
     parser.add_argument(
-        "--n_tail", type=int, default=6, help="How many end-of-sequence positions to evaluate"
+        "--anchor",
+        default="delimiter",
+        choices=["delimiter", "last"],
+        help="Anchor token selection: 'delimiter' uses the last structural delimiter (default); 'last' uses the final token",
     )
     parser.add_argument(
         "--n_layers", type=int, default=36, help="Total number of model layers (used with --sweep)"
@@ -362,8 +414,8 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    out_dir = Path(args.out_dir or _RUNS_DIR)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    _base_dir = Path(args.out_dir or _RUNS_DIR)
+    _base_dir.mkdir(parents=True, exist_ok=True)
 
     device = get_default_device()
     dtype = parse_dtype(args.dtype)
@@ -380,6 +432,8 @@ def main() -> None:
     all_layers = list(range(args.n_layers))
 
     if args.sweep:
+        out_dir = _base_dir / "anchor_token_sweep"
+        out_dir.mkdir(parents=True, exist_ok=True)
         concept_summaries: list[tuple[str, int, str, float]] = []
 
         for concept in args.concepts:
@@ -393,6 +447,10 @@ def main() -> None:
             global_best_pos = 0
             global_best_tok = "?"
 
+            # Collect per-template results for combined figure
+            template_results: dict[str, tuple] = {}
+            template_prompts: dict[str, str] = {}
+
             for tmpl, grp in groups.items():
                 log.info("  template %s  (%d pairs)", tmpl, len(grp))
 
@@ -402,15 +460,13 @@ def main() -> None:
                     layers=all_layers,
                     device=device,
                     dtype=dtype,
-                    n_tail=args.n_tail,
+                    anchor=args.anchor,
                 )
 
-                plot_positional_sweep(
-                    f"{concept}  [{tmpl}]",
-                    scores,
-                    token_labels,
-                    out_dir / f"{concept}_{tmpl}_positional_sweep.png",
-                )
+                example_prompt = grp[0].prompt_pos if grp else None
+                template_results[tmpl] = (scores, token_labels)
+                if example_prompt:
+                    template_prompts[tmpl] = example_prompt
 
                 for l in all_layers:
                     rel_positions = sorted(scores[l].keys())
@@ -437,9 +493,18 @@ def main() -> None:
                 global_best_score,
             )
 
+            if len(template_results) > 1:
+                plot_positional_sweep_combined(
+                    concept,
+                    template_results,
+                    template_prompts,
+                    out_dir / f"{concept}_combined_positional_sweep.png",
+                )
+
         plot_sweep_summary(concept_summaries, out_dir / "positional_sweep_summary.png")
 
     else:
+        out_dir = _base_dir
         all_results: dict[str, tuple[dict[int, list[float]], list[str]]] = {}
 
         for concept in args.concepts:
@@ -449,7 +514,7 @@ def main() -> None:
             pairs = _load_pairs(concept, args.n, args.seed)[: args.n]
 
             scores, token_labels = run_positional_attribution(
-                model, pairs, layer=layer, device=device, dtype=dtype, n_tail=args.n_tail
+                model, pairs, layer=layer, device=device, dtype=dtype, anchor=args.anchor
             )
 
             all_results[concept] = (scores, token_labels)

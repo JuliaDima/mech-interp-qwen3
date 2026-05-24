@@ -7,7 +7,6 @@ This script:
    memory fragmentation / OOM errors on GPUs.
 3. Collects the intervention results.
 4. Aggregates data (mean/std) per feature group.
-5. Produces publication-style visualization plots.
 """
 
 import csv

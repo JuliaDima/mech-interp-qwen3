@@ -20,7 +20,7 @@ import torch
 import torch.nn.functional as F
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from plot_style import GRAY, MAUVE, NAVY, PHASE_COLORS, RED, TEAL, VIOLET, apply, phase_vlines
+from plot_style import GRAY, MAUVE, NAVY, RED, TEAL, VIOLET, apply
 
 apply()
 
@@ -93,21 +93,18 @@ fig, (ax_norm, ax_tc) = plt.subplots(
     2, 1, figsize=(9, 6), sharex=True, gridspec_kw={"hspace": 0.06, "height_ratios": [3, 2]}
 )
 
-phase_specs = [
-    (0, 4.5, "Phase I\nInitial encoding", PHASE_COLORS[0]),
-    (4.5, 18.5, "Phase II\nCarry crystallisation", PHASE_COLORS[1]),
-    (18.5, 35.5, "Phase III\nOutput preparation", PHASE_COLORS[2]),
-]
-
 for ax in (ax_norm, ax_tc):
-    phase_vlines(ax)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
 
-# top panel: norm trajectory
+# peak-normalised counterparts (shape-preserving, peak = 1)
+norms_n = norms / norms.max()
+template_norms_n = {t: v / v.max() for t, v in template_norms.items()}
+
+# top panel: raw norm trajectory (left axis) + peak-normalised (right axis)
 ax_norm.plot(layers, norms, color=VIOLET, lw=2.2, label="All templates (pooled)", zorder=3)
-for t, col, ls in zip(("T0", "T1", "T2"), (NAVY, TEAL, MAUVE), ("--", "--", "--"), strict=False):
-    ax_norm.plot(layers, template_norms[t], color=col, lw=1.1, ls=ls, alpha=0.7, label=t, zorder=2)
+for t, col in zip(("T0", "T1", "T2"), (NAVY, TEAL, MAUVE)):
+    ax_norm.plot(layers, template_norms[t], color=col, lw=1.1, ls="--", alpha=0.7, label=t, zorder=2)
 
 peak_l = int(res["sharpness"]["peak_layer"])
 ax_norm.scatter([peak_l], [norms[peak_l]], color=RED, zorder=5, s=55, label=f"Peak (L{peak_l})")
@@ -120,23 +117,19 @@ ax_norm.annotate(
     color=GRAY,
 )
 
-ax_norm.set_ylabel(r"$\|\delta_l\|$", fontsize=11)
+ax_norm.set_ylabel(r"$\|\delta_l\|$  (raw)", fontsize=11)
 ax_norm.legend(fontsize=8, loc="upper left", ncol=2)
 ax_norm.set_ylim(bottom=0)
 
-# phase labels (bottom of top panel, away from legend)
-for lo, hi, label, _ in phase_specs:
-    ax_norm.text(
-        (lo + hi) / 2,
-        1.5,
-        label,
-        ha="center",
-        va="bottom",
-        fontsize=7.5,
-        color="#555555",
-        style="italic",
-        bbox=dict(boxstyle="round,pad=0.2", fc="white", alpha=0.55, ec="none"),
-    )
+# right axis: peak-normalised (same curves, [0,1] scale)
+ax_n2 = ax_norm.twinx()
+ax_n2.plot(layers, norms_n, color=VIOLET, lw=1.0, ls=":", alpha=0.4, zorder=1)
+for t, col in zip(("T0", "T1", "T2"), (NAVY, TEAL, MAUVE)):
+    ax_n2.plot(layers, template_norms_n[t], color=col, lw=0.7, ls=":", alpha=0.3, zorder=1)
+ax_n2.set_ylabel(r"$\|\delta_l\| / \max$  (normalised)", fontsize=9, color=GRAY)
+ax_n2.tick_params(axis="y", labelcolor=GRAY, labelsize=7)
+ax_n2.set_ylim(bottom=0)
+ax_n2.spines["top"].set_visible(False)
 
 # bottom panel: template consistency
 ax_tc.plot(layers, tc_01, color=NAVY, lw=1.8, label="T0 vs T1")

@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-from plot_style import GRAY, PHASE_BOUNDS, PHASE_LABELS, VIOLET, apply
+from plot_style import GRAY, VIOLET, apply
 
 apply()
 
@@ -117,25 +117,8 @@ sc = ax_sc.scatter(
     zorder=3,
 )
 
-for (lo, hi), name in zip(PHASE_BOUNDS, PHASE_LABELS, strict=False):
-    ax_sc.text(
-        (lo + hi) / 2,
-        1.01,
-        name,
-        ha="center",
-        va="bottom",
-        fontsize=8,
-        color="#777777",
-        style="italic",
-        transform=ax_sc.get_xaxis_transform(),
-    )
-
 for layer in FOCAL_LAYERS:
     ax_sc.axvline(layer, color=GRAY, linewidth=0.7, linestyle=":", alpha=0.5)
-
-from plot_style import phase_vlines
-
-phase_vlines(ax_sc)
 
 ax_sc.set_ylabel("Transcoder feature ID", fontsize=11)
 ax_sc.set_title(
@@ -184,7 +167,6 @@ if mask.any():
 norm_vals = [norms[l] for l in range(n_layers)]
 ax_n.fill_between(range(n_layers), norm_vals, alpha=0.25, color=VIOLET)
 ax_n.plot(range(n_layers), norm_vals, color=VIOLET, linewidth=2.0)
-phase_vlines(ax_n)
 ax_n.set_xlim(-0.5, n_layers - 0.5)
 ax_n.set_xticks(range(0, n_layers, 5))
 ax_n.set_xticklabels([str(l) for l in range(0, n_layers, 5)], fontsize=9)

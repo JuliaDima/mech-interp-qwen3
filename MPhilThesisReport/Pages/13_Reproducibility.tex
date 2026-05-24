@@ -146,6 +146,72 @@ prompt \texttt{calc:~39+59=~}, which has ones digits $(9, 9)$ rather than
 $(6, 9)$; if the identified feature mediates the computation, the output
 should shift from predicting ones digit $5$ to ones digit $8$.
 
+\paragraph{Position-resolved feature sweep.}
+\citet{lindsey2025biology} observe that the features active during
+addition in Claude 3 Haiku differ systematically by token position:
+features at the operand tokens encode individual digit values, while
+features at the delimiter token encode their combination.  To examine
+whether an analogous positional structure is present in Qwen3-4B, the
+operand sweep of Equation~\ref{eq:operand-matrix} was applied at three
+token positions in the prompt \texttt{calc:~}$a$\texttt{+}$b$\texttt{=}:
+the ones digit of $a$ (position 4), the ones digit of $b$ (position 7),
+and the \texttt{=} token (position 8).  At each position the top-15 CLT
+features by attribution edge weight were selected.
+Figure~\ref{fig:operand-pos-sweep} shows the resulting matrices.
+
+At position 4, the selected features activate in vertical bands with
+period 10 along the $a$ axis.  Activation is determined almost entirely
+by $a \bmod 10$ and is insensitive to $b$.  At position 7 the pattern
+is transposed: horizontal bands with period 10 in $b$, independent of
+$a$.  The symmetry between the two positions suggests that the ones
+digits of the two addends are encoded separately, with each operand
+token carrying information about that operand's own digit.
+
+The \texttt{=} token displays a more varied set of activation patterns.
+Several features produce diagonal bands concentrated along contours of
+constant $a + b$, indicating sensitivity to the sum rather than to
+individual operand values.  Others show a periodic point-cluster
+structure in which activation concentrates at cells where both
+$a \bmod 10$ and $b \bmod 10$ take specific values; this is the
+joint-modular structure captured by the score in
+Equation~\ref{eq:lookup-score}, and it is the defining signature of the
+lookup table features described in Section~\ref{subsec:operand-plots}.
+A smaller number of features at this position show broader diagonal
+regions reflecting coarser magnitude sensitivity rather than exact digit
+values.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\textwidth]{../runs/addition/operand_plots_by_pos/ctx5_ones(a)/combined_ones(a)}
+  \vspace{0.6em}
+  \includegraphics[width=\textwidth]{../runs/addition/operand_plots_by_pos/ctx8_ones(b)/combined_ones(b)}
+  \vspace{0.6em}
+  \includegraphics[width=\textwidth]{../runs/addition/operand_plots_by_pos/ctx9_=/combined_=}
+  \caption{%
+    Operand matrices $M_{\ell,k}[a,b]$ for the top-15 CLT features by
+    attribution edge weight at three token positions in
+    \texttt{calc:~36+59=}.
+    \textit{Top:} features captured at the ones digit of $a$ (position 4);
+    activation varies with $a \bmod 10$ and is flat in $b$.
+    \textit{Middle:} features at the ones digit of $b$ (position 7);
+    the role of the two operands is exchanged.
+    \textit{Bottom:} features at the \texttt{=} token (position 8),
+    showing diagonal sum contours, periodic point-cluster grids
+    (joint-modular sensitivity), and broader magnitude bands.
+    Axes span two-digit operands $a, b \in [10, 99]$.
+  }
+  \label{fig:operand-pos-sweep}
+\end{figure}
+
+The positional separation visible in Figure~\ref{fig:operand-pos-sweep}
+implies that ones-digit information is encoded before the two addends
+are jointly processed.  At the operand token positions, no feature in
+the top-15 shows sensitivity to both $a$ and $b$ simultaneously; the
+cross-operand joint representation appears only at the \texttt{=} token.
+This ordering is consistent with the view that the network first reads
+off each digit independently and only subsequently computes a function
+of their combination.
+
 \subsection{Experimental Scope}
 \label{subsec:addition-dataset}
 

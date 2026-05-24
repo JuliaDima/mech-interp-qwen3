@@ -11,12 +11,23 @@ Usage
 
 Registered concepts
 -------------------
-    gcd                 gcd(a,7)=7 vs gcd(a,7)=1
-    residue_class       a%7=1 vs a%7=6
-    transitive_ordering a>b>c True vs False
-    conservation        drop/bounce energy violation
-    causal_direction    A causes B vs B causes A
-    negation_scope      n not less than m True vs False
+    carry                   units digit carry in multi-digit addition
+    gcd                     gcd(a,7)=7 vs gcd(a,7)=1
+    residue_class           a%7=1 vs a%7=6
+    transitive_ordering     a>b>c True vs False
+    conservation            drop/bounce energy violation
+    causal_direction        A causes B vs B causes A
+    negation_scope          n not less than m True vs False
+    balanced_parentheses    balanced vs unbalanced bracket sequences
+    decimal_termination     terminating vs non-terminating decimal
+    doppler_shift           approaching vs receding source frequency
+    dot_product_sign        positive vs negative dot product
+    geometric_series        convergent vs divergent geometric series
+    momentum_conservation   momentum conserved vs violated
+    perfect_square          perfect square vs non-perfect square
+    syllogism               valid vs invalid syllogism
+    triangle_inequality     valid vs invalid triangle side lengths
+    wave_interference       constructive vs destructive interference
 """
 
 from __future__ import annotations
@@ -38,7 +49,10 @@ from experiments.concept_localization.analyze import (
     project_onto_features,
 )
 from experiments.concept_localization.causal_analysis import run_causal_analysis
-from experiments.concept_localization.extract_deltas_generic import extract_layer_deltas_generic
+from experiments.concept_localization.extract_deltas_generic import (
+    extract_layer_deltas_generic,
+    resolve_anchor_token,
+)
 from experiments.concept_localization.visualize import (
     plot_causal_efficiency,
     plot_causal_overlay,
@@ -63,6 +77,10 @@ _TRANSCODER_SET = "mwhanna/qwen3-4b-transcoders"
 
 # ── concept registry ──────────────────────────────────────────────────────────
 def _load_concept(name: str, n_per_template: int, seed: int):
+    if name == "carry":
+        from data.concept_datasets.carry_dataset import generate_carry_pairs
+
+        return generate_carry_pairs(n_per_template, seed=seed)
     if name == "gcd":
         from data.concept_datasets.gcd_dataset import generate_gcd_pairs
 
@@ -87,22 +105,74 @@ def _load_concept(name: str, n_per_template: int, seed: int):
         from data.concept_datasets.negation_scope_dataset import generate_negation_pairs
 
         return generate_negation_pairs(n_per_template, seed=seed)
+    if name == "balanced_parentheses":
+        from data.concept_datasets.balanced_parentheses_dataset import generate_parentheses_pairs
+
+        return generate_parentheses_pairs(n_per_template, seed=seed)
+    if name == "decimal_termination":
+        from data.concept_datasets.decimal_termination_dataset import generate_decimal_pairs
+
+        return generate_decimal_pairs(n_per_template, seed=seed)
+    if name == "doppler_shift":
+        from data.concept_datasets.doppler_shift_dataset import generate_doppler_pairs
+
+        return generate_doppler_pairs(n_per_template, seed=seed)
+    if name == "dot_product_sign":
+        from data.concept_datasets.dot_product_sign_dataset import generate_dot_pairs
+
+        return generate_dot_pairs(n_per_template, seed=seed)
+    if name == "geometric_series":
+        from data.concept_datasets.geometric_series_dataset import generate_geometric_pairs
+
+        return generate_geometric_pairs(n_per_template, seed=seed)
+    if name == "momentum_conservation":
+        from data.concept_datasets.momentum_conservation_dataset import generate_momentum_pairs
+
+        return generate_momentum_pairs(n_per_template, seed=seed)
+    if name == "perfect_square":
+        from data.concept_datasets.perfect_square_dataset import generate_perfect_square_pairs
+
+        return generate_perfect_square_pairs(n_per_template, seed=seed)
+    if name == "syllogism":
+        from data.concept_datasets.syllogism_dataset import generate_syllogism_pairs
+
+        return generate_syllogism_pairs(n_per_template, seed=seed)
+    if name == "triangle_inequality":
+        from data.concept_datasets.triangle_inequality_dataset import generate_triangle_pairs
+
+        return generate_triangle_pairs(n_per_template, seed=seed)
+    if name == "wave_interference":
+        from data.concept_datasets.wave_interference_dataset import generate_wave_pairs
+
+        return generate_wave_pairs(n_per_template, seed=seed)
     raise ValueError(f"Unknown concept: {name!r}")
 
 
 CONCEPTS = [
+    "carry",
     "gcd",
     "residue_class",
     "transitive_ordering",
     "conservation",
     "causal_direction",
     "negation_scope",
+    "balanced_parentheses",
+    "decimal_termination",
+    "doppler_shift",
+    "dot_product_sign",
+    "geometric_series",
+    "momentum_conservation",
+    "perfect_square",
+    "syllogism",
+    "triangle_inequality",
+    "wave_interference",
 ]
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument("--concept", required=True, choices=CONCEPTS)
+    parser.add_argument("--concept", required=True, choices=CONCEPTS + ["all"],
+                        help="Concept name, or 'all' to run every registered concept in sequence")
     parser.add_argument("--model", default=_MODEL)
     parser.add_argument("--transcoder_set", default=_TRANSCODER_SET)
     parser.add_argument("--dtype", default="bfloat16")
@@ -116,14 +186,12 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
         "--anchor_mode",
-        default="diff",
+        default="delimiter",
         help=(
-            "diff (default): anchor at last token where pos/neg differ. "
-            "last: anchor at final token. "
-            "delimiter: anchor at the last '=', ':', or newline. "
-            "pos_from_end:<n>: anchor n tokens from the end — set this to the "
-            "sweep-determined best position after running run_positional_attribution --sweep "
-            "(e.g. pos_from_end:2 anchors at the third-to-last token)."
+            "delimiter (default): anchor at the last structural delimiter ('=', ':', '?', ')') — "
+            "the token where the model closes the expression. Falls back to the last token if none found. "
+            "last: anchor at the absolute last token of the sequence. "
+            "<int>: explicit 0-indexed token position (e.g. '5' for ones digit of first operand in 'calc: 36+59=')."
         ),
     )
     parser.add_argument(
@@ -140,7 +208,21 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    suffix = f"_{args.anchor_mode}" if args.anchor_mode != "diff" else ""
+    if args.concept == "all":
+        for concept in CONCEPTS:
+            log.info("=" * 60)
+            log.info("Running concept: %s", concept)
+            log.info("=" * 60)
+            args.concept = concept
+            args.out_dir = None
+            _run_single(args)
+        return
+
+    _run_single(args)
+
+
+def _run_single(args) -> None:
+    suffix = f"_{args.anchor_mode}" if args.anchor_mode != "delimiter" else ""
     out_dir = Path(args.out_dir or f"runs/concept_localization/{args.concept}{suffix}")
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -236,6 +318,9 @@ def main() -> None:
     )
 
     # ── 6. Save ───────────────────────────────────────────────────────────────
+    anchor_pos, anchor_tok = resolve_anchor_token(
+        pairs[0].prompt_pos, model.tokenizer, args.anchor_mode
+    )
     results_json = {
         "config": {
             "concept": args.concept,
@@ -245,6 +330,8 @@ def main() -> None:
             "skipped": ld.skipped,
             "templates": tmpl_keys,
             "anchor_mode": args.anchor_mode,
+            "anchor_pos": anchor_pos,
+            "anchor_token": anchor_tok,
             "top_k": args.top_k,
         },
         "sharpness": {
