@@ -17,7 +17,7 @@ from experiments.concept_localization.concept_pair import ConceptPair
 MODULI = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
 
 TEMPLATES = {
-    "T0": ("{a}%{m}= ", "{a}%{m}= "),
+    "T0": ("calc: {a}%{m}= ", "calc: {a}%{m}= "),
     "T1": ("the remainder of {a} divided by {m} is: ", "the remainder of {a} divided by {m} is: "),
     "T2": ("what is {a} mod {m}? ", "what is {a} mod {m}? "),
 }

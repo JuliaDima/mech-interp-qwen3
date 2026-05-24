@@ -16,7 +16,7 @@ import random
 from experiments.concept_localization.concept_pair import ConceptPair
 
 TEMPLATES = {
-    "T0": ("{n} is a perfect square: ", "{n} is a perfect square: "),
+    "T0": ("calc: sqrt({n})= ", "calc: sqrt({n})= "),
     "T1": ("sqrt({n}) is an integer: ", "sqrt({n}) is an integer: "),
     "T2": ("is {n} a perfect square? ", "is {n} a perfect square? "),
 }

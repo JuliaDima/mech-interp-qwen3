@@ -17,7 +17,7 @@ import random
 from experiments.concept_localization.concept_pair import ConceptPair
 
 TEMPLATES = {
-    "T0": ("sides {a},{b},{c} form a triangle: ", "sides {a},{b},{c} form a triangle: "),
+    "T0": ("calc: {a}+{b}>{c}: ", "calc: {a}+{b}>{c}: "),
     "T1": (
         "can {a}, {b}, {c} be sides of a triangle? ",
         "can {a}, {b}, {c} be sides of a triangle? ",

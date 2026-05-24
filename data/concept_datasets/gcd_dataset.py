@@ -17,7 +17,7 @@ from experiments.concept_localization.concept_pair import ConceptPair
 DIVISORS = [3, 5, 7, 11]
 
 TEMPLATES = {
-    "T0": ("gcd({a},{g})= ", "gcd({a},{g})= "),
+    "T0": ("calc: gcd({a},{g})= ", "calc: gcd({a},{g})= "),
     "T1": ("the gcd of {a} and {g} is: ", "the gcd of {a} and {g} is: "),
     "T2": ("what is gcd({a},{g})? ", "what is gcd({a},{g})? "),
 }

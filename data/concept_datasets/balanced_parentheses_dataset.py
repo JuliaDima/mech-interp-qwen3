@@ -17,7 +17,7 @@ import random
 from experiments.concept_localization.concept_pair import ConceptPair
 
 TEMPLATES = {
-    "T0": ("seq {seq} balanced: ", "seq {seq} balanced: "),
+    "T0": ("balanced: {seq}: ", "balanced: {seq}: "),
     "T1": (
         "the sequence {seq} has matched brackets: ",
         "the sequence {seq} has matched brackets: ",

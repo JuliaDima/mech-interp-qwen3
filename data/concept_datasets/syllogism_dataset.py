@@ -39,15 +39,15 @@ _NONCE_TRIPLES: list[tuple[str, str, str]] = [
 ]
 
 TEMPLATES = {
-    "T0": (
-        "all {a} are {b}, all {b} are {c}, so all {a} are {c}: ",
-        "all {a} are {b}, all {c} are {b}, so all {a} are {c}: ",
-    ),
+    "T0": ("{a}⊂{b} and {b}⊂{c}, therefore {a}⊂{c}: ", "{a}⊂{b} and {c}⊂{b}, therefore {a}⊂{c}: "),
     "T1": (
         "every {a} is a {b}; every {b} is a {c}; so every {a} is a {c}: ",
         "every {a} is a {b}; every {c} is a {b}; so every {a} is a {c}: ",
     ),
-    "T2": ("{a}⊂{b} and {b}⊂{c}, therefore {a}⊂{c}: ", "{a}⊂{b} and {c}⊂{b}, therefore {a}⊂{c}: "),
+    "T2": (
+        "all {a} are {b}, all {b} are {c}, so all {a} are {c}: ",
+        "all {a} are {b}, all {c} are {b}, so all {a} are {c}: ",
+    ),
 }
 
 

@@ -14,7 +14,7 @@ import random
 from experiments.concept_localization.concept_pair import ConceptPair
 
 TEMPLATES = {
-    "T0": ("{a}>{b}>{c}: ", "{a}>{b}>{c}: "),
+    "T0": ("calc: {a}>{b}>{c}: ", "calc: {a}>{b}>{c}: "),
     "T1": (
         "{a} is greater than {b} which is greater than {c}: ",
         "{a} is greater than {b} which is greater than {c}: ",
