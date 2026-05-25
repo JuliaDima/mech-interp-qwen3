@@ -19,14 +19,14 @@ from experiments.concept_localization.concept_pair import ConceptPair
 DENOMINATORS = [2, 3, 4, 5, 6, 7, 8]
 
 TEMPLATES = {
-    "T0": ("geometric series ratio {r} converges: ", "geometric series ratio {r} converges: "),
+    "T0": ("Yes or No: geometric series ratio {r} converges: ", "Yes or No: geometric series ratio {r} converges: "),
     "T1": (
-        "the series with ratio {r} has a finite sum: ",
-        "the series with ratio {r} has a finite sum: ",
+        "Yes or No: the series with ratio {r} has a finite sum: ",
+        "Yes or No: the series with ratio {r} has a finite sum: ",
     ),
     "T2": (
-        "does the geometric series with ratio {r} converge? ",
-        "does the geometric series with ratio {r} converge? ",
+        "Yes or No: does the geometric series with ratio {r} converge? ",
+        "Yes or No: does the geometric series with ratio {r} converge? ",
     ),
 }
 
@@ -80,6 +80,8 @@ def generate_geometric_pairs(
                     prompt_neg=fmt_neg.format(r=r_neg),
                     label_pos="yes",
                     label_neg="no",
+                    predict_pos="Yes",
+                    predict_neg="No",
                     template=t,
                     meta={"p_pos": p_pos, "p_neg": p_neg, "q": q},
                 )

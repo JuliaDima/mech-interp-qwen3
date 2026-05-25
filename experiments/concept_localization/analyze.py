@@ -26,22 +26,31 @@ log = logging.getLogger(__name__)
 @dataclass
 class SharpnessResult:
     layers: list[int]
-    norms: list[float]
+    norms: list[float]          # ||δ_l|| / E[||h_l||] when mean_act_norm available, else raw
     inter_layer_cos: list[float]  # cos_sim(δ_l, δ_{l+1})
     peak_layer: int
-    sharpness_index: float  # fraction of norm mass at peak ± 1 layers
+    sharpness_index: float      # fraction of normalised norm mass at peak ± 1 layers
+    normalised: bool            # True when norms are activation-normalised
 
 
 @dataclass
 class FeatureMatch:
     feature_id: int
-    cos_sim: float
+    projection: float   # ‖δ_l‖ · cos_sim(δ_l, W_enc_f)
+    cos_sim: float      # cos_sim(δ_l, W_enc_f) — pure directional alignment in [-1, 1]
     layer: int
 
 
 def compute_sharpness(ld: LayerDeltas) -> SharpnessResult:
     layers = sorted(ld.delta.keys())
-    norms = [ld.delta[l].norm().item() for l in layers]
+    raw_norms = [ld.delta[l].norm().item() for l in layers]
+
+    # Normalise by mean activation norm when available to remove residual-stream growth bias
+    normalised = bool(ld.mean_act_norm)
+    if normalised:
+        norms = [r / ld.mean_act_norm.get(l, 1.0) for l, r in zip(layers, raw_norms)]
+    else:
+        norms = raw_norms
 
     inter_cos: list[float] = []
     for i in range(len(layers) - 1):
@@ -61,6 +70,7 @@ def compute_sharpness(ld: LayerDeltas) -> SharpnessResult:
         inter_layer_cos=inter_cos,
         peak_layer=peak_layer,
         sharpness_index=sharpness_index,
+        normalised=normalised,
     )
 
 
@@ -122,13 +132,15 @@ def project_onto_features(
             continue
 
         enc_norms = W_enc.norm(dim=1).clamp(min=1e-8)  # (n_features,)
-        cos_sims = (W_enc @ delta) / (enc_norms * delta_norm)  # (n_features,)
+        projections = (W_enc @ delta) / enc_norms       # ‖δ_l‖ · cos_sim
+        cos_sims = projections / delta_norm             # pure cos_sim in [-1, 1]
 
-        k = min(top_k, cos_sims.numel())
-        topk_vals, topk_ids = cos_sims.abs().topk(k)
+        k = min(top_k, projections.numel())
+        topk_vals, topk_ids = projections.abs().topk(k)
         result[layer] = [
             FeatureMatch(
                 feature_id=int(topk_ids[i].item()),
+                projection=float(projections[topk_ids[i]].item()),
                 cos_sim=float(cos_sims[topk_ids[i]].item()),
                 layer=layer,
             )
@@ -136,10 +148,12 @@ def project_onto_features(
         ]
 
         log.info(
-            "Layer %2d  top feature: id=%d  cos_sim=%.3f",
+            "Layer %2d  top feature: id=%d  projection=%.3f",
             layer,
             result[layer][0].feature_id,
-            result[layer][0].cos_sim,
+            result[layer][0].projection,
         )
 
     return result
+
+

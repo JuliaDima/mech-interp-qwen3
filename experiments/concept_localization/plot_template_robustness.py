@@ -77,26 +77,43 @@ CONCEPTS = [
 ]
 
 
-def load_concept_data(subdir: str) -> tuple[dict[str, np.ndarray], str] | None:
-    """Return ({template_key: norm_array}, anchor_token) or None if data missing."""
+def load_concept_data(
+    subdir: str,
+) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray], str] | None:
+    """Return (raw_norms, act_norms, anchor_token) or None if data missing.
+
+    raw_norms[key][l]  = ‖δ_l‖
+    act_norms[key][l]  = ‖δ_l‖ / E[‖h_l‖]   (activation-normalised)
+    """
     deltas_path = BASE / subdir / "deltas.pt"
     if not deltas_path.exists():
         return None
     data = torch.load(deltas_path, map_location="cpu")
-    norms: dict[str, np.ndarray] = {}
-    for key, layer_dict in data.items():
-        arr = np.zeros(N_LAYERS)
-        for layer, vec in layer_dict.items():
-            arr[int(layer)] = float(vec.float().norm())
-        norms[key] = arr
 
+    mean_act_norm: dict[int, float] = {}
     anchor_tok = "?"
     results_path = BASE / subdir / "results.json"
     if results_path.exists():
-        cfg = json.loads(results_path.read_text()).get("config", {})
+        res = json.loads(results_path.read_text())
+        cfg = res.get("config", {})
         anchor_tok = cfg.get("anchor_token", cfg.get("anchor_mode", "?"))
+        mean_act_norm = {int(k): float(v) for k, v in res.get("mean_act_norm", {}).items()}
 
-    return norms, anchor_tok
+    raw_norms: dict[str, np.ndarray] = {}
+    act_norms: dict[str, np.ndarray] = {}
+    for key, layer_dict in data.items():
+        arr_raw = np.zeros(N_LAYERS)
+        arr_act = np.zeros(N_LAYERS)
+        for layer, vec in layer_dict.items():
+            l = int(layer)
+            raw = float(vec.float().norm())
+            arr_raw[l] = raw
+            scale = mean_act_norm.get(l, 1.0)
+            arr_act[l] = raw / scale if scale > 1e-8 else raw
+        raw_norms[key] = arr_raw
+        act_norms[key] = arr_act
+
+    return raw_norms, act_norms, anchor_tok
 
 
 def norm_array(arr: np.ndarray) -> np.ndarray:
@@ -105,13 +122,14 @@ def norm_array(arr: np.ndarray) -> np.ndarray:
 
 
 concept_data: dict[str, dict[str, np.ndarray]] = {}
+concept_act_data: dict[str, dict[str, np.ndarray]] = {}
 concept_anchor: dict[str, str] = {}
 for key, label, group, color, ls, lw in CONCEPTS:
     result = load_concept_data(key)
     if result is None:
         print(f"  [warn] {key}: no deltas.pt, skipping")
         continue
-    concept_data[key], concept_anchor[key] = result
+    concept_data[key], concept_act_data[key], concept_anchor[key] = result
 
 available = [
     (key, label, group, color, ls, lw)
@@ -129,13 +147,16 @@ fig, axes = plt.subplots(
 )
 axes_flat = axes.flatten()
 
+_ACT_COLOR = "#27ae60"
+
 for idx, (key, label, group, color, ls, lw) in enumerate(available):
     ax = axes_flat[idx]
     norms = concept_data[key]
+    act_norms = concept_act_data[key]
 
-    tmpl_arrays = [norms[t] for t in TMPL_KEYS if t in norms]
-    tmpl_normed = [norm_array(a) for a in tmpl_arrays]
     tmpl_keys_present = [t for t in TMPL_KEYS if t in norms]
+    tmpl_arrays = [norms[t] for t in tmpl_keys_present]
+    tmpl_normed = [norm_array(a) for a in tmpl_arrays]
 
     for t, a_norm in zip(tmpl_keys_present, tmpl_normed, strict=False):
         ax.plot(
@@ -146,15 +167,23 @@ for idx, (key, label, group, color, ls, lw) in enumerate(available):
 
     mean_norm = np.stack(tmpl_normed).mean(0)
     std_norm = np.stack(tmpl_normed).std(0)
-    ax.plot(LAYERS, mean_norm, color=color, linestyle="-", linewidth=2.0, label="mean", zorder=5)
+    ax.plot(LAYERS, mean_norm, color=color, linestyle="-", linewidth=2.0, label=r"$\|\delta_l\| / \max_l(\|\delta_l\|)$", zorder=5)
     ax.fill_between(
         LAYERS, mean_norm - std_norm, mean_norm + std_norm,
         color=color, alpha=0.18, linewidth=0,
     )
 
+    # Activation-normalised mean: ‖δ‖ / E[‖h‖] / max
+    act_arrays = [act_norms[t] for t in tmpl_keys_present if t in act_norms]
+    if act_arrays:
+        act_normed = [norm_array(a) for a in act_arrays]
+        act_mean = np.stack(act_normed).mean(0)
+        ax.plot(LAYERS, act_mean, color=_ACT_COLOR, linestyle="--",
+                linewidth=1.6, label=r"$(\|\delta_l\| / \mathbb{E}\|\mathbf{h}_l\|) / \max_l(\|\delta_l\| / \mathbb{E}\|\mathbf{h}_l\|)$", zorder=6)
+
     ax.set_title(label, fontsize=8.5, pad=4)
     ax.set_xlabel("Layer", fontsize=7.5)
-    ax.set_ylabel("‖δ‖ / max", fontsize=7.5)
+    ax.set_ylabel("Normalised to [0, 1]", fontsize=7.5)
     ax.set_xlim(-0.5, 35.5)
     ax.set_xticks(range(0, 36, 9))
     ax.set_ylim(-0.05, 1.15)
@@ -183,7 +212,10 @@ for idx, (key, label, group, color, ls, lw) in enumerate(available):
         legend_handles = [
             Line2D([0], [0], color=_TEMPLATE_COLORS[t], linestyle="--", linewidth=0.85, label=t)
             for t in tmpl_keys_present
-        ] + [Line2D([0], [0], color=color, linestyle="-", linewidth=2.0, label="mean")]
+        ] + [
+            Line2D([0], [0], color=color, linestyle="-", linewidth=2.0, label=r"$\|\delta_l\| / \max_l(\|\delta_l\|)$"),
+            Line2D([0], [0], color=_ACT_COLOR, linestyle="--", linewidth=1.6, label=r"$(\|\delta_l\| / \mathbb{E}\|\mathbf{h}_l\|) / \max_l(\|\delta_l\| / \mathbb{E}\|\mathbf{h}_l\|)$"),
+        ]
         ax.legend(handles=legend_handles, fontsize=6.5, loc="upper left",
                   framealpha=0.85, edgecolor="#cccccc")
 

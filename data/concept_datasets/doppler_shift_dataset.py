@@ -41,16 +41,16 @@ _SOURCES = [
 
 TEMPLATES = {
     "T0": (
-        "{src} nears, observed frequency exceeds emitted: ",
-        "{src} departs, observed frequency exceeds emitted: ",
+        "Yes or No: {src} nears, observed frequency exceeds emitted: ",
+        "Yes or No: {src} departs, observed frequency exceeds emitted: ",
     ),
     "T1": (
-        "{src} is incoming, measured pitch above emitted pitch: ",
-        "{src} is outgoing, measured pitch above emitted pitch: ",
+        "Yes or No: {src} is incoming, measured pitch above emitted pitch: ",
+        "Yes or No: {src} is outgoing, measured pitch above emitted pitch: ",
     ),
     "T2": (
-        "{src} inbound, pitch measured higher than emitted: ",
-        "{src} outbound, pitch measured higher than emitted: ",
+        "Yes or No: {src} inbound, pitch measured higher than emitted: ",
+        "Yes or No: {src} outbound, pitch measured higher than emitted: ",
     ),
 }
 
@@ -94,6 +94,8 @@ def generate_doppler_pairs(
                     prompt_neg=fmt_neg.format(src=src),
                     label_pos="yes",
                     label_neg="no",
+                    predict_pos="Yes",
+                    predict_neg="No",
                     template=t,
                     meta={"src": src},
                 )

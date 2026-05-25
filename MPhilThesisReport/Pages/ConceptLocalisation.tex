@@ -188,7 +188,87 @@ format, providing additional evidence about the depth at which template-invarian
 encoding begins. This consistency check is the analogue, at the level of individual
 sub-operations, of the cross-template steering evaluation in Chapter~\ref{sec:improving}.
 
-\section{Broader Concept Suite}
+\section{Causal Validation}
+\label{sec:causal_validation}
+
+The delta vectors and sharpness metrics of the preceding sections characterise the
+\textit{representational} structure of each concept, quantifying where a separable direction
+exists in residual-stream space. They do not, however, establish that the extracted
+representation is causally upstream of the model's output. A direction may be strongly
+present at a given layer without being mechanistically connected to the prediction. Two
+complementary interventions test this causal claim directly, and are applied to every concept
+in the suite.
+
+\subsection{Activation Patching}
+\label{sec:act_patching}
+
+Activation patching~\citep{meng2022locating} isolates the causal contribution of a
+specific layer by replacing a single intermediate representation and measuring the
+resulting change in output. For each contrastive pair $(x^+, x^-)$ and each layer $l$,
+the positive prompt's residual-stream vector at the anchor position $t^*$ is transplanted
+into the negative prompt's forward pass. The score is the induced change in the
+logit margin at the final prediction position,
+\begin{equation}
+S_l^{\mathrm{patch}}
+\;=\;
+\Bigl[
+  f_{\mathrm{pos}}\!\left(\tilde{x}^-_{[l]}\right) - f_{\mathrm{neg}}\!\left(\tilde{x}^-_{[l]}\right)
+\Bigr]
+-
+\Bigl[
+  f_{\mathrm{pos}}\!\left(x^-\right) - f_{\mathrm{neg}}\!\left(x^-\right)
+\Bigr],
+\label{eq:act_patching}
+\end{equation}
+where $\tilde{x}^-_{[l]}$ denotes the negative prompt with $h_{l,t^*}(x^-)$ replaced
+by $h_{l,t^*}(x^+)$, and $f_{\mathrm{pos}}$, $f_{\mathrm{neg}}$ are the logits for
+the positive and negative answer tokens at the last position. A large positive $S_l^{\mathrm{patch}}$
+indicates that the layer-$l$ concept representation, when inserted into the negative
+context, is sufficient to shift the model's output toward the positive answer. The metric
+therefore directly quantifies the \textit{causal sufficiency} of the layer-$l$ encoding
+for driving the correct response.
+
+\subsection{Gradient Dot Delta}
+\label{sec:grad_dot_delta}
+
+Activation patching requires a full forward pass for each patched layer, making it
+the more expensive of the two methods. A cheaper first-order approximation is obtained
+by differentiating the output margin with respect to the residual stream at the negative
+prompt's operating point. For each pair and each layer $l$, a single forward pass on
+$x^-$ is followed by a single backward pass to compute the gradient of the margin
+with respect to $h_{l,t^*}(x^-)$. The score is the inner product of this gradient with
+the precomputed concept delta,
+\begin{equation}
+S_l^{\mathrm{grad}}
+\;=\;
+\nabla_{h_{l,t^*}} m\!\left(x^-\right) \cdot \delta_l,
+\label{eq:grad_dot_delta}
+\end{equation}
+where $m(x) = f_{\mathrm{pos}}(x) - f_{\mathrm{neg}}(x)$ is the logit margin evaluated
+at prompt $x$, and the gradient is computed at the negative prompt's residual stream.
+
+The relationship between $S_l^{\mathrm{grad}}$ and $S_l^{\mathrm{patch}}$ is made
+precise by a first-order Taylor expansion of the patched margin around the unpatched
+activation,
+\begin{equation}
+m\!\left(\tilde{x}^-_{[l]}\right)
+\;\approx\;
+m\!\left(x^-\right)
++ \nabla_{h_{l,t^*}} m\!\left(x^-\right)
+  \cdot \bigl(h_{l,t^*}(x^+) - h_{l,t^*}(x^-)\bigr).
+\label{eq:taylor_patch}
+\end{equation}
+Taking the expectation over pairs and using $\delta_l = \mathbb{E}[h_{l,t^*}(x^+)] - \mathbb{E}[h_{l,t^*}(x^-)]$ gives
+$\mathbb{E}[S_l^{\mathrm{patch}}] \approx S_l^{\mathrm{grad}}$ to first order, provided the gradient
+varies little across the pair distribution. The gradient-dot-delta score is therefore the
+linearised, single-pass analogue of activation patching; agreement between the two methods
+at any given layer constitutes evidence that the output function is approximately
+linear in the relevant neighbourhood of residual-stream space. Systematic divergence
+indicates nonlinearity or higher-order interactions that the gradient cannot capture.
+Both methods are anchored at the same position $t^*$ used for delta extraction throughout
+this chapter.
+
+
 \label{sec:concept_suite}
 
 The contrastive methodology described in the preceding sections is not specific to carry. To test
@@ -298,6 +378,40 @@ Across all 36 layers, the 540 selected feature--layer pairs draw from 539 distin
 The finding is consistent with the phase structure and cross-layer geometry described above. The block-diagonal similarity matrix in Figure~\ref{fig:cross_layer_sim} shows that within-phase directional alignment is high (above 0.90), predicting that features should be more stable within a phase than across phase transitions. The scatter confirms this qualitatively: visible banding in feature identity is apparent within each phase region, with the sharpest changeovers at the two transition boundaries.
 
 The result also informs the scope of feature-level intervention. If carry were implemented through a small set of persistent features, a transcoder-based surgical edit targeting those features would be a natural next step. The layer-specific basis implies instead that any feature-level intervention would need to target a different subset at each depth. This reinforces the conclusion of Chapter~\ref{sec:improving} that computation-mode layer selection, rather than individual feature targeting, is the more tractable lever for influencing carry processing in a large pre-trained model.
+
+\subsection{Causal Validation}
+\label{sec:causal_results}
+
+Figure~\ref{fig:causal_analysis} shows the activation patching scores $S_l^{\mathrm{patch}}$
+and gradient-dot-delta scores $S_l^{\mathrm{grad}}$ across all 36 layers for all concepts in
+the suite, with the delta norm of each concept overlaid for reference. The two curves are in
+close agreement for every concept, confirming that the output margin is approximately linear
+in the extracted concept direction and that the gradient-dot-delta approximation is reliable
+in this setting.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{../runs/concept_localization/carry/causal_scores.png}
+\caption{Causal analysis scores across layers for all concepts. Top: activation patching scores
+$S_l^{\mathrm{patch}}$ (equation~\ref{eq:act_patching}) and gradient-dot-delta scores
+$S_l^{\mathrm{grad}}$ (equation~\ref{eq:grad_dot_delta}), averaged over pairs with one
+standard deviation shaded. Bottom: normalised delta norm $\lVert \delta_l \rVert / \max_l(\lVert \delta_l \rVert)$
+and its activation-normalised counterpart $(\lVert \delta_l \rVert / \mathbb{E}\lVert \mathbf{h}_l \rVert) / \max_l(\lVert \delta_l \rVert / \mathbb{E}\lVert \mathbf{h}_l \rVert)$,
+shown for reference. Phase boundaries for carry are marked with vertical dashed lines.}
+\label{fig:causal_analysis}
+\end{figure}
+
+Across all concepts, both scores are near zero in the early layers, where representational
+delta norms are also small, and rise sharply at the layer where each concept's norm profile
+first stabilises. The peak causal influence consistently precedes the norm peak at late layers,
+reinforcing the interpretation that late-network growth in $\lVert \delta_l \rVert$ reflects
+output preparation rather than an increase in computational relevance. For carry specifically,
+the scores decay toward zero across Phase III in a pattern that mirrors the steering
+effectiveness results of Section~\ref{sec:carry_steer_relation}, providing a gradient-based
+corroboration of the phase boundary identified by the contrastive analysis. The broader
+concept suite shows a qualitatively similar pattern: causal influence peaks earlier than the
+representational norm, and late-layer causal scores are suppressed relative to their
+representational magnitude.
 
 \section{Relation to Steering Effectiveness}
 \label{sec:carry_steer_relation}

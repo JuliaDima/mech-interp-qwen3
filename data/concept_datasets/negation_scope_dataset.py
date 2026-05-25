@@ -13,9 +13,9 @@ import random
 from experiments.concept_localization.concept_pair import ConceptPair
 
 TEMPLATES = {
-    "T0": ("{m} is not greater than {n}: ", "{m} is not greater than {n}: "),
-    "T1": ("{m} does not exceed {n}: ", "{m} does not exceed {n}: "),
-    "T2": ("is {m} at most {n}? ", "is {m} at most {n}? "),
+    "T0": ("True or False: {m} is not greater than {n}: ", "True or False: {m} is not greater than {n}: "),
+    "T1": ("True or False: {m} does not exceed {n}: ", "True or False: {m} does not exceed {n}: "),
+    "T2": ("True or False: is {m} at most {n}? ", "True or False: is {m} at most {n}? "),
 }
 
 
@@ -68,6 +68,8 @@ def generate_negation_pairs(
                     prompt_neg=fmt_neg.format(m=m, n=n_neg),
                     label_pos="True",
                     label_neg="False",
+                    predict_pos="True",
+                    predict_neg="False",
                     template=t,
                     meta={"m": m, "n_pos": n_pos, "n_neg": n_neg},
                 )

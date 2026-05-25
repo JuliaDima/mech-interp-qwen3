@@ -20,16 +20,16 @@ WAVELENGTHS = [2, 4, 6]
 
 TEMPLATES = {
     "T0": (
-        "wavelength {lam}, path diff {d}, constructive: ",
-        "wavelength {lam}, path diff {d}, constructive: ",
+        "Yes or No: wavelength {lam}, path diff {d}, constructive: ",
+        "Yes or No: wavelength {lam}, path diff {d}, constructive: ",
     ),
     "T1": (
-        "waves lambda={lam} path={d} interfere constructively: ",
-        "waves lambda={lam} path={d} interfere constructively: ",
+        "Yes or No: waves lambda={lam} path={d} interfere constructively: ",
+        "Yes or No: waves lambda={lam} path={d} interfere constructively: ",
     ),
     "T2": (
-        "is path difference {d} a multiple of wavelength {lam}? ",
-        "is path difference {d} a multiple of wavelength {lam}? ",
+        "Yes or No: is path difference {d} a multiple of wavelength {lam}? ",
+        "Yes or No: is path difference {d} a multiple of wavelength {lam}? ",
     ),
 }
 
@@ -80,6 +80,8 @@ def generate_wave_pairs(
                     prompt_neg=fmt_neg.format(lam=lam, d=d_neg),
                     label_pos="yes",
                     label_neg="no",
+                    predict_pos="Yes",
+                    predict_neg="No",
                     template=t,
                     meta={"lam": lam, "d_pos": d_pos, "d_neg": d_neg, "k_pos": k_pos},
                 )

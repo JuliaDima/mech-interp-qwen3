@@ -23,3 +23,5 @@ class ConceptPair:
     label_neg: str = ""
     template: str = "T0"
     meta: dict = field(default_factory=dict)
+    predict_pos: str = ""  # expected model output for causal analysis; defaults to label_pos
+    predict_neg: str = ""  # expected model output for causal analysis; defaults to label_neg

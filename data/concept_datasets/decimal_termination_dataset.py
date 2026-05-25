@@ -78,9 +78,9 @@ _NEG = [
 ]
 
 TEMPLATES = {
-    "T0": ("calc: 1/{n}= ", "calc: 1/{n}= "),
-    "T1": ("1 divided by {n} has a finite decimal: ", "1 divided by {n} has a finite decimal: "),
-    "T2": ("does 1/{n} have a terminating decimal? ", "does 1/{n} have a terminating decimal? "),
+    "T0": ("Yes or No: 1/{n} terminates: ", "Yes or No: 1/{n} terminates: "),
+    "T1": ("Yes or No: 1 divided by {n} has a finite decimal: ", "Yes or No: 1 divided by {n} has a finite decimal: "),
+    "T2": ("Yes or No: does 1/{n} have a terminating decimal? ", "Yes or No: does 1/{n} have a terminating decimal? "),
 }
 
 
@@ -125,6 +125,8 @@ def generate_decimal_pairs(
                     prompt_neg=fmt_neg.format(n=n_neg),
                     label_pos="yes",
                     label_neg="no",
+                    predict_pos="Yes",
+                    predict_neg="No",
                     template=t,
                     meta={"n_pos": n_pos, "n_neg": n_neg},
                 )

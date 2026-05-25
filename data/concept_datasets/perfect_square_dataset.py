@@ -1,7 +1,10 @@
 """Perfect square concept dataset.
 
-Pos: n = k² for some integer k → "yes"
-Neg: n is not a perfect square → "no"
+Pos: n = k² for some integer k → "Yes"
+Neg: n is not a perfect square → "No"
+
+All templates use "Yes or No: " prefix so the model reliably outputs "Yes" or
+"No" rather than a number or other continuation.
 
 n_pos = k² for k in [2, 31]; n_neg = n_pos + offset for a random
 small offset in {-3,-2,-1,1,2,3} that avoids other perfect squares.
@@ -16,9 +19,9 @@ import random
 from experiments.concept_localization.concept_pair import ConceptPair
 
 TEMPLATES = {
-    "T0": ("calc: sqrt({n})= ", "calc: sqrt({n})= "),
-    "T1": ("sqrt({n}) is an integer: ", "sqrt({n}) is an integer: "),
-    "T2": ("is {n} a perfect square? ", "is {n} a perfect square? "),
+    "T0": ("True or False: sqrt({n}) is integer: ", "True or False: sqrt({n}) is integer: "),
+    "T1": ("Yes or No: sqrt({n}) is an integer: ", "Yes or No: sqrt({n}) is an integer: "),
+    "T2": ("Yes or No: is {n} a perfect square? ", "Yes or No: is {n} a perfect square? "),
 }
 
 
@@ -74,12 +77,16 @@ def generate_perfect_square_pairs(
             if counts[t] >= n_per_template:
                 continue
             fmt_pos, fmt_neg = TEMPLATES[t]
+            pred_pos = "True" if t == "T0" else "Yes"
+            pred_neg = "False" if t == "T0" else "No"
             pairs.append(
                 ConceptPair(
                     prompt_pos=fmt_pos.format(n=n_pos),
                     prompt_neg=fmt_neg.format(n=n_neg),
                     label_pos="yes",
                     label_neg="no",
+                    predict_pos=pred_pos,
+                    predict_neg=pred_neg,
                     template=t,
                     meta={"k": k, "n_pos": n_pos, "n_neg": n_neg},
                 )

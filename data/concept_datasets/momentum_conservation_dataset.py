@@ -18,14 +18,14 @@ from experiments.concept_localization.concept_pair import ConceptPair
 
 TEMPLATES = {
     "T0": (
-        "v1={v1}→{v1a}, v2={v2}→{v2a}. conserved: ",
-        "v1={v1}→{v1a}, v2={v2}→{v2a}. conserved: ",
+        "Yes or No: v1={v1}→{v1a}, v2={v2}→{v2a}. conserved: ",
+        "Yes or No: v1={v1}→{v1a}, v2={v2}→{v2a}. conserved: ",
     ),
     "T1": (
-        "object 1 goes {v1} then {v1a}, object 2 goes {v2} then {v2a}. momentum conserved: ",
-        "object 1 goes {v1} then {v1a}, object 2 goes {v2} then {v2a}. momentum conserved: ",
+        "Yes or No: object 1 goes {v1} then {v1a}, object 2 goes {v2} then {v2a}. momentum conserved: ",
+        "Yes or No: object 1 goes {v1} then {v1a}, object 2 goes {v2} then {v2a}. momentum conserved: ",
     ),
-    "T2": ("does {v1a}+{v2a} equal {v1}+{v2}? ", "does {v1a}+{v2a} equal {v1}+{v2}? "),
+    "T2": ("Yes or No: does {v1a}+{v2a} equal {v1}+{v2}? ", "Yes or No: does {v1a}+{v2a} equal {v1}+{v2}? "),
 }
 
 
@@ -82,6 +82,8 @@ def generate_momentum_pairs(
                     prompt_neg=fmt_neg.format(v1=v1, v2=v2, v1a=v1a, v2a=v2a_neg),
                     label_pos="yes",
                     label_neg="no",
+                    predict_pos="Yes",
+                    predict_neg="No",
                     template=t,
                     meta={
                         "v1": v1,

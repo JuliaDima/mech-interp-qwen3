@@ -20,12 +20,12 @@ from experiments.concept_localization.concept_pair import ConceptPair
 TEMPLATES = {
     "T0": ("calc: ({a1},{a2})·({b1},{b2})= ", "calc: ({a1},{a2})·({b1},{b2})= "),
     "T1": (
-        "vectors ({a1},{a2}) and ({b1},{b2}) form an acute angle: ",
-        "vectors ({a1},{a2}) and ({b1},{b2}) form an acute angle: ",
+        "Yes or No: vectors ({a1},{a2}) and ({b1},{b2}) form an acute angle: ",
+        "Yes or No: vectors ({a1},{a2}) and ({b1},{b2}) form an acute angle: ",
     ),
     "T2": (
-        "dot product of ({a1},{a2}) and ({b1},{b2}) is positive: ",
-        "dot product of ({a1},{a2}) and ({b1},{b2}) is positive: ",
+        "Yes or No: dot product of ({a1},{a2}) and ({b1},{b2}) is positive: ",
+        "Yes or No: dot product of ({a1},{a2}) and ({b1},{b2}) is positive: ",
     ),
 }
 
@@ -73,12 +73,22 @@ def generate_dot_pairs(
             if counts[t] >= n_per_template:
                 continue
             fmt_pos, fmt_neg = TEMPLATES[t]
+            dot_pos = a1 * b1_pos + a2 * b2
+            dot_neg = a1 * b1_neg + a2 * b2
+            if t == "T0":
+                pred_pos = str(dot_pos)
+                pred_neg = str(dot_neg)
+            else:
+                pred_pos = "Yes"
+                pred_neg = "No"
             pairs.append(
                 ConceptPair(
                     prompt_pos=fmt_pos.format(a1=a1, a2=a2, b1=b1_pos, b2=b2),
                     prompt_neg=fmt_neg.format(a1=a1, a2=a2, b1=b1_neg, b2=b2),
                     label_pos="yes",
                     label_neg="no",
+                    predict_pos=pred_pos,
+                    predict_neg=pred_neg,
                     template=t,
                     meta={"a1": a1, "a2": a2, "b2": b2, "b1_pos": b1_pos, "b1_neg": b1_neg},
                 )

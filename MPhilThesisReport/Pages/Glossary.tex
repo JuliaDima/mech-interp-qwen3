@@ -68,4 +68,18 @@
     Values close to one indicate a localised representation; values close to $3/L$ indicate
     a representation that is uniformly distributed across the network's $L$ layers.
 
+
+  \item[Activation patching] A causal intervention technique in which a single intermediate
+    representation, here the residual-stream vector at a chosen layer and token position,
+    is replaced by the corresponding value from a different input.
+    The resulting change in output logits quantifies the causal sufficiency of that
+    representation for driving the model's prediction.
+
+  \item[Gradient-dot-delta] A first-order approximation to activation patching obtained by
+    computing the inner product of the output-margin gradient with respect to a layer's
+    residual stream, evaluated at the baseline input, and the concept delta vector at that layer.
+    The approximation is exact when the output margin is linear in the residual stream;
+    agreement with activation patching in practice confirms that the relevant neighbourhood
+    is approximately linear.
+
 \end{description}

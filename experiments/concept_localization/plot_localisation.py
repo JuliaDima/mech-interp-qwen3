@@ -1,150 +1,211 @@
-"""Visualisations for the carry concept localisation results.
+"""Concept localisation visualisations.
 
-Produces:
-  cross_layer_sim.pdf   — 36×36 heatmap of cos(δ_i, δ_j)
-  phase_annotated.pdf   — norm trajectory + template consistency with phase regions
+Produces two figures per concept run:
+  cross_layer_sim.pdf   — per-template heatmaps of cos(δ_i, δ_j)
+  template_consistency.pdf   — template consistency
+
+Usage
+-----
+    python -m experiments.concept_localization.plot_localisation
+    python -m experiments.concept_localization.plot_localisation --concept residue_class
+    python -m experiments.concept_localization.plot_localisation --concept all
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from pathlib import Path
 
 import matplotlib
-
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn.functional as F
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from plot_style import GRAY, MAUVE, NAVY, RED, TEAL, VIOLET, apply
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(_REPO_ROOT))
+
+from experiments.concept_localization.run_concept import CONCEPTS, SYMBOLIC_SUBSET
+from experiments.plot_style import CMAP_DIV, GRAY, MAUVE, NAVY, RED, TEAL, VIOLET, apply
 
 apply()
 
-OUT_DIR = Path("runs/concept_localization/carry")
-RESULTS = OUT_DIR / "results.json"
-DELTAS = OUT_DIR / "deltas.pt"
+_TMPL_COLORS = {"T0": NAVY, "T1": TEAL, "T2": MAUVE}
+_RUNS = _REPO_ROOT / "runs" / "concept_localization"
 
-# ── load ──────────────────────────────────────────────────────────────────────
-with open(RESULTS) as f:
-    res = json.load(f)
 
-deltas_raw = torch.load(DELTAS, map_location="cpu")
-norms = np.array([res["sharpness"]["norm_by_layer"][str(l)] for l in range(36)])
-layers = np.arange(36)
+def _load(concept_dir: Path):
+    results_path = concept_dir / "results.json"
+    deltas_path = concept_dir / "deltas.pt"
+    if not results_path.exists() or not deltas_path.exists():
+        return None, None
+    with open(results_path) as f:
+        res = json.load(f)
+    deltas = torch.load(deltas_path, map_location="cpu", weights_only=False)
+    return res, deltas
 
-template_norms = {}
-for t in ("T0", "T1", "T2"):
-    vecs = torch.stack([deltas_raw[t][l].float() for l in range(36)])
-    template_norms[t] = vecs.norm(dim=-1).numpy()
 
-t_cons = res["template_consistency"]
-tc_01 = np.array([t_cons[str(l)]["T0_vs_T1"] for l in range(36)])
-tc_02 = np.array([t_cons[str(l)]["T0_vs_T2"] for l in range(36)])
-tc_12 = np.array([t_cons[str(l)]["T1_vs_T2"] for l in range(36)])
+def _vecs(deltas: dict, key: str, n_layers: int) -> torch.Tensor:
+    """Stack layer deltas for a given key into (n_layers, d_model)."""
+    bucket = deltas.get(key, {})
+    d_model = next(iter(bucket.values())).shape[-1] if bucket else 1
+    rows = []
+    for l in range(n_layers):
+        rows.append(bucket[l].float() if l in bucket else torch.zeros(d_model))
+    return torch.stack(rows)
 
-all_vecs = torch.stack([deltas_raw["all"][l].float() for l in range(36)])
-all_vecs_n = F.normalize(all_vecs, dim=-1)
 
-# ── Figure 1: cross-layer similarity matrix ───────────────────────────────────
-cos_mat = (all_vecs_n @ all_vecs_n.T).numpy()
+def plot_cross_layer_sim(concept: str) -> None:
+    out_dir = _RUNS / concept
+    res, deltas = _load(out_dir)
+    if res is None:
+        print(f"  [skip] {concept}: no data")
+        return
 
-fig, ax = plt.subplots(figsize=(6.5, 5.5))
-im = ax.imshow(cos_mat, vmin=0.7, vmax=1.0, cmap="Blues", aspect="auto", origin="upper")
-cb = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-cb.set_label(r"$\cos(\delta_i,\, \delta_j)$", fontsize=10)
-cb.ax.tick_params(labelsize=8)
+    cfg = res.get("config", {})
+    anchor_tok = cfg.get("anchor_token", cfg.get("anchor_mode", "?"))
+    n_layers = len(res["sharpness"]["norm_by_layer"])
+    tmpl_keys = [k for k in deltas if k != "all"]
+    keys = ["all"] + tmpl_keys
+    n_panels = len(keys)
 
-for boundary in [4.5, 18.5]:
-    ax.axhline(boundary, color="white", lw=1.5, ls="--", alpha=0.8)
-    ax.axvline(boundary, color="white", lw=1.5, ls="--", alpha=0.8)
+    fig, axes = plt.subplots(1, n_panels, figsize=(4.5 * n_panels, 4.5),
+                             gridspec_kw={"wspace": 0.4})
+    if n_panels == 1:
+        axes = [axes]
 
-ax.set_xlabel("Layer $j$", fontsize=10)
-ax.set_ylabel("Layer $i$", fontsize=10)
-ax.set_title(r"Cross-layer cosine similarity of carry delta $\delta_l$", pad=8)
-tick_pos = [0, 5, 10, 15, 20, 25, 30, 35]
-ax.set_xticks(tick_pos)
-ax.set_yticks(tick_pos)
+    for ax, key in zip(axes, keys):
+        D = _vecs(deltas, key, n_layers)
+        D_n = F.normalize(D.float(), dim=-1)
+        mat = (D_n @ D_n.T).numpy()
 
-for lo, hi, label in [(0, 4, "I"), (5, 18, "II"), (19, 35, "III")]:
-    mid = (lo + hi) / 2
-    ax.text(
-        mid,
-        mid,
-        label,
-        ha="center",
-        va="center",
-        fontsize=12,
-        color="white",
-        fontweight="bold",
-        alpha=0.85,
-    )
+        vmin = float(np.percentile(mat, 2))
+        vmax = 1.0
+        cmap = "Blues" if vmin >= 0 else CMAP_DIV
+        if vmin < 0:
+            abs_max = max(abs(vmin), vmax)
+            vmin, vmax = -abs_max, abs_max
 
-ax.grid(False)
-fig.savefig(OUT_DIR / "cross_layer_sim.pdf")
-plt.close(fig)
-print("Saved cross_layer_sim.pdf")
+        im = ax.imshow(mat, vmin=vmin, vmax=vmax, cmap=cmap,
+                       aspect="auto", origin="upper", interpolation="nearest")
+        cb = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        cb.set_label(r"$\cos(\delta_i,\, \delta_j)$", fontsize=8)
+        cb.ax.tick_params(labelsize=7)
 
-# ── Figure 2: phase-annotated dual panel ──────────────────────────────────────
-fig, (ax_norm, ax_tc) = plt.subplots(
-    2, 1, figsize=(9, 6), sharex=True, gridspec_kw={"hspace": 0.06, "height_ratios": [3, 2]}
-)
+        tick_step = max(1, n_layers // 7)
+        ticks = list(range(0, n_layers, tick_step))
+        ax.set_xticks(ticks)
+        ax.set_yticks(ticks)
+        ax.set_xticklabels(ticks, fontsize=7)
+        ax.set_yticklabels(ticks, fontsize=7)
+        ax.set_xlabel("Layer $j$", fontsize=9)
+        ax.set_ylabel("Layer $i$", fontsize=9)
+        ax.grid(False)
 
-for ax in (ax_norm, ax_tc):
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
+        label = "all templates" if key == "all" else key
+        ax.set_title(f'{label}   anchor: "{anchor_tok}"', fontsize=9, pad=5)
 
-# peak-normalised counterparts (shape-preserving, peak = 1)
-norms_n = norms / norms.max()
-template_norms_n = {t: v / v.max() for t, v in template_norms.items()}
+    fig.suptitle(f"Cross-layer cosine similarity — {concept}", fontsize=12, y=1.02)
+    out = out_dir / "cross_layer_sim.pdf"
+    fig.savefig(out, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved {out}")
 
-# top panel: raw norm trajectory (left axis) + peak-normalised (right axis)
-ax_norm.plot(layers, norms, color=VIOLET, lw=2.2, label="All templates (pooled)", zorder=3)
-for t, col in zip(("T0", "T1", "T2"), (NAVY, TEAL, MAUVE)):
-    ax_norm.plot(layers, template_norms[t], color=col, lw=1.1, ls="--", alpha=0.7, label=t, zorder=2)
 
-peak_l = int(res["sharpness"]["peak_layer"])
-ax_norm.scatter([peak_l], [norms[peak_l]], color=RED, zorder=5, s=55, label=f"Peak (L{peak_l})")
-ax_norm.annotate(
-    f"L{peak_l},  $\\psi={res['sharpness']['sharpness_index']:.3f}$",
-    xy=(peak_l, norms[peak_l]),
-    xytext=(peak_l - 9, norms[peak_l] - 6),
-    arrowprops=dict(arrowstyle="->", color=GRAY, lw=0.9),
-    fontsize=8.5,
-    color=GRAY,
-)
+def plot_template_consistency(concept: str) -> None:
+    out_dir = _RUNS / concept
+    res, deltas = _load(out_dir)
+    if res is None:
+        print(f"  [skip] {concept}: no data")
+        return
 
-ax_norm.set_ylabel(r"$\|\delta_l\|$  (raw)", fontsize=11)
-ax_norm.legend(fontsize=8, loc="upper left", ncol=2)
-ax_norm.set_ylim(bottom=0)
+    cfg = res.get("config", {})
+    anchor_tok = cfg.get("anchor_token", cfg.get("anchor_mode", "?"))
+    n_layers = len(res["sharpness"]["norm_by_layer"])
+    layers = np.arange(n_layers)
+    # norm_by_layer already activation-normalised when mean_act_norm was available
+    norms = np.array([res["sharpness"]["norm_by_layer"][str(l)] for l in layers])
+    is_normalised = res["sharpness"].get("normalised", False)
+    mean_act_norm = res.get("mean_act_norm", {})
+    tmpl_keys = [k for k in deltas if k != "all"]
 
-# right axis: peak-normalised (same curves, [0,1] scale)
-ax_n2 = ax_norm.twinx()
-ax_n2.plot(layers, norms_n, color=VIOLET, lw=1.0, ls=":", alpha=0.4, zorder=1)
-for t, col in zip(("T0", "T1", "T2"), (NAVY, TEAL, MAUVE)):
-    ax_n2.plot(layers, template_norms_n[t], color=col, lw=0.7, ls=":", alpha=0.3, zorder=1)
-ax_n2.set_ylabel(r"$\|\delta_l\| / \max$  (normalised)", fontsize=9, color=GRAY)
-ax_n2.tick_params(axis="y", labelcolor=GRAY, labelsize=7)
-ax_n2.set_ylim(bottom=0)
-ax_n2.spines["top"].set_visible(False)
+    # Per-template norms from deltas.pt — apply same normalisation as "all"
+    tmpl_norms = {}
+    for t in tmpl_keys:
+        arr = np.zeros(n_layers)
+        bucket = deltas.get(t, {})
+        for l in range(n_layers):
+            if l in bucket:
+                raw = bucket[l].float().norm().item()
+                scale = mean_act_norm.get(str(l), 1.0) if is_normalised else 1.0
+                arr[l] = raw / scale if scale > 0 else raw
+        tmpl_norms[t] = arr
 
-# bottom panel: template consistency
-ax_tc.plot(layers, tc_01, color=NAVY, lw=1.8, label="T0 vs T1")
-ax_tc.plot(layers, tc_02, color=TEAL, lw=1.8, label="T0 vs T2")
-ax_tc.plot(layers, tc_12, color=MAUVE, lw=1.8, label="T1 vs T2")
-ax_tc.axhline(1.0, color=GRAY, lw=0.7, ls="--", alpha=0.5)
+    # Template consistency: pairwise cosine per layer, computed from deltas
+    pairs = [(t1, t2) for i, t1 in enumerate(tmpl_keys) for t2 in tmpl_keys[i+1:]]
+    tc: dict[str, np.ndarray] = {}
+    for t1, t2 in pairs:
+        vals = []
+        b1, b2 = deltas.get(t1, {}), deltas.get(t2, {})
+        for l in range(n_layers):
+            if l in b1 and l in b2:
+                a, b = b1[l].float(), b2[l].float()
+                vals.append(F.cosine_similarity(a.unsqueeze(0), b.unsqueeze(0)).item())
+            else:
+                vals.append(float("nan"))
+        tc[f"{t1} vs {t2}"] = np.array(vals)
 
-ax_tc.text(30, 0.80, "late-layer\ndivergence", ha="center", fontsize=8, color=RED, style="italic")
+    if not tc:
+        print(f"  [skip] {concept}: no template consistency data")
+        return
 
-ax_tc.set_ylabel("Template\nconsistency", fontsize=10)
-ax_tc.set_xlabel("Layer", fontsize=10)
-ax_tc.set_ylim(0.74, 1.03)
-ax_tc.legend(fontsize=8, loc="lower left")
+    fig, ax_tc = plt.subplots(1, 1, figsize=(9, 4))
+    ax_tc.spines["top"].set_visible(False)
+    ax_tc.spines["right"].set_visible(False)
 
-fig.suptitle("Carry concept localisation in Qwen3-4B", fontsize=13, y=1.01)
-fig.savefig(OUT_DIR / "phase_annotated.pdf")
-plt.close(fig)
-print("Saved phase_annotated.pdf")
+    colors = [NAVY, TEAL, MAUVE, GRAY]
+    for (label, vals), col in zip(tc.items(), colors):
+        ax_tc.plot(layers, vals, color=col, lw=1.8, label=label)
+    ax_tc.axhline(1.0, color=GRAY, lw=0.7, ls="--", alpha=0.5)
+    ax_tc.set_ylabel("Template consistency", fontsize=10)
+    ax_tc.set_xlabel("Layer", fontsize=10)
+    ax_tc.set_ylim(top=1.05)
+    ax_tc.legend(fontsize=8, loc="lower left")
+
+    fig.suptitle(f"{concept} — template consistency", fontsize=13, y=1.01)
+    out = out_dir / "template_consistency.pdf"
+    fig.savefig(out, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved {out}")
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    ap.add_argument("--concept", default="carry",
+                    help="Concept name, 'all', or 'symbolic'")
+    ap.add_argument("--runs_dir", default=None,
+                    help="Override runs directory")
+    args = ap.parse_args()
+
+    global _RUNS
+    if args.runs_dir:
+        _RUNS = Path(args.runs_dir)
+
+    if args.concept == "all":
+        concepts = CONCEPTS
+    elif args.concept == "symbolic":
+        concepts = SYMBOLIC_SUBSET
+    else:
+        concepts = [args.concept]
+
+    for concept in concepts:
+        print(f"— {concept}")
+        plot_cross_layer_sim(concept)
+        plot_template_consistency(concept)
+
+
+if __name__ == "__main__":
+    main()

@@ -39,14 +39,14 @@ _NONCE_TRIPLES: list[tuple[str, str, str]] = [
 ]
 
 TEMPLATES = {
-    "T0": ("{a}⊂{b} and {b}⊂{c}, therefore {a}⊂{c}: ", "{a}⊂{b} and {c}⊂{b}, therefore {a}⊂{c}: "),
+    "T0": ("Yes or No: {a}⊂{b} and {b}⊂{c}, therefore {a}⊂{c}: ", "Yes or No: {a}⊂{b} and {c}⊂{b}, therefore {a}⊂{c}: "),
     "T1": (
-        "every {a} is a {b}; every {b} is a {c}; so every {a} is a {c}: ",
-        "every {a} is a {b}; every {c} is a {b}; so every {a} is a {c}: ",
+        "Yes or No: every {a} is a {b}; every {b} is a {c}; so every {a} is a {c}: ",
+        "Yes or No: every {a} is a {b}; every {c} is a {b}; so every {a} is a {c}: ",
     ),
     "T2": (
-        "all {a} are {b}, all {b} are {c}, so all {a} are {c}: ",
-        "all {a} are {b}, all {c} are {b}, so all {a} are {c}: ",
+        "Yes or No: all {a} are {b}, all {b} are {c}, so all {a} are {c}: ",
+        "Yes or No: all {a} are {b}, all {c} are {b}, so all {a} are {c}: ",
     ),
 }
 
@@ -83,6 +83,8 @@ def generate_syllogism_pairs(
                     prompt_neg=fmt_neg.format(a=a, b=b, c=c),
                     label_pos="yes",
                     label_neg="no",
+                    predict_pos="Yes",
+                    predict_neg="No",
                     template=t,
                     meta={"a": a, "b": b, "c": c},
                 )

@@ -17,14 +17,14 @@ import random
 from experiments.concept_localization.concept_pair import ConceptPair
 
 TEMPLATES = {
-    "T0": ("calc: {a}+{b}>{c}: ", "calc: {a}+{b}>{c}: "),
+    "T0": ("Yes or No: {a}+{b}>{c}: ", "Yes or No: {a}+{b}>{c}: "),
     "T1": (
-        "can {a}, {b}, {c} be sides of a triangle? ",
-        "can {a}, {b}, {c} be sides of a triangle? ",
+        "Yes or No: can {a}, {b}, {c} be sides of a triangle? ",
+        "Yes or No: can {a}, {b}, {c} be sides of a triangle? ",
     ),
     "T2": (
-        "triangle with sides {a},{b},{c} is valid: ",
-        "triangle with sides {a},{b},{c} is valid: ",
+        "Yes or No: triangle with sides {a},{b},{c} is valid: ",
+        "Yes or No: triangle with sides {a},{b},{c} is valid: ",
     ),
 }
 
@@ -79,6 +79,8 @@ def generate_triangle_pairs(
                     prompt_neg=fmt_neg.format(a=a, b=b, c=c_neg),
                     label_pos="yes",
                     label_neg="no",
+                    predict_pos="Yes",
+                    predict_neg="No",
                     template=t,
                     meta={"a": a, "b": b, "c_pos": c_pos, "c_neg": c_neg},
                 )

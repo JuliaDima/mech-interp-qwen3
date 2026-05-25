@@ -14,12 +14,12 @@ import random
 from experiments.concept_localization.concept_pair import ConceptPair
 
 TEMPLATES = {
-    "T0": ("calc: {a}>{b}>{c}: ", "calc: {a}>{b}>{c}: "),
+    "T0": ("True or False: {a}>{b}>{c}: ", "True or False: {a}>{b}>{c}: "),
     "T1": (
-        "{a} is greater than {b} which is greater than {c}: ",
-        "{a} is greater than {b} which is greater than {c}: ",
+        "True or False: {a} is greater than {b} which is greater than {c}: ",
+        "True or False: {a} is greater than {b} which is greater than {c}: ",
     ),
-    "T2": ("given {a}>{b} and {b}>{c}: ", "given {a}>{b} and {b}>{c}: "),
+    "T2": ("True or False: given {a}>{b} and {b}>{c}: ", "True or False: given {a}>{b} and {b}>{c}: "),
 }
 
 _SCALES = [
@@ -85,6 +85,8 @@ def generate_ordering_pairs(
                     prompt_neg=fmt_neg.format(a=a, b=b, c=c_neg),
                     label_pos="True",
                     label_neg="False",
+                    predict_pos="True",
+                    predict_neg="False",
                     template=t,
                     meta={"a": a, "b": b, "c_pos": c_pos, "c_neg": c_neg, "n_digits": len(str(a))},
                 )

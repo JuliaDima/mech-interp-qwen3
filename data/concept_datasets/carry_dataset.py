@@ -143,6 +143,8 @@ def generate_carry_pairs(
                     prompt_neg=fmt_neg.format(a=a_neg, b=b_neg),
                     label_pos="carry",
                     label_neg="no_carry",
+                    predict_pos=str(a_pos + b_pos),
+                    predict_neg=str(a_neg + b_neg),
                     template=t,
                     meta={
                         "a_pos": a_pos,
