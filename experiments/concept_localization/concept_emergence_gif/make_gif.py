@@ -32,9 +32,14 @@ _REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from experiments.concept_localization.extract_deltas_generic import extract_layer_deltas_generic
+from experiments.concept_localization.extract_deltas_generic import (
+    _find_delimiter_anchor,
+    extract_layer_deltas_generic,
+)
 from experiments.concept_localization.run_concept import _load_concept
-from experiments.plot_style import GRAY, VIOLET, apply
+from experiments.plot_style import GRAY, TEAL, VIOLET, apply
+
+_GREEN = "#27ae60"
 from mechinterp_qwen3.attribution_model import AttributionModel
 from mechinterp_qwen3.utils.hf_utils import load_transcoder_from_hub
 from mechinterp_qwen3.utils.model_utils import get_default_device, parse_dtype
@@ -61,10 +66,14 @@ def _render_frame(
     ax: plt.Axes,
     layers: list[int],
     norms_at_pos: np.ndarray,
+    act_norms_at_pos: np.ndarray,
     current_pos: int,
-    token_labels: list[str],
+    n_pairs: int,
+    token_labels_pos: list[str],
+    token_labels_neg: list[str],
     concept: str,
     n_layers: int,
+    template: str | None = None,
 ) -> None:
     ax.cla()
 
@@ -72,21 +81,29 @@ def _render_frame(
         alpha = 0.12 + 0.25 * (p / max(current_pos, 1))
         ax.plot(layers, norms_at_pos[p], color=GRAY, lw=0.8, alpha=alpha)
 
-    ax.plot(layers, norms_at_pos[current_pos], color=VIOLET, lw=2.4, zorder=5)
+    ax.plot(layers, norms_at_pos[current_pos], color=VIOLET, lw=2.4, zorder=5,
+            label=r"$\|\delta_l\| / \max_l(\|\delta_l\|)$  (mean over pairs)")
+    ax.plot(layers, act_norms_at_pos[current_pos], color=_GREEN, lw=1.8,
+            ls="--", zorder=6,
+            label=r"$(\|\delta_l\| / \mathbb{E}\|\mathbf{h}_l\|) / \max_l(\|\delta_l\| / \mathbb{E}\|\mathbf{h}_l\|)$ (mean over pairs)")
 
-    tok_str = token_labels[current_pos]
-    consumed = "".join(token_labels[: current_pos + 1])
+    tok_str = token_labels_pos[current_pos]
+    consumed_pos = "".join(token_labels_pos[: current_pos + 1])
+    consumed_neg = "".join(token_labels_neg[: current_pos + 1])
+    tmpl_str = f"template {template}" if template else "all templates"
     ax.set_title(
-        f"{concept} — anchor at token {current_pos}: {tok_str!r}\n"
-        f'consumed: "{consumed}"',
-        fontsize=10,
+        f"{concept} — anchor at token {current_pos}: {tok_str!r}  "
+        f"({n_pairs} pairs, {tmpl_str})\n"
+        f'pos (example): "{consumed_pos}"    neg (example): "{consumed_neg}"',
+        fontsize=9,
         pad=6,
     )
     ax.set_xlabel("Layer", fontsize=10)
-    ax.set_ylabel("‖δ‖ / max(‖δ‖)", fontsize=10)
+    ax.set_ylabel("Normalised to [0, 1]", fontsize=10)
     ax.set_xlim(-0.5, n_layers - 0.5)
     ax.set_ylim(-0.05, 1.15)
     ax.set_xticks(range(0, n_layers, 5))
+    ax.legend(fontsize=8, loc="upper left")
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
 
@@ -100,9 +117,14 @@ def make_emergence_gif(
     dtype_str: str = "bfloat16",
     seed: int = 42,
     fps: int = 4,
-    template: str | None = None,
+    template: str | None = "T0",
     max_pairs: int | None = None,
 ) -> None:
+    # The GIF iterates over fixed integer token positions (0 … delimiter_pos), which
+    # requires every pair to share the same tokenization length.  Because templates
+    # differ in prefix length, mixing templates would force aggressive length-filtering
+    # that discards most pairs.  A single template is therefore used by default (T0).
+    # To compare across templates, run the GIF separately per template.
     device = get_default_device()
     dtype = parse_dtype(dtype_str)
 
@@ -126,15 +148,36 @@ def make_emergence_gif(
     layers = list(range(n_layers))
 
     example_ids = model.tokenizer(pairs[0].prompt_pos, add_special_tokens=False).input_ids
+    example_ids_neg = model.tokenizer(pairs[0].prompt_neg, add_special_tokens=False).input_ids
     seq_len = len(example_ids)
-    token_labels = _decode_tokens(model.tokenizer, example_ids)
-    log.info("Token sequence (%d tokens): %s", seq_len, token_labels)
+    token_labels_pos = _decode_tokens(model.tokenizer, example_ids)
+    token_labels_neg = _decode_tokens(model.tokenizer, example_ids_neg)
 
-    norms = np.zeros((seq_len, n_layers))
-    for pos in range(seq_len):
+    # Stop at the last structural delimiter ('=', ':', '?', ')') — the natural anchor
+    delimiter_pos = _find_delimiter_anchor(example_ids, model.tokenizer)
+    log.info("Delimiter anchor at position %d: %r", delimiter_pos, token_labels_pos[delimiter_pos])
+
+    # Keep only pairs whose tokenization length matches pairs[0].  Within a single
+    # template, operands of different digit-counts still tokenize differently, so
+    # this further restricts to one digit-size class.  The result is a homogeneous
+    # set where every fixed integer position refers to the same token.
+    pairs = [
+        p for p in pairs
+        if len(model.tokenizer(p.prompt_pos, add_special_tokens=False).input_ids) == seq_len
+    ]
+    n_template_total = len(all_pairs)
+    log.info(
+        "Token sequence (%d tokens): %s — using %d/%d length-matched pairs (template=%s)",
+        seq_len, token_labels_pos, len(pairs), n_template_total, template,
+    )
+
+    n_frames = delimiter_pos + 1
+    norms_raw = np.zeros((n_frames, n_layers))
+    act_norms_raw = np.zeros((n_frames, n_layers))
+    for pos in range(n_frames):
         log.info(
             "Extracting deltas at position %d/%d (%r)...",
-            pos, seq_len - 1, token_labels[pos],
+            pos, seq_len - 1, token_labels_pos[pos],
         )
         results = extract_layer_deltas_generic(
             model, pairs, layers, device, dtype,
@@ -144,18 +187,23 @@ def make_emergence_gif(
         ld = results["all"]
         for li, l in enumerate(layers):
             if l in ld.delta:
-                norms[pos, li] = ld.delta[l].norm().item()
+                raw = ld.delta[l].norm().item()
+                norms_raw[pos, li] = raw
+                scale = ld.mean_act_norm.get(l, 1.0) if ld.mean_act_norm else 1.0
+                act_norms_raw[pos, li] = raw / scale if scale > 0 else raw
 
-    peak = norms.max()
-    if peak > 1e-8:
-        norms = norms / peak
+    row_max = norms_raw.max(axis=1, keepdims=True).clip(min=1e-8)
+    norms = norms_raw / row_max
+
+    row_max_act = act_norms_raw.max(axis=1, keepdims=True).clip(min=1e-8)
+    act_norms = act_norms_raw / row_max_act
 
     apply()
     frames: list[Image.Image] = []
-    fig, ax = plt.subplots(figsize=(10, 4))
+    fig, ax = plt.subplots(figsize=(5, 5))
 
-    for pos in range(seq_len):
-        _render_frame(ax, layers, norms, pos, token_labels, concept, n_layers)
+    for pos in range(n_frames):
+        _render_frame(ax, layers, norms, act_norms, pos, len(pairs), token_labels_pos, token_labels_neg, concept, n_layers, template)
         fig.tight_layout()
         fig.canvas.draw()
         w, h = fig.canvas.get_width_height()
@@ -164,18 +212,31 @@ def make_emergence_gif(
 
     plt.close(fig)
 
-    frames += [frames[-1]] * fps
-
     out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Save raw norms so downstream tests can compare against concept localization results
+    # without reloading the model.
+    norms_data = {
+        "norms_raw": norms_raw,        # (n_frames, n_layers) — raw ‖δ_l‖ per anchor pos
+        "act_norms_raw": act_norms_raw,
+        "delimiter_pos": delimiter_pos,
+        "n_pairs": len(pairs),
+        "layers": layers,
+    }
+    np.save(out_path.with_suffix(".npy"), norms_data)
+    log.info("Saved emergence norms → %s", out_path.with_suffix(".npy"))
+
     duration_ms = int(1000 / fps)
+    durations = [duration_ms] * len(frames)
+    durations[-1] = 7000  # hold delimiter frame for 7 s before looping
     frames[0].save(
         out_path,
         save_all=True,
         append_images=frames[1:],
         loop=0,
-        duration=duration_ms,
+        duration=durations,
     )
-    log.info("Saved GIF (%d frames, %d fps) → %s", len(frames), fps, out_path)
+    log.info("Saved GIF (%d frames, %d fps, 7 s hold at delimiter) → %s", len(frames), fps, out_path)
 
 
 def main() -> None:
@@ -184,9 +245,11 @@ def main() -> None:
     parser.add_argument("--model", default=_MODEL)
     parser.add_argument("--transcoder_set", default=_TRANSCODER_SET)
     parser.add_argument("--n", type=int, default=50, help="Pairs per template")
-    parser.add_argument("--template", default=None, help="Restrict to one template, e.g. T0")
+    parser.add_argument("--template", default="T0",
+                        help="Template to use (default T0). Pass '' to use all templates "
+                             "(triggers aggressive length filtering — most pairs will be dropped).")
     parser.add_argument("--max_pairs", type=int, default=None)
-    parser.add_argument("--fps", type=int, default=4)
+    parser.add_argument("--fps", type=int, default=2)
     parser.add_argument("--dtype", default="bfloat16")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
@@ -207,7 +270,7 @@ def main() -> None:
         dtype_str=args.dtype,
         seed=args.seed,
         fps=args.fps,
-        template=args.template,
+        template=args.template or None,
         max_pairs=args.max_pairs,
     )
 

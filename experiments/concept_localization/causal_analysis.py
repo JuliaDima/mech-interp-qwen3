@@ -69,9 +69,33 @@ class CausalScores:
     n_pairs: int = 0
 
 
-def _target_token_id(tokenizer, label: str) -> int | None:
-    ids = tokenizer(label, add_special_tokens=False).input_ids
-    return ids[0] if ids else None
+def _resolve_target(
+    tokenizer, pair
+) -> tuple[list[int], int | None, int | None]:
+    """Resolve the first diverging predicted token for a pair.
+
+    Uses pair.predict_pos / predict_neg when set, otherwise falls back to
+    label_pos / label_neg.  Returns (shared_prefix_ids, pos_target_id,
+    neg_target_id) so callers can do teacher forcing: append shared_prefix_ids
+    to both prompt sequences and measure the logit margin at position -1.
+    """
+    pred_pos = pair.predict_pos if pair.predict_pos else pair.label_pos
+    pred_neg = pair.predict_neg if pair.predict_neg else pair.label_neg
+
+    ids_pos = tokenizer(pred_pos, add_special_tokens=False).input_ids
+    ids_neg = tokenizer(pred_neg, add_special_tokens=False).input_ids
+
+    if not ids_pos:
+        return [], None, None
+
+    k = 0
+    while k < len(ids_pos) and k < len(ids_neg) and ids_pos[k] == ids_neg[k]:
+        k += 1
+
+    prefix = ids_pos[:k]
+    target_pos = ids_pos[k] if k < len(ids_pos) else None
+    target_neg = ids_neg[k] if k < len(ids_neg) else None
+    return prefix, target_pos, target_neg
 
 
 def run_activation_patching(
@@ -81,14 +105,20 @@ def run_activation_patching(
     device: torch.device,
     dtype: torch.dtype,
 ) -> dict[int, list[float]]:
-    """Activation patching across layers.
+    """Activation patching across layers at the expression-end delimiter.
+
+    Patches at position p = last structural delimiter (e.g. '=' in 'a+b='),
+    where both prompts share the same surface token but carry different hidden
+    states.  This avoids the digit-identity confound that arises when patching
+    at the anchor t*, where the two prompts have different tokens.
 
     For each pair and each layer L:
-      - cache pos residual at anchor across all layers in one forward pass
-      - run neg-prompt once for baseline logit
-      - for each L: re-run neg with h[L, anchor] replaced by pos value
+      - find p = expression-end (same token in both prompts, strictly after t*)
+      - cache pos residuals at p for all layers in one forward pass
+      - run neg once for baseline margin logit^+ − logit^−
+      - for each L: re-run neg with h[L, p] swapped to the pos value
 
-    Returns dict[layer -> list of per-pair Δlogit].
+    Returns dict[layer -> list of per-pair Δmargin].
     """
     model.eval()
     scores: dict[int, list[float]] = {l: [] for l in layers}
@@ -99,34 +129,59 @@ def run_activation_patching(
             ids_pos = model.tokenizer(pair.prompt_pos, add_special_tokens=False).input_ids
             ids_neg = model.tokenizer(pair.prompt_neg, add_special_tokens=False).input_ids
 
+            if len(ids_pos) != len(ids_neg):
+                skipped += 1
+                continue
+
             anchor = _find_anchor(ids_pos, ids_neg)
             if anchor is None:
                 skipped += 1
                 continue
 
-            target_id = _target_token_id(model.tokenizer, pair.label_pos)
+            # Find patch position: expression-end delimiter after the anchor,
+            # where both prompts have the same surface token.
+            tokens_pos = model.tokenizer.convert_ids_to_tokens(ids_pos)
+            patch_pos = _find_expression_end(tokens_pos)
+            if patch_pos is None or patch_pos <= anchor:
+                patch_pos = anchor + 1
+            if patch_pos >= len(ids_pos):
+                skipped += 1
+                continue
+            if ids_pos[patch_pos] != ids_neg[patch_pos]:
+                skipped += 1
+                continue
+
+            prefix_ids, target_id, neg_id = _resolve_target(model.tokenizer, pair)
             if target_id is None:
                 skipped += 1
                 continue
 
-            toks_pos = torch.tensor([ids_pos], dtype=torch.long, device=device)
-            toks_neg = torch.tensor([ids_neg], dtype=torch.long, device=device)
+            # Teacher forcing: extend both prompts with the shared answer prefix
+            # so that position -1 predicts the first diverging output token.
+            ids_pos_ext = ids_pos + prefix_ids
+            ids_neg_ext = ids_neg + prefix_ids
 
-            # One pass: cache pos residuals at anchor for all layers
+            toks_pos = torch.tensor([ids_pos_ext], dtype=torch.long, device=device)
+            toks_neg = torch.tensor([ids_neg_ext], dtype=torch.long, device=device)
+
+            # One pass: cache pos residuals at patch_pos for all layers
             pos_cache: dict[int, torch.Tensor] = {}
             cache_hooks = [
                 (
                     f"blocks.{l}.hook_resid_post",
-                    lambda act, hook, _l=l, _a=anchor: (
-                        pos_cache.update({_l: act[0, _a, :].clone()}) or act
+                    lambda act, hook=None, _l=l, _p=patch_pos: (
+                        pos_cache.update({_l: act[0, _p, :].clone()}) or act
                     ),
                 )
                 for l in layers
             ]
             model.run_with_hooks(toks_pos, fwd_hooks=cache_hooks)
 
-            # Baseline: neg without patching
-            base_logit = model(toks_neg)[0, -1, target_id].item()
+            # Baseline margin on unpatched negative prompt
+            base_logits = model(toks_neg)[0, -1]
+            base_margin = base_logits[target_id].item()
+            if neg_id is not None:
+                base_margin -= base_logits[neg_id].item()
 
             # One patched pass per layer
             for l in layers:
@@ -135,18 +190,20 @@ def run_activation_patching(
                 vec = pos_cache[l]  # (d_model,)
 
                 def make_hook(v, pos):
-                    def hook_fn(act, hook):
+                    def hook_fn(act, hook=None):
                         act = act.clone()
                         act[:, pos, :] = v
                         return act
-
                     return hook_fn
 
                 logits_patch = model.run_with_hooks(
                     toks_neg,
-                    fwd_hooks=[(f"blocks.{l}.hook_resid_post", make_hook(vec, anchor))],
+                    fwd_hooks=[(f"blocks.{l}.hook_resid_post", make_hook(vec, patch_pos))],
                 )
-                scores[l].append(logits_patch[0, -1, target_id].item() - base_logit)
+                patch_margin = logits_patch[0, -1, target_id].item()
+                if neg_id is not None:
+                    patch_margin -= logits_patch[0, -1, neg_id].item()
+                scores[l].append(patch_margin - base_margin)
 
     if skipped:
         log.warning("Activation patching: skipped %d pairs", skipped)
@@ -163,17 +220,15 @@ def run_gradient_dot_delta(
 ) -> dict[int, list[float]]:
     """Gradient-dot-delta across layers.
 
-    For each pair: one forward + one backward pass on the positive prompt.
-    At each layer L, extracts grad of the log-odds margin
-    logit(label_pos) - logit(label_neg) w.r.t. h[L, anchor, :], then
-    computes the dot product with the precomputed concept delta δ_L.
+    For each pair: one forward + one backward pass on the negative prompt.
+    At each layer L, extracts grad of the margin logit(label_pos) - logit(label_neg)
+    w.r.t. h[L, anchor, :] evaluated at h_L^neg, then computes the dot product
+    with the precomputed concept delta δ_L.
 
-    Using the margin rather than logit(label_pos) alone keeps the gradient
-    coherent across pairs where label_pos varies (e.g. GCD, where the
-    target token differs by divisor): the margin gradient points in the
-    direction that jointly raises the correct answer and suppresses the
-    distractor, which is structurally aligned with the concept delta by
-    construction.
+    This is the first-order linear approximation of activation patching: both
+    methods operate at the negative prompt's operating point and measure the
+    change in margin caused by moving layer L's representation in the direction
+    of δ_L.
 
     Returns dict[layer -> list of per-pair g·δ scores].
     """
@@ -190,15 +245,17 @@ def run_gradient_dot_delta(
             skipped += 1
             continue
 
-        target_id = _target_token_id(model.tokenizer, pair.label_pos)
+        prefix_ids, target_id, neg_id = _resolve_target(model.tokenizer, pair)
         if target_id is None:
             skipped += 1
             continue
-        neg_id = _target_token_id(model.tokenizer, pair.label_neg)
 
-        toks_pos = torch.tensor([ids_pos], dtype=torch.long, device=device)
+        # Teacher forcing: extend neg prompt with shared answer prefix so
+        # position -1 predicts the first diverging output token.
+        ids_neg_ext = ids_neg + prefix_ids
+        toks_neg = torch.tensor([ids_neg_ext], dtype=torch.long, device=device)
 
-        # Forward pass — hooks retain intermediate tensors for backward
+        # Forward pass on negative prompt — hooks retain intermediate tensors for backward
         resid_refs: dict[int, torch.Tensor] = {}
 
         def make_retain_hook(layer_idx):
@@ -211,7 +268,7 @@ def run_gradient_dot_delta(
 
         hooks = [(f"blocks.{l}.hook_resid_post", make_retain_hook(l)) for l in layers]
 
-        logits = model.run_with_hooks(toks_pos, fwd_hooks=hooks)
+        logits = model.run_with_hooks(toks_neg, fwd_hooks=hooks)
         objective = logits[0, -1, target_id]
         if neg_id is not None:
             objective = objective - logits[0, -1, neg_id]
@@ -316,13 +373,18 @@ def run_positional_attribution(
             )
             _logged_delimiter = True
 
-        target_id = _target_token_id(model.tokenizer, pair.label_pos)
+        prefix_ids, target_id, _ = _resolve_target(model.tokenizer, pair)
         if target_id is None:
             skipped += 1
             continue
 
-        toks_pos = torch.tensor([ids_pos], dtype=torch.long, device=device)
-        toks_neg = torch.tensor([ids_neg], dtype=torch.long, device=device)
+        # Teacher forcing: extend prompts so position -1 predicts the first
+        # diverging output token.  Causal attention means h at earlier positions
+        # is unaffected by the extension.
+        ids_pos_ext = ids_pos + prefix_ids
+        ids_neg_ext = ids_neg + prefix_ids
+        toks_pos = torch.tensor([ids_pos_ext], dtype=torch.long, device=device)
+        toks_neg = torch.tensor([ids_neg_ext], dtype=torch.long, device=device)
 
         if not token_labels:
             token_labels = [tokens[seq_len - 1 - i] for i in range(n_valid)]
@@ -342,7 +404,7 @@ def run_positional_attribution(
         if not h_neg_store:
             skipped += 1
             continue
-        h_neg = h_neg_store[0]  # (seq_len, d_model)
+        h_neg = h_neg_store[0]  # (seq_len + prefix_len, d_model); index by abs_pos
 
         # Pos forward — retain activations for backward
         h_pos_store: list[torch.Tensor] = []
@@ -449,13 +511,18 @@ def run_positional_attribution_sweep(
             skipped += 1
             continue
 
-        target_id = _target_token_id(model.tokenizer, pair.label_pos)
+        prefix_ids, target_id, _ = _resolve_target(model.tokenizer, pair)
         if target_id is None:
             skipped += 1
             continue
 
-        toks_pos = torch.tensor([ids_pos], dtype=torch.long, device=device)
-        toks_neg = torch.tensor([ids_neg], dtype=torch.long, device=device)
+        # Teacher forcing: extend prompts so position -1 predicts the first
+        # diverging output token.  Causal attention means h at earlier positions
+        # is unaffected by the extension.
+        ids_pos_ext = ids_pos + prefix_ids
+        ids_neg_ext = ids_neg + prefix_ids
+        toks_pos = torch.tensor([ids_pos_ext], dtype=torch.long, device=device)
+        toks_neg = torch.tensor([ids_neg_ext], dtype=torch.long, device=device)
 
         if not token_labels:
             token_labels = [tokens[seq_len - 1 - i] for i in range(n_valid)]

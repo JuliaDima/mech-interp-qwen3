@@ -54,11 +54,9 @@ from experiments.concept_localization.extract_deltas_generic import (
     resolve_anchor_token,
 )
 from experiments.concept_localization.visualize import (
-    plot_causal_efficiency,
     plot_causal_overlay,
     plot_causal_scores,
     plot_feature_projections,
-    plot_norm_and_alignment,
 )
 from mechinterp_qwen3.attribution_model import AttributionModel
 from mechinterp_qwen3.utils.hf_utils import load_transcoder_from_hub
@@ -223,21 +221,27 @@ def main() -> None:
 
     if args.concept in ("all", "symbolic"):
         batch = CONCEPTS if args.concept == "all" else SYMBOLIC_SUBSET
+        base = "symbolic_subset" if args.concept == "symbolic" else None
         for concept in batch:
             log.info("=" * 60)
             log.info("Running concept: %s", concept)
             log.info("=" * 60)
             args.concept = concept
             args.out_dir = None
-            _run_single(args)
+            _run_single(args, base_subdir=base)
         return
 
     _run_single(args)
 
 
-def _run_single(args) -> None:
+def _run_single(args, base_subdir: str | None = None) -> None:
     suffix = f"_{args.anchor_mode}" if args.anchor_mode != "delimiter" else ""
-    out_dir = Path(args.out_dir or f"runs/concept_localization/{args.concept}{suffix}")
+    if args.out_dir:
+        out_dir = Path(args.out_dir)
+    elif base_subdir:
+        out_dir = Path(f"runs/concept_localization/{base_subdir}/{args.concept}{suffix}")
+    else:
+        out_dir = Path(f"runs/concept_localization/{args.concept}{suffix}")
     out_dir.mkdir(parents=True, exist_ok=True)
 
     device = get_default_device()
@@ -351,6 +355,7 @@ def _run_single(args) -> None:
         "sharpness": {
             "peak_layer": sharpness.peak_layer,
             "sharpness_index": round(sharpness.sharpness_index, 4),
+            "normalised": sharpness.normalised,
             "norm_by_layer": {
                 str(l): round(v, 4) for l, v in zip(sharpness.layers, sharpness.norms, strict=False)
             },
@@ -363,7 +368,11 @@ def _run_single(args) -> None:
         "mean_act_norm": {str(l): round(v, 4) for l, v in mean_act_norms.items()},
         "top_features_by_layer": {
             str(layer): [
-                {"feature_id": m.feature_id, "cos_sim": round(m.cos_sim, 4)} for m in matches
+                {
+                    "feature_id": m.feature_id,
+                    "projection": round(m.projection, 4),
+                }
+                for m in matches
             ]
             for layer, matches in projections.items()
         },
@@ -400,9 +409,6 @@ def _run_single(args) -> None:
     log.info("Saved delta tensors → %s", deltas_path)
 
     # ── 7. Plots ──────────────────────────────────────────────────────────────
-    plot_norm_and_alignment(layer_results, out_dir / "norm_trajectory.png", concept=args.concept)
-    log.info("Saved norm_trajectory.png")
-
     if projections:
         plot_feature_projections(
             projections,
@@ -429,13 +435,6 @@ def _run_single(args) -> None:
             mean_act_norms=mean_act_norms or None,
         )
         log.info("Saved causal_overlay.png")
-        plot_causal_efficiency(
-            causal,
-            delta_norms_raw,
-            out_dir / "causal_efficiency.png",
-            concept=args.concept,
-        )
-        log.info("Saved causal_efficiency.png")
 
     log.info("Done. All outputs in %s", out_dir)
 

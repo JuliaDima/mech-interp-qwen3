@@ -40,7 +40,7 @@ for layer, feats in top_feats.items():
     for feat in feats:
         all_layers.append(layer)
         all_fids.append(feat["feature_id"])
-        all_sims.append(feat["cos_sim"])
+        all_sims.append(feat["projection"])
 
 all_layers = np.array(all_layers)
 all_fids = np.array(all_fids)

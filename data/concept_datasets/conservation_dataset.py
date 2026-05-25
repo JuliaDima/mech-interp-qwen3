@@ -13,14 +13,14 @@ import random
 from experiments.concept_localization.concept_pair import ConceptPair
 
 TEMPLATES = {
-    "T0": ("drop={h}, bounce={b}. valid: ", "drop={h}, bounce={b}. valid: "),
+    "T0": ("True or False: drop={h}, bounce={b}. valid: ", "True or False: drop={h}, bounce={b}. valid: "),
     "T1": (
-        "ball dropped from {h}m rebounds to {b}m. physical: ",
-        "ball dropped from {h}m rebounds to {b}m. physical: ",
+        "True or False: ball dropped from {h}m rebounds to {b}m. physical: ",
+        "True or False: ball dropped from {h}m rebounds to {b}m. physical: ",
     ),
     "T2": (
-        "does bouncing to {b}m after dropping from {h}m conserve energy? ",
-        "does bouncing to {b}m after dropping from {h}m conserve energy? ",
+        "True or False: does bouncing to {b}m after dropping from {h}m conserve energy? ",
+        "True or False: does bouncing to {b}m after dropping from {h}m conserve energy? ",
     ),
 }
 
@@ -72,6 +72,8 @@ def generate_conservation_pairs(
                     prompt_neg=fmt_neg.format(h=h, b=b_neg),
                     label_pos="True",
                     label_neg="False",
+                    predict_pos="True",
+                    predict_neg="False",
                     template=t,
                     meta={"h": h, "b_pos": b_pos, "b_neg": b_neg},
                 )

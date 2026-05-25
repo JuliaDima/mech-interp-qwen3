@@ -186,7 +186,7 @@ def main() -> None:
         "template_consistency": {str(layer): row for layer, row in consistency.items()},
         "top_features_by_layer": {
             str(layer): [
-                {"feature_id": m.feature_id, "cos_sim": round(m.cos_sim, 4)} for m in matches
+                {"feature_id": m.feature_id, "projection": round(m.projection, 4)} for m in matches
             ]
             for layer, matches in projections.items()
         },

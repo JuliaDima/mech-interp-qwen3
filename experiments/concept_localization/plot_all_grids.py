@@ -7,7 +7,6 @@ image tiling.
 Outputs written to runs/concept_localization/:
     causal_overlay_all.png
     causal_scores_all.png
-    causal_efficiency_all.png
     norm_trajectory_all.png
     feature_projections_scatter_all.png
 
@@ -41,8 +40,6 @@ _DEFAULT_RUNS = _REPO_ROOT / "runs" / "concept_localization"
 # Plot types to tile from existing PNGs (filename stem → human title)
 _PNG_PLOT_TYPES: list[tuple[str, str]] = [
     ("causal_scores", "Causal scores"),
-    ("causal_efficiency", "Causal efficiency"),
-    ("norm_trajectory", "Delta norm & alignment"),
     ("feature_projections_scatter", "Feature projections"),
 ]
 

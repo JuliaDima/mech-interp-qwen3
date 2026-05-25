@@ -44,9 +44,9 @@ _CAUSAL_FACTS: list[tuple[str, str]] = [
 ]
 
 TEMPLATES = {
-    "T0": ("{A} causes {B}: ", "{B} causes {A}: "),
-    "T1": ("{A} leads to {B}: ", "{B} leads to {A}: "),
-    "T2": ("{A} produces {B}: ", "{B} produces {A}: "),
+    "T0": ("True or False: {A} causes {B}: ", "True or False: {B} causes {A}: "),
+    "T1": ("True or False: {A} leads to {B}: ", "True or False: {B} leads to {A}: "),
+    "T2": ("True or False: {A} produces {B}: ", "True or False: {B} produces {A}: "),
 }
 
 
@@ -81,6 +81,8 @@ def generate_causal_pairs(
                     prompt_neg=fmt_neg.format(A=cause, B=effect),
                     label_pos="True",
                     label_neg="False",
+                    predict_pos="True",
+                    predict_neg="False",
                     template=t,
                     meta={"cause": cause, "effect": effect},
                 )

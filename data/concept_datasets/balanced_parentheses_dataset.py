@@ -17,12 +17,12 @@ import random
 from experiments.concept_localization.concept_pair import ConceptPair
 
 TEMPLATES = {
-    "T0": ("balanced: {seq}: ", "balanced: {seq}: "),
+    "T0": ("Yes or No: balanced: {seq}: ", "Yes or No: balanced: {seq}: "),
     "T1": (
-        "the sequence {seq} has matched brackets: ",
-        "the sequence {seq} has matched brackets: ",
+        "Yes or No: the sequence {seq} has matched brackets: ",
+        "Yes or No: the sequence {seq} has matched brackets: ",
     ),
-    "T2": ("is {seq} a valid bracket string? ", "is {seq} a valid bracket string? "),
+    "T2": ("Yes or No: is {seq} a valid bracket string? ", "Yes or No: is {seq} a valid bracket string? "),
 }
 
 
@@ -92,6 +92,8 @@ def generate_parentheses_pairs(
                     prompt_neg=fmt_neg.format(seq=seq_neg),
                     label_pos="yes",
                     label_neg="no",
+                    predict_pos="Yes",
+                    predict_neg="No",
                     template=t,
                     meta={"seq_pos": seq_pos, "seq_neg": seq_neg},
                 )

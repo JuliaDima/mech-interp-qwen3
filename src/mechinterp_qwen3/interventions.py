@@ -3,7 +3,7 @@
 Two intervention strategies for testing causal hypotheses in transformer circuits:
 
 1. **Direct inhibition** — Scale target features to zero (or by alpha) in a
-   standard forward pass. Fast, but potentially confounded: upstream activations
+   standard forward pass. Fast but potentially confounded since upstream activations
    may already differ between clean and perturbed inputs.
 
 2. **Constrained patching** — Cache MLP inputs from a perturbed forward pass,

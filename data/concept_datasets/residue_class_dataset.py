@@ -1,11 +1,11 @@
 """Residue class concept dataset.
 
-Improvements over original:
-- Modulus m varies across {5, 7, 11} instead of always 7
-- Residue classes r_pos and r_neg are sampled randomly (not fixed 1 vs 6)
-- Number of digits varies uniformly across {2, 3, 4}
-- Gap between a_pos and a_neg varies (r_neg - r_pos, not fixed 5)
-- Templates: compact math / natural language / question form
+Fixed modulus m=7, fixed residue classes r_pos=1 vs r_neg=6 so every pair
+tests the same binary concept direction: a ≡ 1 (mod 7) vs a ≡ 6 (mod 7).
+
+Fixing m and (r_pos, r_neg) ensures a single coherent delta direction and
+consistent target tokens ("1" vs "6") across all pairs, making the causal
+analysis valid. a varies freely over 2-4 digit numbers for statistical diversity.
 """
 
 from __future__ import annotations
@@ -14,12 +14,14 @@ import random
 
 from experiments.concept_localization.concept_pair import ConceptPair
 
-MODULI = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+M = 7
+R_POS = 1
+R_NEG = 6
 
 TEMPLATES = {
-    "T0": ("calc: {a}%{m}= ", "calc: {a}%{m}= "),
-    "T1": ("the remainder of {a} divided by {m} is: ", "the remainder of {a} divided by {m} is: "),
-    "T2": ("what is {a} mod {m}? ", "what is {a} mod {m}? "),
+    "T0": ("calc: {a}%7= ", "calc: {a}%7= "),
+    "T1": ("the remainder of {a} divided by 7 is: ", "the remainder of {a} divided by 7 is: "),
+    "T2": ("what is {a} mod 7? ", "what is {a} mod 7? "),
 }
 
 
@@ -28,48 +30,41 @@ def generate_residue_pairs(
     templates: list[str] | None = None,
     seed: int = 42,
 ) -> list[ConceptPair]:
-    """Generate pairs a_pos ≡ r_pos (mod m) vs a_neg ≡ r_neg (mod m).
+    """Pairs a_pos ≡ 1 (mod 7) vs a_neg ≡ 6 (mod 7), same base k.
 
-    Modulus m, residue classes r_pos/r_neg, and number of digits all vary.
+    a_pos = 7k + 1, a_neg = 7k + 6, so they differ by 5 and share the same
+    digit count. k is sampled uniformly over 2-4 digit ranges.
     """
     if templates is None:
         templates = list(TEMPLATES)
 
     rng = random.Random(seed)
     pairs: list[ConceptPair] = []
-    seen: set[tuple[int, int, int]] = set()
+    seen: set[int] = set()
     counts = {t: 0 for t in templates}
     attempts = 0
 
-    while attempts < n_per_template * len(templates) * 200 and any(
+    while attempts < n_per_template * len(templates) * 500 and any(
         v < n_per_template for v in counts.values()
     ):
         attempts += 1
-        m = rng.choice(MODULI)
-        r_pos = rng.randint(0, m - 1)
-        r_neg = rng.choice([r for r in range(m) if r != r_pos])
+        n_digits = rng.choice([2, 3, 4])
+        lo, hi = 10 ** (n_digits - 1), 10**n_digits - 1
 
-        n_digits = rng.choice([1, 2, 3])
-        lo, hi = max(1, 10 ** (n_digits - 1)), 10**n_digits - 1
-
-        min_base = max(0, (lo - r_pos + m - 1) // m)
-        max_base = (hi - r_pos) // m
-        if min_base > max_base:
+        k_min = (lo - R_POS + M - 1) // M
+        k_max = (hi - R_NEG) // M
+        if k_min > k_max:
             continue
 
-        base = rng.randint(min_base, max_base)
-        a_pos = base * m + r_pos
-        a_neg = base * m + r_neg
+        k = rng.randint(k_min, k_max)
+        a_pos = M * k + R_POS
+        a_neg = M * k + R_NEG
 
         if not (lo <= a_pos <= hi and lo <= a_neg <= hi):
             continue
-        if a_pos % m != r_pos or a_neg % m != r_neg:
+        if k in seen:
             continue
-
-        key = (base, m, r_pos)
-        if key in seen:
-            continue
-        seen.add(key)
+        seen.add(k)
 
         for t in templates:
             if counts[t] >= n_per_template:
@@ -77,12 +72,14 @@ def generate_residue_pairs(
             fmt_pos, fmt_neg = TEMPLATES[t]
             pairs.append(
                 ConceptPair(
-                    prompt_pos=fmt_pos.format(a=a_pos, m=m),
-                    prompt_neg=fmt_neg.format(a=a_neg, m=m),
-                    label_pos=str(r_pos),
-                    label_neg=str(r_neg),
+                    prompt_pos=fmt_pos.format(a=a_pos),
+                    prompt_neg=fmt_neg.format(a=a_neg),
+                    label_pos=str(R_POS),
+                    label_neg=str(R_NEG),
+                    predict_pos=str(R_POS),
+                    predict_neg=str(R_NEG),
                     template=t,
-                    meta={"a_pos": a_pos, "a_neg": a_neg, "m": m, "r_pos": r_pos, "r_neg": r_neg},
+                    meta={"a_pos": a_pos, "a_neg": a_neg, "m": M, "r_pos": R_POS, "r_neg": R_NEG},
                 )
             )
             counts[t] += 1
