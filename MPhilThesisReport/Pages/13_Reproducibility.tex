@@ -407,14 +407,214 @@ propagation.
   \label{fig:carry-structure}
 \end{figure}
 
-Taken together, the three diagnostics converge on the same conclusion.
-The teacher-forced cascade localises the computation to the first output
-token and reveals that the model's confidence is determined almost entirely
-at that step.  The confidence and entropy maps show that this determination
-is modular in the decimal ones digits of both operands, with a period-10
-structure that would be inexplicable under a positional carry algorithm.
-The carry-class overlay confirms that carry complexity does not predict
-accuracy, removing the most natural alternative hypothesis.  These
-behavioural observations are consistent with the lookup-table mechanism
-reported by \citet{lindsey2025biology}, and they motivate the mechanistic
-analysis of the following sections.
+TODO: Conclusions...
+
+% ============================================================
+\section{Reproducing the Multilingual Circuit}
+% ============================================================
+
+\citet{lindsey2025biology} showed that antonym completion in Claude~3.5
+Haiku is not implemented by a monolithic circuit but by three functionally
+independent components, each localised in a distinct portion of the
+network.  When presented with a prompt of the form \textit{the opposite of
+``small'' is ``}, the model activates a family of transcoder features
+encoding the antonym \textit{operation} (what semantic relation is being
+applied), the \textit{operand} (the concept whose opposite is sought), and
+the output \textit{language} (which language the response should appear in).
+By identifying source-exclusive and target-exclusive features for each
+component in isolation and injecting the latter while suppressing the former,
+they demonstrated that each component can be redirected independently without
+disrupting the others.  The present experiment asks whether the same
+factorised structure is present in Qwen3-4B, a model trained on a different
+corpus with a different tokeniser.
+
+The multilingual setting makes the factorisation hypothesis non-trivial to
+test.  If the operation and operand components were language-specific,
+features identified from an English prompt would carry no predictive power
+over French or Chinese outputs.  The hypothesis predicts instead that the
+features encoding the antonym relation and the concept of size are
+language-neutral directions in activation space, remaining active across
+prompts in all three languages, and that only the language component varies
+with the surface language of the input.  This thesis reproduces three causal
+interventions on Qwen3-4B, targeting the operation, operand, and language
+components in turn, using the transcoder-based causal methodology described
+below.
+
+\subsection{Exclusive Feature Identification}
+\label{subsec:exclusive-features}
+
+For each experiment, a \textit{source} condition and a \textit{target}
+condition are defined, differing along exactly one of the three components.
+Let $a_{\ell,k}^{\,\mathrm{src}}$ and $a_{\ell,k}^{\,\mathrm{tgt}}$ denote
+the activation of transcoder feature $k$ at layer $\ell$ and token position
+$p$ under the source and target conditions respectively.  Taking the top-$K$
+active features in each condition, a feature is \textit{source-exclusive} if
+it is strongly active in the source condition and weakly active in the target,
+and \textit{target-exclusive} if the reverse holds.  With exclusivity
+threshold $\rho \in (0,1)$, the suppress set $\mathcal{S}^\ell$ and inject
+set $\mathcal{I}^\ell$ at layer $\ell$ are defined as
+
+\begin{equation}
+  \mathcal{S}^\ell
+    = \bigl\{k \in \mathcal{F}_{\mathrm{src}}^\ell
+        : a_{\ell,k}^{\,\mathrm{tgt}} < \rho\cdot a_{\ell,k}^{\,\mathrm{src}}\bigr\},
+  \qquad
+  \mathcal{I}^\ell
+    = \bigl\{k \in \mathcal{F}_{\mathrm{tgt}}^\ell
+        : a_{\ell,k}^{\,\mathrm{src}} < \rho\cdot a_{\ell,k}^{\,\mathrm{tgt}}\bigr\},
+  \label{eq:exclusive-sets}
+\end{equation}
+
+where $\mathcal{F}_{\mathrm{src}}^\ell$ and $\mathcal{F}_{\mathrm{tgt}}^\ell$
+are the top-$K$ active feature indices at layer $\ell$ under the respective
+conditions.  The threshold $\rho = 0.5$ was used throughout, so a feature
+qualifies as source-exclusive only if the target condition activates it at
+less than half the source-condition magnitude.  The sets $\mathcal{S}^\ell$
+and $\mathcal{I}^\ell$ are disjoint by construction: a feature active at
+comparable magnitude in both conditions satisfies neither criterion and
+belongs to neither set.
+
+\subsection{Causal Intervention Sweep}
+\label{subsec:multilingual-intervention}
+
+The intervention acts on the pre-MLP hidden state.  Let
+$\mathbf{h}^{\ell,p} \in \mathbb{R}^d$ denote the post-RMSNorm input to the
+MLP at layer $\ell$ and token position $p$, the vector on which the
+transcoder encoder was trained to operate.  For each layer $\ell$ in the
+designated range, $\mathbf{h}^{\ell,p}$ is projected through the transcoder
+encoder, the resulting feature representation is modified according to
+Equation~\eqref{eq:exclusive-sets}, and the altered output supplants the
+standard MLP contribution at that position.
+
+The feature activations produced by this projection are
+
+\begin{equation}
+  \tilde{\mathbf{z}}^{\ell,p}
+    = \mathrm{ReLU}\!\left(
+        \mathbf{W}_\mathrm{enc}^{(\ell)}\,\mathbf{h}^{\ell,p}
+        + \mathbf{b}_\mathrm{enc}^{(\ell)}
+      \right) \in \mathbb{R}^K.
+  \label{eq:reenc}
+\end{equation}
+
+Source-exclusive activations are set to zero and target-exclusive activations
+are augmented at intervention strength $\gamma \geq 0$,
+
+\begin{equation}
+  \tilde{z}^{\ell,p}_k \;\leftarrow\; 0,
+  \quad k \in \mathcal{S}^\ell;
+  \qquad
+  \tilde{z}^{\ell,p}_k \;\leftarrow\; \tilde{z}^{\ell,p}_k + \gamma\,v_k,
+  \quad k \in \mathcal{I}^\ell,
+  \label{eq:suppress-inject}
+\end{equation}
+
+where $v_k = a_{\ell,k}^{\,\mathrm{tgt}}$ is the target-condition activation
+magnitude of feature $k$.  The modified feature vector is then projected back
+to residual space via the transcoder decoder,
+
+\begin{equation}
+  \tilde{\mathbf{o}}^{\ell,p}
+    = \mathbf{W}_\mathrm{dec}^{(\ell)}\,\tilde{\mathbf{z}}^{\ell,p}
+    + \mathbf{b}_\mathrm{dec}^{(\ell)},
+  \label{eq:decode-multi}
+\end{equation}
+
+and computation propagates with $\tilde{\mathbf{o}}^{\ell,p}$ in place of
+the standard MLP output at position $p$ and layer $\ell$, all other positions
+and layers remaining undisturbed.  The next-token probability for each
+monitored vocabulary index $t$ at the final position $T$ is
+
+\begin{equation}
+  \pi_t(\gamma)
+    = \bigl[\mathrm{softmax}\!\left(\mathrm{logits}_T\right)\bigr]_t.
+  \label{eq:pi-gamma}
+\end{equation}
+
+The sweep is conducted over $\gamma \in \{0,\,\delta,\,2\delta,\,\ldots,\,\gamma_{\max}\}$,
+yielding one probability curve $\pi_t$ per monitored token.  If the targeted
+component is causally sufficient for the corresponding aspect of the output,
+$\pi_t$ for the target-condition token should rise monotonically with $\gamma$
+while the source-condition curve declines, constituting a directional
+redistribution of probability mass.
+
+\subsection{Three Causal Interventions}
+\label{subsec:multilingual-experiments}
+
+The three interventions differ in which component they target, at which token
+position features are identified, and over which layer range the modification
+is applied.  The layer ranges are grounded in the decomposition reported by
+\citet{lindsey2025biology} for Claude~3.5 Haiku: the operation component
+occupies the middle third of the network, the operand the early third, and
+the language component the first fifth.  For Qwen3-4B with $L = 36$, these
+correspond to
+
+\begin{equation}
+  \mathcal{L}_{\mathrm{op}}
+    = \Bigl\{\bigl\lfloor\tfrac{L}{3}\bigr\rfloor,\,\ldots,\,
+             \bigl\lfloor\tfrac{2L}{3}\bigr\rfloor - 1\Bigr\}
+    = \{12,\ldots,23\},
+  \label{eq:op-layers}
+\end{equation}
+
+\begin{equation}
+  \mathcal{L}_{\mathrm{oper}}
+    = \Bigl\{0,\,\ldots,\,\bigl\lfloor\tfrac{L}{3}\bigr\rfloor - 1\Bigr\}
+    = \{0,\ldots,11\},
+  \label{eq:oper-layers}
+\end{equation}
+
+\begin{equation}
+  \mathcal{L}_{\mathrm{lang}}
+    = \Bigl\{0,\,\ldots,\,\max\!\bigl(1,\bigl\lfloor\tfrac{L}{5}\bigr\rfloor\bigr) - 1\Bigr\}
+    = \{0,\ldots,6\}.
+  \label{eq:lang-layers}
+\end{equation}
+
+These ranges are adopted from Anthropic's analysis of a distinct architecture
+and are not derived from the geometry of Qwen3-4B itself.  Whether they
+correctly delimit the relevant layer segments for this model is an empirical
+question that the results address.
+
+\paragraph{Operation swap.}
+The antonym task is presented in English as \textit{the opposite of
+``small'' is ``}, with the alternative prompt \textit{a synonym of ``small''
+is ``} as the target condition.  Features are identified at the final token
+position $p = T$ over layers $\mathcal{L}_{\mathrm{op}}$.  The resulting
+exclusive partition $(\mathcal{S}^\ell, \mathcal{I}^\ell)$ is transferred
+without modification to antonym prompts in English, French, and Chinese.  The
+monitored tokens are the antonym surface forms in each language and their
+synonym counterparts.  If the operation features are language-neutral, the
+English-derived partition should redirect the output toward synonyms across
+all three languages.
+
+\paragraph{Operand swap.}
+The source condition is the English antonym prompt for ``small'' and the
+target is the English antonym prompt for ``hot'', \textit{the opposite of
+``hot'' is ``}.  Features are identified not at the final position but at
+the \textit{operand divergence position} $p^*$, the first index at which
+the token sequences of the two English prompts diverge.  This is the position
+at which the words ``small'' and ``hot'' enter the context respectively, and
+it is where the operand concept is hypothesised to be encoded.  The exclusive
+partition is computed over $\mathcal{L}_{\mathrm{oper}}$ and applied at the
+analogous divergence position in each language-specific antonym prompt.  The
+monitored tokens are the antonym surface forms and the surface forms denoting
+cold in each language.
+
+\paragraph{Language swap.}
+Three directed language pairs are examined: English to Chinese, Chinese to
+French, and French to English.  For each pair, both the source and target
+activations are drawn from antonym prompts in the respective languages, and
+the exclusive partition encodes the contrast between two language contexts
+rather than two semantic conditions.  The partition is computed at the final
+position over $\mathcal{L}_{\mathrm{lang}}$ and the intervention acts on the
+source-language prompt.  The monitored tokens are the antonym surface forms
+in both languages.  If the language component is independently localised,
+substituting target-language features for source-language ones should redirect
+the output toward the target-language antonym, leaving the underlying semantic
+relation undisturbed.
+
+\subsection{Results}
+\label{subsec:multilingual-results}
+
+% TODO: results pending full experimental runs.
