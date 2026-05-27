@@ -13,77 +13,14 @@ digit of $d_1 + d_2$ and route this information directly to the output.
 The present reproduction asks whether the same mechanistic signature
 appears in Qwen3-4B, trained independently on a different corpus and with
 a different tokeniser, and whether the attribution methodology transfers
-faithfully to a model for which it was not originally calibrated.
-
-\subsection{Transcoders and the Linearised Computation Graph}
-
-Let $\mathcal{M}$ be a transformer with $L$ layers, residual stream
-dimension $d$, and MLP sublayers $f_0, \ldots, f_{L-1}$.  Mechanistic
-analysis replaces each $f_\ell$ with a pretrained \textit{transcoder}
-$\mathcal{T}_\ell$, a sparse encoder--decoder whose weights are fit
-offline to reconstruct the MLP output while decomposing it into $K$
-interpretable directions.  For a residual-stream vector
-$\mathbf{x} \in \mathbb{R}^d$ entering layer $\ell$, the transcoder
-computes pre-activations
-
-\begin{equation}
-  z_{\ell,k}(\mathbf{x})
-    = \bigl(\mathbf{W}_\mathrm{enc}^{(\ell)}\,\mathbf{x}
-           + \mathbf{b}_\mathrm{enc}^{(\ell)}\bigr)_k,
-  \label{eq:preact}
-\end{equation}
-
-so that feature $k$ carries activation
-$a_{\ell,k}(\mathbf{x}) = \mathrm{ReLU}(z_{\ell,k}(\mathbf{x}))$,
-and the reconstructed MLP output is
-
-\begin{equation}
-  \hat{f}_\ell(\mathbf{x})
-    = \mathbf{W}_\mathrm{dec}^{(\ell)}\,\mathbf{a}_\ell(\mathbf{x})
-    + \mathbf{b}_\mathrm{dec}^{(\ell)},
-  \label{eq:recon}
-\end{equation}
-
-where $\mathbf{W}_\mathrm{dec}^{(\ell)} \in \mathbb{R}^{d \times K}$ and
-$\mathbf{a}_\ell(\mathbf{x})$ is the vector of all feature activations at
-layer $\ell$.  Throughout this section a double subscript $(\ell, k)$
-indexes features, with $\ell$ specifying the layer and $k$ the index within
-that layer's dictionary, in place of the flat index $f$ used in
-Chapter~\ref{sec:introduction}.
-
-Attribution is computed on the \textit{linearised} model, in which attention
-outputs are detached and treated as constants, so the residual stream
-propagates solely through the transcoder reconstruction path.  This
-linearisation is the necessary condition for the attribution scores to
-be additive and interpretable as influence flows; it is also what
-constrains their faithfulness, a point examined in Section~\ref{sec:faithfulness}.
-
-Let $T$ denote the position of the final input token, and let
-$y_j = \mathbf{v}_j^\top \mathbf{h}_T$ be the logit for output token
-$j$, where $\mathbf{h}_T$ is the pre-unembedding hidden state and
-$\mathbf{v}_j$ is the (demeaned) unembedding direction for token $j$.
-The \textit{attribution score} of feature $k$ at position $t$ in
-layer $\ell$ is defined as
-
-\begin{equation}
-  \alpha_{\ell,k,t}
-    \;=\; a_{\ell,k,t}
-          \cdot \frac{\partial y_j}{\partial a_{\ell,k,t}},
-  \label{eq:attr}
-\end{equation}
-
-the product of the feature activation $a_{\ell,k,t}$ with the gradient of
-the target logit with respect to that activation, consistent with
-Equation~\eqref{eq:attribution} of Chapter~\ref{sec:introduction}.
-Collecting all such scores over a given prompt yields a directed weighted
-graph, the \textit{attribution graph}, in which nodes are (layer, position,
-feature) triples and edges carry the influence $\alpha_{\ell,k,t}$ from
-earlier features to later ones.  The graph is then pruned by retaining only the nodes and edges
-that account for a fixed fraction of the total downstream influence on
-$y_j$, controlled by a node threshold $\tau_\mathrm{node}$ and an edge
-threshold $\tau_\mathrm{edge}$.
+faithfully to a model for which it was not originally calibrated.  The
+analysis adopts the transcoder formalism and notation of
+Section~\ref{sec:interp-methods}; the faithfulness of the linearised
+attribution on Qwen3-4B is examined separately in
+Section~\ref{sec:faithfulness}.
 
 \subsection{Operand Plots and Lookup Feature Identification}
+\label{subsec:operand-plots}
 
 For a prompt $\texttt{calc:~}a\texttt{+}b\texttt{=~}$, let $T$ be the
 index of the \texttt{=} token.  The \textit{operand matrix} for feature
@@ -155,8 +92,8 @@ whether an analogous positional structure is present in Qwen3-4B, the
 operand sweep of Equation~\ref{eq:operand-matrix} was applied at three
 token positions in the prompt \texttt{calc:~}$a$\texttt{+}$b$\texttt{=}:
 the ones digit of $a$ (position 4), the ones digit of $b$ (position 7),
-and the \texttt{=} token (position 8).  At each position the top-15 CLT
-features by attribution edge weight were selected.
+and the \texttt{=} token (position 8).  At each position the top-15 CLT features by attribution edge weight were
+selected; one representative per distinct ones-digit encoded is shown.
 Figure~\ref{fig:operand-pos-sweep} shows the resulting matrices.
 
 At position 4, the selected features activate in vertical bands with
@@ -182,22 +119,23 @@ values.
 
 \begin{figure}[ht]
   \centering
-  \includegraphics[width=\textwidth]{../runs/addition/operand_plots_by_pos/ctx5_ones(a)/combined_ones(a)}
+  \includegraphics[width=\textwidth]{../runs/addition/operand_plots_by_pos/ctx5_ones(a)/combined_ones(a)_filtered}
   \vspace{0.6em}
-  \includegraphics[width=\textwidth]{../runs/addition/operand_plots_by_pos/ctx8_ones(b)/combined_ones(b)}
+  \includegraphics[width=\textwidth]{../runs/addition/operand_plots_by_pos/ctx8_ones(b)/combined_ones(b)_filtered}
   \vspace{0.6em}
-  \includegraphics[width=\textwidth]{../runs/addition/operand_plots_by_pos/ctx9_=/combined_=}
+  \includegraphics[width=\textwidth]{../runs/addition/operand_plots_by_pos/ctx9_=/combined_=_filtered}
   \caption{%
-    Operand matrices $M_{\ell,k}[a,b]$ for the top-15 CLT features by
-    attribution edge weight at three token positions in
-    \texttt{calc:~36+59=}.
-    \textit{Top:} features captured at the ones digit of $a$ (position 4);
-    activation varies with $a \bmod 10$ and is flat in $b$.
-    \textit{Middle:} features at the ones digit of $b$ (position 7);
-    the role of the two operands is exchanged.
-    \textit{Bottom:} features at the \texttt{=} token (position 8),
-    showing diagonal sum contours, periodic point-cluster grids
-    (joint-modular sensitivity), and broader magnitude bands.
+    Representative operand matrices $M_{\ell,k}[a,b]$ at three token
+    positions in \texttt{calc:~36+59=}, one per distinct ones-digit encoded.
+    \textit{Top:} features at the ones digit of $a$ (position 4); each
+    panel activates along a single vertical stripe determined by $a \bmod 10$,
+    and is flat in $b$.
+    \textit{Middle:} features at the ones digit of $b$ (position 7); the
+    pattern is transposed, with activation concentrated in a single horizontal
+    stripe determined by $b \bmod 10$.
+    \textit{Bottom:} features at the \texttt{=} token (position 8), showing
+    periodic point-cluster grids of joint-modular sensitivity and broader
+    diagonal regions of sum sensitivity.
     Axes span two-digit operands $a, b \in [10, 99]$.
   }
   \label{fig:operand-pos-sweep}
@@ -205,8 +143,8 @@ values.
 
 The positional separation visible in Figure~\ref{fig:operand-pos-sweep}
 implies that ones-digit information is encoded before the two addends
-are jointly processed.  At the operand token positions, no feature in
-the top-15 shows sensitivity to both $a$ and $b$ simultaneously; the
+are jointly processed.  At the operand token positions, no retained feature shows sensitivity
+to both $a$ and $b$ simultaneously; the
 cross-operand joint representation appears only at the \texttt{=} token.
 This ordering is consistent with the view that the network first reads
 off each digit independently and only subsequently computes a function
