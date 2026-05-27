@@ -1,15 +1,14 @@
 """Multilingual circuits intervention experiment.
 
 Reproduces Anthropic's Biology of LLMs §5 antonym-completion experiments on
-Qwen3-4B with transcoders, testing three independently editable components:
+Qwen3-4B with transcoders, testing three independent components:
 
   1. Operation swap  — antonym features replaced by synonym features
   2. Operand swap    — "small" size features replaced by "hot" temperature features
   3. Language swap   — output-language features swapped across EN / FR / ZH
 
 For each experiment the script sweeps an injection strength alpha from 0 to a
-maximum value and records next-token probabilities for a set of tracked tokens,
-generating probability-vs-alpha plots analogous to Figures 19–21 in the paper.
+maximum value and records next-token probabilities for a set of tracked tokens.
 
 Usage:
     python -m experiments.multilingual_circuits.run
@@ -28,13 +27,36 @@ from pathlib import Path
 
 import torch
 import torch.nn.functional as F
+import matplotlib
 import matplotlib.pyplot as plt
+import matplotlib.font_manager as _fm
+
+# Use a CJK-capable font for legend labels if available, so Chinese characters
+# render correctly alongside Latin text.
+_CJK_FONTS = ["WenQuanYi Micro Hei", "Droid Sans Fallback", "Noto Sans CJK SC"]
+_cjk_font = next(
+    (f for f in _CJK_FONTS if any(x.name == f for x in _fm.fontManager.ttflist)),
+    None,
+)
+if _cjk_font:
+    matplotlib.rcParams["font.family"] = "sans-serif"
+    matplotlib.rcParams["font.sans-serif"] = [_cjk_font, "DejaVu Sans"] + list(
+        matplotlib.rcParams.get("font.sans-serif", [])
+    )
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from experiments.plot_style import apply as _apply_style, NAVY, VIOLET, TEAL, MAUVE, GRAY, RED
+from experiments.plot_style import apply as _apply_style_base, NAVY, VIOLET, TEAL, MAUVE, GRAY, RED
+
+
+def _apply_style() -> None:
+    """Apply the shared thesis style, then restore CJK font if available."""
+    _apply_style_base()
+    if _cjk_font:
+        matplotlib.rcParams["font.family"] = "sans-serif"
+        matplotlib.rcParams["font.sans-serif"] = [_cjk_font, "DejaVu Sans"]
 from mechinterp_qwen3.attribution_model import AttributionModel
 from mechinterp_qwen3.utils.hf_utils import load_transcoder_from_hub
 from mechinterp_qwen3.utils.model_utils import get_default_device, parse_dtype
@@ -69,26 +91,29 @@ HOT_ANTONYM_PROMPTS: dict[str, str] = {
 # Language-swap pairs: (source_lang, target_lang)
 LANG_SWAP_PAIRS: list[tuple[str, str]] = [("en", "zh"), ("zh", "fr"), ("fr", "en")]
 
-# Token surface forms to track per experiment
+# Token surface forms to track per experiment.
+# All prompts end with an open-quote character, so the model predicts the next
+# token without a leading space — surface forms must match that convention.
 
 # Antonyms of "small" in each language (original predictions to track)
 ANTONYM_TOKENS: dict[str, list[str]] = {
-    "en": [" large", " big"],
-    "fr": [" grand"],
+    "en": ["large", "big"],
+    "fr": ["grand"],
     "zh": ["大"],
 }
 
 # Synonyms of "small" in each language (intervention targets for op-swap)
 SYNONYM_TOKENS: dict[str, list[str]] = {
-    "en": [" small", " little", " tiny"],
-    "fr": [" petit", " minuscule"],
+    "en": ["tiny", "little", "small"],
+    "fr": ["petit", "minuscule"],
     "zh": ["小", "微", "矮"],
 }
 
-# Antonyms of "hot" = cold in each language (intervention targets for operand-swap)
+# Antonyms of "hot" = cold in each language (intervention targets for operand-swap).
+# French "froid" tokenises as "f" + "roid"; the first predicted token is "f".
 COLD_TOKENS: dict[str, list[str]] = {
-    "en": [" cold"],
-    "fr": [" froid", " froide"],
+    "en": ["cold"],
+    "fr": ["f"],          # first subtoken of "froid"
     "zh": ["冷"],
 }
 

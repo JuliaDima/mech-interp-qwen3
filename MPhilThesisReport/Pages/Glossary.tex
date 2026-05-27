@@ -82,4 +82,25 @@
     agreement with activation patching in practice confirms that the relevant neighbourhood
     is approximately linear.
 
+  \item[Source-exclusive feature] A transcoder feature that is strongly active under a source
+    prompt condition and weakly active under a target condition, qualifying it for suppression
+    during a causal intervention sweep.  The complementary notion, a target-exclusive feature,
+    is one that is strongly active in the target condition and weakly active in the source,
+    qualifying it for injection.  Formally, feature $k$ at layer $\ell$ is source-exclusive if
+    $a_{\ell,k}^{\,\mathrm{tgt}} < \rho\cdot a_{\ell,k}^{\,\mathrm{src}}$ for a
+    threshold $\rho \in (0,1)$.
+
+  \item[Intervention sweep] An experiment in which a causal modification of the model's
+    internal activations is applied at a sequence of increasing strengths $\gamma$, and the
+    resulting next-token probabilities for a set of tracked tokens are recorded at each value.
+    A successful sweep produces a monotone crossover between the source-condition and
+    target-condition token probability curves, providing evidence that the modified features
+    causally mediate the targeted aspect of the output.
+
+  \item[Operand divergence position] The index of the first token at which two prompt
+    sequences differ, used in the operand swap experiment to locate the token position at
+    which the operand concept enters the context.  For the English prompts \textit{the opposite
+    of ``small'' is ``} and \textit{the opposite of ``hot'' is ``}, this is the position of
+    the tokens corresponding to ``small'' and ``hot'' respectively.
+
 \end{description}
