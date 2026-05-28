@@ -39,6 +39,7 @@ _DEFAULT_RUNS = _REPO_ROOT / "runs" / "concept_localization"
 
 # Plot types to tile from existing PNGs (filename stem → human title)
 _PNG_PLOT_TYPES: list[tuple[str, str]] = [
+    ("norm_trajectory", "Norm trajectory"),
     ("causal_scores", "Causal scores"),
     ("feature_projections_scatter", "Feature projections"),
 ]

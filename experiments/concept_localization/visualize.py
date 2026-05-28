@@ -100,14 +100,23 @@ def plot_norm_and_alignment(
             normed = [r / ld.mean_act_norm.get(l, 1.0) for l, r in zip(layers, raw)]
             ax_normed.plot(layers, normed, label=label, color=color, linewidth=lw, linestyle=ls, alpha=alpha)
 
+        if is_agg and ld.mean_pair_cos:
+            cos_layers = sorted(ld.mean_pair_cos.keys())
+            cos_vals = [ld.mean_pair_cos[l] for l in cos_layers]
+            ax_raw.plot(cos_layers, cos_vals, color=ps.TEAL, linewidth=1.6,
+                        linestyle=":", label=r"mean $\cos(\delta_i,\,\bar{\delta}_l)$", zorder=4)
+            if use_norm and ax_normed is not None:
+                ax_normed.plot(cos_layers, cos_vals, color=ps.TEAL, linewidth=1.6,
+                               linestyle=":", label=r"mean $\cos(\delta_i,\,\bar{\delta}_l)$", zorder=4)
+
     ax_raw.set_ylabel(r"$\|\delta_l\| / \max_l(\|\delta_l\|)$")
     ax_raw.set_title(f"{concept} — norm trajectory", fontsize=11)
     ax_raw.set_ylim(bottom=0)
-    ax_raw.legend()
+    ax_raw.legend(fontsize=8)
 
     if use_norm and ax_normed is not None:
         ax_normed.set_ylabel(r"$\|\delta_l\| / \mathbb{E}\|\mathbf{h}_l\|$")
-        ax_normed.legend()
+        ax_normed.legend(fontsize=8)
 
     # Inter-layer cosine similarity for aggregate only
     if "all" in results and results["all"].delta:
