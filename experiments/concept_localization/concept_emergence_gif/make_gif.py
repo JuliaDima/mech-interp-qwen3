@@ -40,6 +40,8 @@ from experiments.concept_localization.run_concept import _load_concept
 from experiments.plot_style import GRAY, TEAL, VIOLET, apply
 
 _GREEN = "#27ae60"
+_STEP_COLOR = "#D4A017"   # amber — steepest-step markers
+
 from mechinterp_qwen3.attribution_model import AttributionModel
 from mechinterp_qwen3.utils.hf_utils import load_transcoder_from_hub
 from mechinterp_qwen3.utils.model_utils import get_default_device, parse_dtype
@@ -62,6 +64,51 @@ def _decode_tokens(tokenizer, ids: list[int]) -> list[str]:
     ]
 
 
+def _detect_step_layers(normed: np.ndarray, n_top: int = 2, smooth: int = 2) -> list[int]:
+    """Layer indices (transition i → i+1) of the n_top steepest local gradient peaks."""
+    grad = np.diff(normed)
+    if smooth > 1:
+        kernel = np.ones(smooth) / smooth
+        grad = np.convolve(grad, kernel, mode="same")
+    # Local maxima of the gradient (peaks)
+    peaks = [
+        (grad[i], i)
+        for i in range(1, len(grad) - 1)
+        if grad[i] >= grad[i - 1] and grad[i] > grad[i + 1] and grad[i] > 0
+    ]
+    if not peaks:
+        top = sorted(np.argsort(grad)[-n_top:].tolist())
+        return top
+    peaks.sort(reverse=True)
+    return sorted(i for _, i in peaks[:n_top])
+
+
+def _detect_phases(
+    normed: np.ndarray, min_frac: float = 0.28, merge_gap: int = 4
+) -> list[int]:
+    """Return layer indices of significant gradient peaks (phase boundaries).
+
+    Each returned index i means the steepest rise is at the transition i → i+1.
+    Nearby peaks within merge_gap layers are merged to their centroid.
+    """
+    grad = np.diff(normed)
+    threshold = grad.max() * min_frac
+    peaks = [
+        i
+        for i in range(1, len(grad) - 1)
+        if grad[i] >= grad[i - 1] and grad[i] > grad[i + 1] and grad[i] > threshold
+    ]
+    if not peaks:
+        return []
+    merged: list[int] = [peaks[0]]
+    for p in peaks[1:]:
+        if p - merged[-1] <= merge_gap:
+            merged[-1] = (merged[-1] + p) // 2
+        else:
+            merged.append(p)
+    return merged
+
+
 def _render_frame(
     ax: plt.Axes,
     layers: list[int],
@@ -81,11 +128,45 @@ def _render_frame(
         alpha = 0.12 + 0.25 * (p / max(current_pos, 1))
         ax.plot(layers, norms_at_pos[p], color=GRAY, lw=0.8, alpha=alpha)
 
-    ax.plot(layers, norms_at_pos[current_pos], color=VIOLET, lw=2.4, zorder=5,
+    purple = norms_at_pos[current_pos]
+    ax.plot(layers, purple, color=VIOLET, lw=2.4, zorder=5,
             label=r"$\|\delta_l\| / \max_l(\|\delta_l\|)$  (mean over pairs)")
     ax.plot(layers, act_norms_at_pos[current_pos], color=_GREEN, lw=1.8,
             ls="--", zorder=6,
             label=r"$(\|\delta_l\| / \mathbb{E}\|\mathbf{h}_l\|) / \max_l(\|\delta_l\| / \mathbb{E}\|\mathbf{h}_l\|)$ (mean over pairs)")
+
+    # --- Steepest-step and phase annotations (purple line only) ---
+    if purple.max() > 1e-10:
+        top_steps = _detect_step_layers(purple, n_top=2)
+        phase_bounds = _detect_phases(purple)
+        n_phases = len(phase_bounds) + 1
+
+        # Shade phases with alternating very-light fills
+        phase_edges = [0] + [b + 1 for b in phase_bounds] + [n_layers]
+        phase_alphas = [0.06, 0.0, 0.06, 0.0, 0.06]
+        for k in range(len(phase_edges) - 1):
+            lo, hi = phase_edges[k], phase_edges[k + 1]
+            ax.axvspan(lo - 0.5, hi - 0.5, color=VIOLET,
+                       alpha=phase_alphas[k % len(phase_alphas)], lw=0, zorder=0)
+
+        # Mark top-2 steepest transitions
+        grad = np.diff(purple)
+        for rank, step_l in enumerate(top_steps):
+            step_size = float(grad[step_l])
+            x_mid = step_l + 0.5
+            y_mid = float((purple[step_l] + purple[step_l + 1]) / 2)
+            ax.axvline(x_mid, color=_STEP_COLOR, lw=1.4, ls="--", alpha=0.85, zorder=4)
+            label_y = min(y_mid + 0.08, 1.05)
+            ax.text(x_mid, label_y,
+                    f"#{rank + 1}  +{step_size:.3f}",
+                    ha="center", va="bottom", fontsize=7, color=_STEP_COLOR,
+                    bbox=dict(boxstyle="round,pad=0.15", facecolor="white",
+                              edgecolor=_STEP_COLOR, alpha=0.85, lw=0.6))
+
+        # Phase count in the bottom-right corner
+        ax.text(0.98, 0.03, f"{n_phases} phase{'s' if n_phases != 1 else ''}",
+                transform=ax.transAxes, ha="right", va="bottom",
+                fontsize=8, color=GRAY, style="italic")
 
     tok_str = token_labels_pos[current_pos]
     consumed_pos = "".join(token_labels_pos[: current_pos + 1])
@@ -222,6 +303,10 @@ def make_emergence_gif(
         "delimiter_pos": delimiter_pos,
         "n_pairs": len(pairs),
         "layers": layers,
+        "token_labels_pos": token_labels_pos,
+        "token_labels_neg": token_labels_neg,
+        "concept": concept,
+        "template": template,
     }
     np.save(out_path.with_suffix(".npy"), norms_data)
     log.info("Saved emergence norms → %s", out_path.with_suffix(".npy"))
@@ -237,6 +322,48 @@ def make_emergence_gif(
         duration=durations,
     )
     log.info("Saved GIF (%d frames, %d fps, 7 s hold at delimiter) → %s", len(frames), fps, out_path)
+
+
+def regen_gif_from_npy(npy_path: Path, out_path: Path, fps: int = 2) -> None:
+    """Regenerate the GIF from a saved .npy file — no model loading required."""
+    data = np.load(npy_path, allow_pickle=True).item()
+    norms_raw = data["norms_raw"]
+    act_norms_raw = data["act_norms_raw"]
+    delimiter_pos = data["delimiter_pos"]
+    n_pairs = data["n_pairs"]
+    layers = data["layers"]
+    token_labels_pos = data.get("token_labels_pos", [str(i) for i in range(norms_raw.shape[0] + 2)])
+    token_labels_neg = data.get("token_labels_neg", token_labels_pos)
+    concept = data.get("concept", npy_path.parent.name)
+    template = data.get("template", None)
+
+    n_layers = len(layers)
+    n_frames = norms_raw.shape[0]
+
+    row_max = norms_raw.max(axis=1, keepdims=True).clip(min=1e-8)
+    norms = norms_raw / row_max
+    row_max_act = act_norms_raw.max(axis=1, keepdims=True).clip(min=1e-8)
+    act_norms = act_norms_raw / row_max_act
+
+    apply()
+    frames: list[Image.Image] = []
+    fig, ax = plt.subplots(figsize=(5, 5))
+    for pos in range(n_frames):
+        _render_frame(ax, layers, norms, act_norms, pos, n_pairs,
+                      token_labels_pos, token_labels_neg, concept, n_layers, template)
+        fig.tight_layout()
+        fig.canvas.draw()
+        w, h = fig.canvas.get_width_height()
+        buf = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8).reshape(h, w, 4)
+        frames.append(Image.fromarray(buf[:, :, :3]))
+    plt.close(fig)
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    duration_ms = int(1000 / fps)
+    durations = [duration_ms] * len(frames)
+    durations[-1] = 7000
+    frames[0].save(out_path, save_all=True, append_images=frames[1:], loop=0, duration=durations)
+    log.info("Regenerated GIF (%d frames) → %s", len(frames), out_path)
 
 
 def main() -> None:
@@ -257,9 +384,19 @@ def main() -> None:
         default=None,
         help="Output GIF path (default: runs/concept_localization/<concept>/emergence.gif)",
     )
+    parser.add_argument(
+        "--from_npy",
+        default=None,
+        metavar="PATH",
+        help="Regenerate GIF from an existing .npy file without reloading the model.",
+    )
     args = parser.parse_args()
 
     out = Path(args.out or f"runs/concept_localization/{args.concept}/emergence.gif")
+
+    if args.from_npy:
+        regen_gif_from_npy(Path(args.from_npy), out, fps=args.fps)
+        return
 
     make_emergence_gif(
         concept=args.concept,
