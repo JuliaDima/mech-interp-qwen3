@@ -13,7 +13,10 @@ import random
 from experiments.concept_localization.concept_pair import ConceptPair
 
 TEMPLATES = {
-    "T0": ("True or False: {m} is not greater than {n}: ", "True or False: {m} is not greater than {n}: "),
+    "T0": (
+        "True or False: {m} is not greater than {n}: ",
+        "True or False: {m} is not greater than {n}: ",
+    ),
     "T1": ("True or False: {m} does not exceed {n}: ", "True or False: {m} does not exceed {n}: "),
     "T2": ("True or False: is {m} at most {n}? ", "True or False: is {m} at most {n}? "),
 }
@@ -26,7 +29,7 @@ def generate_negation_pairs(
 ) -> list[ConceptPair]:
     """Pairs: n_pos > m (statement true) vs n_neg < m (statement false).
 
-    m is fixed; only n varies. Values are 1-2 digit integers.
+    m is fixed; only n varies. Values are 3 digit integers.
     """
     if templates is None:
         templates = list(TEMPLATES)
@@ -41,7 +44,7 @@ def generate_negation_pairs(
         v < n_per_template for v in counts.values()
     ):
         attempts += 1
-        n_digits = rng.choice([1, 2, 3])
+        n_digits = 3
         lo = 10 ** (n_digits - 1) if n_digits > 1 else 1
         hi = 10**n_digits - 1
 

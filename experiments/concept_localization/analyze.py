@@ -15,10 +15,17 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+import numpy as np
 import torch
 import torch.nn.functional as F
+from tqdm import tqdm
 
 from experiments.concept_localization.extract_deltas import LayerDeltas
+from experiments.concept_localization.extract_deltas_generic import (
+    AnchorFactory,
+    _resolve_anchor,
+)
+from mechinterp_qwen3.utils.token_utils import tokenize_qwen_input
 
 log = logging.getLogger(__name__)
 
@@ -26,18 +33,18 @@ log = logging.getLogger(__name__)
 @dataclass
 class SharpnessResult:
     layers: list[int]
-    norms: list[float]          # ||δ_l|| / E[||h_l||] when mean_act_norm available, else raw
+    norms: list[float]  # ||δ_l|| / E[||h_l||] when mean_act_norm available, else raw
     inter_layer_cos: list[float]  # cos_sim(δ_l, δ_{l+1})
     peak_layer: int
-    sharpness_index: float      # fraction of normalised norm mass at peak ± 1 layers
-    normalised: bool            # True when norms are activation-normalised
+    sharpness_index: float  # fraction of normalised norm mass at peak ± 1 layers
+    normalised: bool  # True when norms are activation-normalised
 
 
 @dataclass
 class FeatureMatch:
     feature_id: int
-    projection: float   # ‖δ_l‖ · cos_sim(δ_l, W_enc_f)
-    cos_sim: float      # cos_sim(δ_l, W_enc_f) — pure directional alignment in [-1, 1]
+    projection: float  # ‖δ_l‖ · cos_sim(δ_l, W_enc_f)
+    cos_sim: float  # cos_sim(δ_l, W_enc_f) — pure directional alignment in [-1, 1]
     layer: int
 
 
@@ -48,7 +55,7 @@ def compute_sharpness(ld: LayerDeltas) -> SharpnessResult:
     # Normalise by mean activation norm when available to remove residual-stream growth bias
     normalised = bool(ld.mean_act_norm)
     if normalised:
-        norms = [r / ld.mean_act_norm.get(l, 1.0) for l, r in zip(layers, raw_norms)]
+        norms = [r / ld.mean_act_norm.get(l, 1.0) for l, r in zip(layers, raw_norms, strict=False)]
     else:
         norms = raw_norms
 
@@ -132,8 +139,8 @@ def project_onto_features(
             continue
 
         enc_norms = W_enc.norm(dim=1).clamp(min=1e-8)  # (n_features,)
-        projections = (W_enc @ delta) / enc_norms       # ‖δ_l‖ · cos_sim
-        cos_sims = projections / delta_norm             # pure cos_sim in [-1, 1]
+        projections = (W_enc @ delta) / enc_norms  # ‖δ_l‖ · cos_sim
+        cos_sims = projections / delta_norm  # pure cos_sim in [-1, 1]
 
         k = min(top_k, projections.numel())
         topk_vals, topk_ids = projections.abs().topk(k)
@@ -157,3 +164,146 @@ def project_onto_features(
     return result
 
 
+@torch.no_grad()
+def sweep_concept_feature_activations(
+    model,
+    pairs,
+    feature_ids: list[tuple[int, int]],
+    anchor_mode: str = "delimiter",
+    anchor_factory: AnchorFactory | None = None,
+) -> dict[tuple[int, int], tuple[np.ndarray, np.ndarray]]:
+    """Collect transcoder feature activations at the anchor across all concept pairs.
+
+    For each (layer, feat_id) in feature_ids, returns two arrays of length
+    len(valid_pairs): activations on positive examples and on negative examples.
+
+    Uses targeted residual-stream hooks and per-layer transcoder encoding only at
+    the anchor position and only for the needed layers, rather than running the
+    full get_activations (which computes all layers × all positions × full d_tc).
+    """
+    from collections import defaultdict
+
+    from mechinterp_qwen3.transcoder.activation_functions import JumpReLU
+
+    # Group feature indices by layer
+    by_layer: dict[int, list[int]] = defaultdict(list)
+    for layer, feat_id in feature_ids:
+        by_layer[layer].append(feat_id)
+
+    # Pre-extract W_enc/b_enc rows for only the needed features per layer
+    layer_info: dict[int, tuple] = {}
+    for layer, feat_ids_l in by_layer.items():
+        tc = model.transcoders[layer]
+        idx = torch.tensor(feat_ids_l, dtype=torch.long)
+        W_sub = tc.W_enc[idx].detach()  # (n_feats, d_model)
+        b_sub = tc.b_enc[idx].detach()  # (n_feats,)
+        act_fn = tc.activation_function
+        is_jr = isinstance(act_fn, JumpReLU)
+        if is_jr:
+            thr = act_fn.threshold.detach()
+            thr_sub = thr[idx] if thr.numel() > 1 else thr.expand(len(feat_ids_l))
+        else:
+            thr_sub = None
+        layer_info[layer] = (feat_ids_l, W_sub, b_sub, is_jr, thr_sub)
+
+    n = len(pairs)
+    buf_pos = {fid: np.zeros(n, dtype=np.float32) for fid in feature_ids}
+    buf_neg = {fid: np.zeros(n, dtype=np.float32) for fid in feature_ids}
+    valid = np.zeros(n, dtype=bool)
+
+    for i, pair in enumerate(tqdm(pairs, desc="Sweeping feature activations")):
+        ids_pos = model.tokenizer(pair.prompt_pos, add_special_tokens=False).input_ids
+        ids_neg = model.tokenizer(pair.prompt_neg, add_special_tokens=False).input_ids
+        if len(ids_pos) != len(ids_neg):
+            continue
+
+        anchor = _resolve_anchor(ids_pos, model.tokenizer, anchor_mode, anchor_factory, pair) + 1
+
+        # Hook captures residual stream at anchor for needed layers only (no transcoder)
+        resid_cache: dict[int, torch.Tensor] = {}
+        hooks = [
+            (
+                f"blocks.{layer}.{model.feature_input_hook}",
+                lambda acts, hook, _l=layer, _pos=anchor: (
+                    resid_cache.update({_l: acts[0, _pos, :].detach().clone()})
+                )
+                or acts,
+            )
+            for layer in by_layer
+        ]
+
+        for ids, buf, label in [
+            (ids_pos, buf_pos, "pos"),
+            (ids_neg, buf_neg, "neg"),
+        ]:
+            resid_cache.clear()
+            input_ids = tokenize_qwen_input(ids, model.tokenizer, model.cfg.device).unsqueeze(0)
+            model.run_with_hooks(input_ids, fwd_hooks=hooks)
+
+            for layer, (feat_ids_l, W_sub, b_sub, is_jr, thr_sub) in layer_info.items():
+                if layer not in resid_cache:
+                    continue
+                h = resid_cache[layer]
+                dev, dt = h.device, h.dtype
+                pre = h @ W_sub.to(dev, dt).T + b_sub.to(dev, dt)  # (n_feats,)
+                if is_jr:
+                    out = pre * (pre > thr_sub.to(dev, dt))
+                else:
+                    out = torch.relu(pre)
+                out_np = out.float().cpu().numpy()
+                for j, fid in enumerate(feat_ids_l):
+                    buf[(layer, fid)][i] = out_np[j]
+
+        valid[i] = True
+
+    return {fid: (buf_pos[fid][valid], buf_neg[fid][valid]) for fid in feature_ids}
+
+
+@torch.no_grad()
+def collect_layer_residuals(
+    model,
+    prompts_and_anchors: list[tuple[list[int], int]],
+    target_layers: list[int],
+) -> dict[int, np.ndarray]:
+    """Capture residual-stream vectors at the anchor position for each prompt.
+
+    prompts_and_anchors: list of (token_id_list, anchor_position) pairs.
+    target_layers: which layers to hook (uses model.feature_input_hook).
+
+    Returns dict layer → float32 array of shape (N, d_model),
+    where N = len(prompts_and_anchors).  Missing entries (anchor out of range)
+    are filled with zeros.
+
+    This is the generic sweep primitive.  Concept-specific analysis (carry,
+    gcd, ...) builds its prompts, resolves anchors, calls this function,
+    and then applies its own scoring on the returned residuals.
+    """
+    N = len(prompts_and_anchors)
+    H: dict[int, list[torch.Tensor]] = {l: [] for l in target_layers}
+
+    for ids, anchor in tqdm(prompts_and_anchors, desc="Capturing residual stream"):
+        # anchor was computed on raw ids; +1 for the sink token prepended by tokenize_qwen_input
+        sink_anchor = anchor + 1
+        resid_cache: dict[int, torch.Tensor] = {}
+        hooks = [
+            (
+                f"blocks.{layer}.{model.feature_input_hook}",
+                lambda acts, hook, _l=layer, _pos=sink_anchor: (
+                    resid_cache.update({_l: acts[0, _pos, :].detach().clone()})
+                    if _pos < acts.shape[1]
+                    else None
+                )
+                or acts,
+            )
+            for layer in target_layers
+        ]
+        input_ids = tokenize_qwen_input(ids, model.tokenizer, model.cfg.device).unsqueeze(0)
+        model.run_with_hooks(input_ids, fwd_hooks=hooks)
+
+        for layer in target_layers:
+            vec = resid_cache.get(layer)
+            if vec is None:
+                vec = torch.zeros(model.cfg.d_model, device=model.cfg.device)
+            H[layer].append(vec)
+
+    return {layer: torch.stack(vecs).float().cpu().numpy() for layer, vecs in H.items()}

@@ -39,7 +39,10 @@ _NONCE_TRIPLES: list[tuple[str, str, str]] = [
 ]
 
 TEMPLATES = {
-    "T0": ("Yes or No: {a}⊂{b} and {b}⊂{c}, therefore {a}⊂{c}: ", "Yes or No: {a}⊂{b} and {c}⊂{b}, therefore {a}⊂{c}: "),
+    "T0": (
+        "Yes or No: {a} is in {b} and {b} is in {c}, therefore {a} is in {c}: ",
+        "Yes or No: {a} is in {b} and {c} is in {b}, therefore {a} is in {c}: ",
+    ),
     "T1": (
         "Yes or No: every {a} is a {b}; every {b} is a {c}; so every {a} is a {c}: ",
         "Yes or No: every {a} is a {b}; every {c} is a {b}; so every {a} is a {c}: ",

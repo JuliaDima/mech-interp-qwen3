@@ -33,6 +33,7 @@ import torch
 from tqdm import tqdm
 
 from experiments.concept_localization.extract_deltas import _find_anchor
+from mechinterp_qwen3.utils.token_utils import tokenize_qwen_input
 
 log = logging.getLogger(__name__)
 
@@ -69,9 +70,7 @@ class CausalScores:
     n_pairs: int = 0
 
 
-def _resolve_target(
-    tokenizer, pair
-) -> tuple[list[int], int | None, int | None]:
+def _resolve_target(tokenizer, pair) -> tuple[list[int], int | None, int | None]:
     """Resolve the first diverging predicted token for a pair.
 
     Uses pair.predict_pos / predict_neg when set, otherwise falls back to
@@ -161,15 +160,16 @@ def run_activation_patching(
             ids_pos_ext = ids_pos + prefix_ids
             ids_neg_ext = ids_neg + prefix_ids
 
-            toks_pos = torch.tensor([ids_pos_ext], dtype=torch.long, device=device)
-            toks_neg = torch.tensor([ids_neg_ext], dtype=torch.long, device=device)
+            toks_pos = tokenize_qwen_input(ids_pos_ext, model.tokenizer, device).unsqueeze(0)
+            toks_neg = tokenize_qwen_input(ids_neg_ext, model.tokenizer, device).unsqueeze(0)
+            _pp = patch_pos + 1  # +1 for the sink token at position 0
 
             # One pass: cache pos residuals at patch_pos for all layers
             pos_cache: dict[int, torch.Tensor] = {}
             cache_hooks = [
                 (
                     f"blocks.{l}.hook_resid_post",
-                    lambda act, hook=None, _l=l, _p=patch_pos: (
+                    lambda act, hook=None, _l=l, _p=_pp: (
                         pos_cache.update({_l: act[0, _p, :].clone()}) or act
                     ),
                 )
@@ -194,11 +194,12 @@ def run_activation_patching(
                         act = act.clone()
                         act[:, pos, :] = v
                         return act
+
                     return hook_fn
 
                 logits_patch = model.run_with_hooks(
                     toks_neg,
-                    fwd_hooks=[(f"blocks.{l}.hook_resid_post", make_hook(vec, patch_pos))],
+                    fwd_hooks=[(f"blocks.{l}.hook_resid_post", make_hook(vec, _pp))],
                 )
                 patch_margin = logits_patch[0, -1, target_id].item()
                 if neg_id is not None:
@@ -253,7 +254,7 @@ def run_gradient_dot_delta(
         # Teacher forcing: extend neg prompt with shared answer prefix so
         # position -1 predicts the first diverging output token.
         ids_neg_ext = ids_neg + prefix_ids
-        toks_neg = torch.tensor([ids_neg_ext], dtype=torch.long, device=device)
+        toks_neg = tokenize_qwen_input(ids_neg_ext, model.tokenizer, device).unsqueeze(0)
 
         # Forward pass on negative prompt — hooks retain intermediate tensors for backward
         resid_refs: dict[int, torch.Tensor] = {}
@@ -283,7 +284,7 @@ def run_gradient_dot_delta(
                 continue
             if l not in layer_deltas:
                 continue
-            g = grad[0, anchor, :].float()
+            g = grad[0, anchor + 1, :].float()  # +1 for sink token
             delta = layer_deltas[l].to(device=g.device, dtype=torch.float32)
             scores[l].append(torch.dot(g.detach(), delta).item())
 
@@ -369,7 +370,10 @@ def run_positional_attribution(
         if not _logged_delimiter:
             log.info(
                 "Expression end: delimiter=%r at abs_pos=%d  |  valid tokens: %s  |  prompt: %r",
-                tokens[expr_end], expr_end, tokens[expr_end:], pair.prompt_pos,
+                tokens[expr_end],
+                expr_end,
+                tokens[expr_end:],
+                pair.prompt_pos,
             )
             _logged_delimiter = True
 
@@ -383,8 +387,8 @@ def run_positional_attribution(
         # is unaffected by the extension.
         ids_pos_ext = ids_pos + prefix_ids
         ids_neg_ext = ids_neg + prefix_ids
-        toks_pos = torch.tensor([ids_pos_ext], dtype=torch.long, device=device)
-        toks_neg = torch.tensor([ids_neg_ext], dtype=torch.long, device=device)
+        toks_pos = tokenize_qwen_input(ids_pos_ext, model.tokenizer, device).unsqueeze(0)
+        toks_neg = tokenize_qwen_input(ids_neg_ext, model.tokenizer, device).unsqueeze(0)
 
         if not token_labels:
             token_labels = [tokens[seq_len - 1 - i] for i in range(n_valid)]
@@ -428,7 +432,7 @@ def run_positional_attribution(
         grad = h_pos_store[0].grad[0]  # (seq_len, d_model)
 
         for rel_pos in range(n_valid):
-            abs_pos = seq_len - 1 - rel_pos
+            abs_pos = seq_len - rel_pos  # seq_len - 1 - rel_pos + 1 for sink offset
             g = grad[abs_pos].float().detach()
             diff = (h_pos[abs_pos] - h_neg[abs_pos].to(device=g.device)).float().detach()
             g_norm = g.norm()
@@ -502,7 +506,10 @@ def run_positional_attribution_sweep(
         if not _logged_delimiter:
             log.info(
                 "Expression end: delimiter=%r at abs_pos=%d  |  valid tokens: %s  |  prompt: %r",
-                tokens[expr_end], expr_end, tokens[expr_end:], pair.prompt_pos,
+                tokens[expr_end],
+                expr_end,
+                tokens[expr_end:],
+                pair.prompt_pos,
             )
             _logged_delimiter = True
 
@@ -521,8 +528,8 @@ def run_positional_attribution_sweep(
         # is unaffected by the extension.
         ids_pos_ext = ids_pos + prefix_ids
         ids_neg_ext = ids_neg + prefix_ids
-        toks_pos = torch.tensor([ids_pos_ext], dtype=torch.long, device=device)
-        toks_neg = torch.tensor([ids_neg_ext], dtype=torch.long, device=device)
+        toks_pos = tokenize_qwen_input(ids_pos_ext, model.tokenizer, device).unsqueeze(0)
+        toks_neg = tokenize_qwen_input(ids_neg_ext, model.tokenizer, device).unsqueeze(0)
 
         if not token_labels:
             token_labels = [tokens[seq_len - 1 - i] for i in range(n_valid)]
@@ -570,7 +577,7 @@ def run_positional_attribution_sweep(
             h_neg = h_neg_all[l]  # (seq_len, d_model)
 
             for rel_pos in range(n_valid):
-                abs_pos = seq_len - 1 - rel_pos
+                abs_pos = seq_len - rel_pos  # seq_len - 1 - rel_pos + 1 for sink offset
                 g = grad_l[abs_pos].float().detach()
                 diff = (h_pos[abs_pos] - h_neg[abs_pos].to(device=g.device)).float().detach()
                 g_norm = g.norm()

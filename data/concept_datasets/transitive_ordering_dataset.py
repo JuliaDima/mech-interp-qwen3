@@ -19,12 +19,13 @@ TEMPLATES = {
         "True or False: {a} is greater than {b} which is greater than {c}: ",
         "True or False: {a} is greater than {b} which is greater than {c}: ",
     ),
-    "T2": ("True or False: given {a}>{b} and {b}>{c}: ", "True or False: given {a}>{b} and {b}>{c}: "),
+    "T2": (
+        "True or False: given {a}>{b} and {b}>{c}: ",
+        "True or False: given {a}>{b} and {b}>{c}: ",
+    ),
 }
 
 _SCALES = [
-    (1, 9),  # 1-digit
-    (10, 99),  # 2-digit
     (100, 999),  # 3-digit
 ]
 

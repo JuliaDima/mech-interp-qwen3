@@ -1,0 +1,303 @@
+"""Generic per-concept transcoder feature sweep.
+
+Loads any registered concept's dataset, runs pos and neg prompts through the
+model at target layers, and scores every transcoder feature by
+
+    score   = mean(act | pos) − mean(act | neg)
+
+Features are ranked by Jaccard similarity × |score|, which identifies features
+that consistently separate pos from neg examples. Results are displayed as bar
+charts where each bar is one example, coloured by pos (blue) or neg (red).
+
+Usage
+-----
+    python scripts/sweeps/run_concept_sweep.py --concept carry --layers 19,20,21 --top_k 200
+    python scripts/sweeps/run_concept_sweep.py --concept gcd --layers 4,5,17,18,19 --anchor delimiter
+    python scripts/sweeps/run_concept_sweep.py --concept decimal_termination --layers 17,18,19,20 --anchor digit_1
+"""
+
+from __future__ import annotations
+
+import argparse
+import importlib
+import json
+import logging
+import sys
+from pathlib import Path
+
+import numpy as np
+import torch
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from sweep_utils import apply_transcoder_all, score_and_rank
+
+from experiments.concept_localization.analyze import collect_layer_residuals
+from experiments.concept_localization.extract_deltas_generic import (
+    _resolve_anchor,
+)
+from mechinterp_qwen3.attribution_model import AttributionModel
+from mechinterp_qwen3.utils.hf_utils import load_transcoder_from_hub
+from mechinterp_qwen3.utils.model_utils import get_default_device, parse_dtype
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s  %(levelname)-8s  %(name)s — %(message)s",
+    datefmt="%H:%M:%S",
+)
+log = logging.getLogger("run_concept_sweep")
+
+_MODEL = "Qwen/Qwen3-4B"
+_TRANSCODER_SET = "mwhanna/qwen3-4b-transcoders"
+
+CONCEPTS = [
+    "carry",
+    "gcd",
+    "residue_class",
+    "transitive_ordering",
+    "conservation",
+    "causal_direction",
+    "negation_scope",
+    "balanced_parentheses",
+    "decimal_termination",
+    "decimal_termination_large_prime",
+    "doppler_shift",
+    "dot_product_sign",
+    "geometric_series",
+    "momentum_conservation",
+    "perfect_square",
+    "syllogism",
+    "triangle_inequality",
+    "wave_interference",
+]
+
+
+def _load_concept(name: str, n: int, seed: int):
+    mod = importlib.import_module(f"data.concept_datasets.{name}_dataset")
+    # Try different naming conventions: full name, suffix-only, then any generate_*_pairs function
+    for fn in [
+        f"generate_{name}_pairs",
+        f"generate_{name.split('_')[-1]}_pairs",
+        "generate_decimal_pairs",
+        "generate_large_prime_pairs",
+        "generate_wave_pairs",
+    ]:
+        if hasattr(mod, fn):
+            return getattr(mod, fn)(n, seed=seed)
+    # Fallback: find first generate_*_pairs function
+    for attr_name in dir(mod):
+        if attr_name.startswith("generate_") and attr_name.endswith("_pairs"):
+            return getattr(mod, attr_name)(n, seed=seed)
+    raise ValueError(f"Cannot find a generate function in {name}_dataset")
+
+
+def _get_dataset_attr(concept: str, attr: str, default=None):
+    try:
+        mod = importlib.import_module(f"data.concept_datasets.{concept}_dataset")
+        return getattr(mod, attr, default)
+    except ImportError:
+        return default
+
+
+def _build_inputs(model, pairs, anchor_mode, anchor_factory, max_pairs):
+    inputs, pos_mask, prompts = [], [], []
+    for pair in pairs[:max_pairs]:
+        ids_pos = model.tokenizer(pair.prompt_pos, add_special_tokens=False).input_ids
+        ids_neg = model.tokenizer(pair.prompt_neg, add_special_tokens=False).input_ids
+        if len(ids_pos) != len(ids_neg):
+            continue
+
+        if anchor_factory:
+            positions = anchor_factory(pair, model.tokenizer)
+            anchor = positions.get(anchor_mode, len(ids_pos) - 1)
+        else:
+            anchor = _resolve_anchor(ids_pos, model.tokenizer, anchor_mode, None, None)
+
+        for ids, is_pos, prompt in [
+            (ids_pos, True, pair.prompt_pos),
+            (ids_neg, False, pair.prompt_neg),
+        ]:
+            inputs.append((ids, anchor))
+            pos_mask.append(is_pos)
+            prompts.append(prompt)
+
+    return inputs, np.array(pos_mask, dtype=bool), prompts
+
+
+@torch.no_grad()
+def sweep_all_features(
+    model,
+    pairs,
+    target_layers: list[int],
+    anchor_mode: str = "delimiter",
+    anchor_factory=None,
+    top_k: int = 200,
+    max_pairs: int = 200,
+) -> tuple[
+    list[tuple[int, int, float, float]], dict[tuple[int, int], np.ndarray], np.ndarray, list[str]
+]:
+    """Sweep all transcoder features, rank by Jaccard × |score|.
+
+    Returns:
+        ranked         list of (layer, feat_id, score, jaccard)
+        acts_1d        dict (layer, feat_id) → (N,) activations
+        pos_mask       bool array, True for pos examples
+        prompts        list of formatted prompt strings
+    """
+    inputs, pos_mask, prompts = _build_inputs(model, pairs, anchor_mode, anchor_factory, max_pairs)
+    if len(inputs) == 0:
+        raise ValueError("No valid pairs found — check anchor_mode and pair lengths")
+
+    log.info(
+        "Running %d examples (%d pos, %d neg) at %d layers",
+        len(inputs),
+        pos_mask.sum(),
+        (~pos_mask).sum(),
+        len(target_layers),
+    )
+
+    H = collect_layer_residuals(model, inputs, target_layers)
+
+    ranked: list[tuple[int, int, float, float]] = []
+    acts_1d: dict[tuple[int, int], np.ndarray] = {}
+
+    for layer in target_layers:
+        if layer not in H:
+            continue
+        try:
+            acts_np = apply_transcoder_all(model, layer, H[layer])
+        except (IndexError, KeyError, AttributeError):
+            log.warning("No transcoder at layer %d — skipping", layer)
+            continue
+
+        top_feats = score_and_rank(acts_np, pos_mask, top_k=top_k)
+        for feat_id, score, jaccard in top_feats:
+            ranked.append((layer, feat_id, score, jaccard))
+            acts_1d[(layer, feat_id)] = acts_np[:, feat_id]
+
+        if top_feats:
+            top_score = max(top_feats, key=lambda x: abs(x[1]))[1]
+            log.info(
+                "Layer %2d  d_tc=%d  top_k=%d  top |score|=%.4f",
+                layer,
+                acts_np.shape[1],
+                len(top_feats),
+                abs(top_score),
+            )
+
+    ranked.sort(key=lambda x: -abs(x[2]) * x[3])
+    return ranked, acts_1d, pos_mask, prompts
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument("--concept", required=True, choices=CONCEPTS)
+    parser.add_argument("--model", default=_MODEL)
+    parser.add_argument("--transcoder_set", default=_TRANSCODER_SET)
+    parser.add_argument("--dtype", default="bfloat16")
+    parser.add_argument(
+        "--layers",
+        required=True,
+        help="Comma-separated layer indices (e.g. '17,18,19,20')",
+    )
+    parser.add_argument(
+        "--anchor",
+        default=None,
+        help="Anchor mode — uses dataset's first ANCHOR_MODE if not set, else 'delimiter'",
+    )
+    parser.add_argument("--n", type=int, default=100, help="Pairs per template to load")
+    parser.add_argument("--max_pairs", type=int, default=200)
+    parser.add_argument("--top_k", type=int, default=200, help="Top features to select per layer")
+    parser.add_argument(
+        "--top_per_layer", type=int, default=5, help="Top features to display per layer"
+    )
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--out_dir", default=None, help="Output dir (default: runs/concept_localization/<concept>)"
+    )
+    args = parser.parse_args()
+
+    target_layers = [int(x.strip()) for x in args.layers.split(",")]
+    out_dir = (
+        Path(args.out_dir) if args.out_dir else Path(f"runs/concept_localization/{args.concept}")
+    )
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    anchor_factory = _get_dataset_attr(args.concept, "ANCHOR_FACTORY")
+    anchor_modes = _get_dataset_attr(args.concept, "ANCHOR_MODES") or ()
+    anchor_mode = args.anchor or (anchor_modes[0] if anchor_modes else "delimiter")
+
+    log.info("Concept: %s  anchor: %s  layers: %s", args.concept, anchor_mode, target_layers)
+
+    device = get_default_device()
+    dtype = parse_dtype(args.dtype)
+
+    log.info("Loading model %s", args.model)
+    transcoder_set, _ = load_transcoder_from_hub(
+        args.transcoder_set, dtype=dtype, lazy_encoder=True, lazy_decoder=True
+    )
+    model = AttributionModel.from_pretrained_and_transcoders(
+        args.model, transcoder_set, dtype=dtype, device=device
+    )
+    model.eval()
+
+    log.info("Loading dataset for %s (%d pairs/template)", args.concept, args.n)
+    pairs = _load_concept(args.concept, args.n, args.seed)
+    log.info("Loaded %d pairs", len(pairs))
+
+    ranked, acts_1d, pos_mask, prompts = sweep_all_features(
+        model,
+        pairs,
+        target_layers,
+        anchor_mode=anchor_mode,
+        anchor_factory=anchor_factory,
+        top_k=args.top_k,
+        max_pairs=args.max_pairs,
+    )
+
+    ranked_path = out_dir / "sweep_ranked.json"
+    with open(ranked_path, "w") as f:
+        json.dump(
+            [
+                {"layer": l, "feat_id": fi, "score": round(s, 6), "jaccard": round(j, 4)}
+                for l, fi, s, j in ranked
+            ],
+            f,
+            indent=2,
+        )
+    log.info("Saved ranking → %s", ranked_path)
+
+    # Save activations for top-k features
+    activations_path = out_dir / "sweep_activations.npz"
+    np.savez_compressed(
+        activations_path,
+        pos_mask=pos_mask,
+        **{f"L{layer}_F{feat_id}": acts for (layer, feat_id), acts in acts_1d.items()},
+    )
+    log.info("Saved %d feature activations → %s", len(acts_1d), activations_path)
+
+    # Save example metadata for alignment with theoretical analysis
+    import pickle
+
+    examples_path = out_dir / "sweep_examples.pkl"
+    sweep_examples = []
+    n_pairs = len(pos_mask) // 2
+    for i, pair in enumerate(pairs[:n_pairs]):
+        sweep_examples.append(
+            {
+                "pair_idx": i,
+                "template": pair.template,
+                "meta": pair.meta,
+                "label_pos": pair.label_pos,
+            }
+        )
+    with open(examples_path, "wb") as f:
+        pickle.dump(sweep_examples, f)
+    log.info("Saved example metadata → %s", examples_path)
+    log.info("Done. Outputs in %s", out_dir)
+
+
+if __name__ == "__main__":
+    main()

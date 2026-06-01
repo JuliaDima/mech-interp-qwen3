@@ -13,7 +13,10 @@ import random
 from experiments.concept_localization.concept_pair import ConceptPair
 
 TEMPLATES = {
-    "T0": ("True or False: drop={h}, bounce={b}. valid: ", "True or False: drop={h}, bounce={b}. valid: "),
+    "T0": (
+        "True or False: drop={h}, bounce={b}. valid: ",
+        "True or False: drop={h}, bounce={b}. valid: ",
+    ),
     "T1": (
         "True or False: ball dropped from {h}m rebounds to {b}m. physical: ",
         "True or False: ball dropped from {h}m rebounds to {b}m. physical: ",
@@ -47,7 +50,7 @@ def generate_conservation_pairs(
         v < n_per_template for v in counts.values()
     ):
         attempts += 1
-        n_digits = rng.choice([1, 2, 3])
+        n_digits = 2
         lo = 10 ** (n_digits - 1) if n_digits > 1 else 1
         hi = 10**n_digits - 1
 

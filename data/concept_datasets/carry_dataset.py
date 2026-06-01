@@ -1,17 +1,16 @@
 """Carry concept dataset.
 
-Each pair isolates a single carry at a randomly chosen column (units, tens,
-hundreds, or thousands).  Within a pair, exactly one digit of one operand
-differs between pos (carry) and neg (no carry); which operand carries and at
-which column both vary across the dataset, preventing the concept direction
-from conflating carry with a fixed operand structure or a fixed digit position.
+Each pair isolates a single carry at the units column (column 0).  Within a
+pair, exactly one digit of one operand differs between pos (carry) and neg
+(no carry); which operand varies is randomised.  Fixing the carry to the units
+position ensures the contrastive signal is always at the same token position
+relative to the expression, giving a clean concept direction.
 
-Isolation conditions for a single carry at column k:
-  - columns j < k:       a_j + b_j < 10        (no carry-in to column k)
-  - column k:            a_k + b_k >= 10        (carry out of column k) [pos]
-                         a_k + b_k < 10         [neg]
-  - column k+1:          a_{k+1} + b_{k+1} <= 8 (absorbs carry-in, no propagation)
-  - columns j > k+1:     a_j + b_j < 10        (no carry elsewhere)
+Isolation conditions:
+  - column 0:   a_0 + b_0 >= 10  (carry out of units) [pos]
+                a_0 + b_0 < 10   [neg]
+  - column 1:   a_1 + b_1 <= 8   (absorbs carry-in, no propagation)
+  - columns j > 1:  a_j + b_j < 10  (no carry elsewhere)
 
 Number of digits is sampled uniformly from {3, 4, 5} per pair.
 """
@@ -29,6 +28,29 @@ TEMPLATES = {
 }
 
 
+def make_anchor_positions(template_str: str, a: int, b: int, tokenizer) -> dict[str, int]:
+    """Compute token positions by substituting a and b into the template.
+
+    Tokenises the prefix ending at the last character of each number, giving
+    the token that covers the ones digit — works for any template format.
+    """
+    a_str, b_str = str(a), str(b)
+    pre_a = template_str[: template_str.index("{a}")]
+    pre_b = template_str[: template_str.index("{b}")].replace("{a}", a_str)
+    ones_a = len(tokenizer(pre_a + a_str, add_special_tokens=False).input_ids) - 1
+    ones_b = len(tokenizer(pre_b + b_str, add_special_tokens=False).input_ids) - 1
+    return {"ones_a": ones_a, "ones_b": ones_b, "separator": ones_a + 1}
+
+
+def _carry_anchor_factory(pair, tokenizer) -> dict[str, int]:
+    tmpl_str = TEMPLATES[pair.template][0]
+    return make_anchor_positions(tmpl_str, pair.meta["a_pos"], pair.meta["b_pos"], tokenizer)
+
+
+ANCHOR_FACTORY = _carry_anchor_factory
+ANCHOR_MODES = ("ones_b", "ones_a", "separator")
+
+
 def _digits(n: int, n_digits: int) -> list[int]:
     """Return digits of n least-significant-first."""
     return [(n // 10**i) % 10 for i in range(n_digits)]
@@ -43,12 +65,12 @@ def generate_carry_pairs(
     templates: list[str] | None = None,
     seed: int = 42,
 ) -> list[ConceptPair]:
-    """Generate contrastive carry pairs across digit lengths and carry columns.
+    """Generate contrastive carry pairs with carry always at the units column.
 
     Each pair differs in exactly one digit of one operand.  Half the pairs vary
-    a's carry-column digit; the other half vary b's.  Carry column is sampled
-    uniformly from {0, ..., n_digits - 2} so carries appear at units, tens,
-    and hundreds positions.
+    a's units digit; the other half vary b's.  Fixing carry_col=0 ensures the
+    contrastive signal is always anchored at the same token position, giving a
+    clean delta direction unconfounded by carry-column variation.
     """
     if templates is None:
         templates = list(TEMPLATES)
@@ -64,14 +86,12 @@ def generate_carry_pairs(
     ):
         attempts += 1
 
-        n_digits = rng.randint(3, 5)
+        n_digits = 3
         lo = 10 ** (n_digits - 1)
         hi = 10**n_digits - 1
 
-        # carry_col in [0, n_digits-2]: never the most-significant column
-        # (a carry-out there would overflow to n_digits+1 digits)
-        carry_col = rng.randint(0, n_digits - 2)
-        vary_a = rng.random() < 0.5  # which operand's carry_col digit varies
+        carry_col = 0  # always units digit
+        vary_a = rng.random() < 0.5  # which operand's units digit varies
 
         # Draw both operands digit-by-digit (index 0 = least significant)
         a_digs = [rng.randint(0, 9) for _ in range(n_digits)]
