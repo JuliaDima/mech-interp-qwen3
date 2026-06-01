@@ -17,15 +17,16 @@ from dataclasses import dataclass, field
 import torch
 from tqdm import tqdm
 
+from mechinterp_qwen3.utils.token_utils import tokenize_qwen_input
+
 log = logging.getLogger(__name__)
 
 
 @dataclass
 class LayerDeltas:
     delta: dict[int, torch.Tensor] = field(default_factory=dict)  # layer → (d_model,)
-    mean_act_norm: dict[int, float] = field(
-        default_factory=dict
-    )  # layer → mean ‖h‖ across all pairs
+    mean_act_norm: dict[int, float] = field(default_factory=dict)  # layer → mean ‖h‖
+    mean_pair_cos: dict[int, float] = field(default_factory=dict)  # layer → mean cos(δ_i, δ̄)
     n_pairs: int = 0
     skipped: int = 0
 
@@ -76,15 +77,16 @@ def extract_layer_deltas(
 
             tmpl_key = str(pair.template)
 
+            _pos = anchor + 1  # +1 for the sink token prepended by tokenize_qwen_input
             for ids, bucket_name in [(ids_pos, "pos"), (ids_neg, "neg")]:
-                input_ids = torch.tensor([ids], dtype=torch.long, device=device)
+                input_ids = tokenize_qwen_input(ids, model.tokenizer, device).unsqueeze(0)
                 cache: dict[int, torch.Tensor] = {}
 
                 hooks = [
                     (
                         f"blocks.{layer}.hook_resid_post",
-                        lambda act, hook, _l=layer, _pos=anchor: (
-                            cache.update({_l: act[0, _pos, :].detach().clone()}) or act
+                        lambda act, hook, _l=layer, _p=_pos: (
+                            cache.update({_l: act[0, _p, :].detach().clone()}) or act
                         ),
                     )
                     for layer in layers

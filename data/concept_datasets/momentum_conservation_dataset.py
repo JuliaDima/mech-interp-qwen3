@@ -18,14 +18,17 @@ from experiments.concept_localization.concept_pair import ConceptPair
 
 TEMPLATES = {
     "T0": (
-        "Yes or No: v1={v1}→{v1a}, v2={v2}→{v2a}. conserved: ",
-        "Yes or No: v1={v1}→{v1a}, v2={v2}→{v2a}. conserved: ",
+        "Yes or No: v1={v1}→{v1a}, v2={v2}→{v2a}. conserves momentum: ",
+        "Yes or No: v1={v1}→{v1a}, v2={v2}→{v2a}. conserves momentum: ",
     ),
     "T1": (
-        "Yes or No: object 1 goes {v1} then {v1a}, object 2 goes {v2} then {v2a}. momentum conserved: ",
-        "Yes or No: object 1 goes {v1} then {v1a}, object 2 goes {v2} then {v2a}. momentum conserved: ",
+        "Yes or No: object 1 goes {v1} then {v1a}, object 2 goes {v2} then {v2a}. conserves momentum: ",
+        "Yes or No: object 1 goes {v1} then {v1a}, object 2 goes {v2} then {v2a}. conserves momentum: ",
     ),
-    "T2": ("Yes or No: does {v1a}+{v2a} equal {v1}+{v2}? ", "Yes or No: does {v1a}+{v2a} equal {v1}+{v2}? "),
+    "T2": (
+        "Yes or No: does {v1a}+{v2a} equal {v1}+{v2}? ",
+        "Yes or No: does {v1a}+{v2a} equal {v1}+{v2}? ",
+    ),
 }
 
 
@@ -48,7 +51,7 @@ def generate_momentum_pairs(
         v < n_per_template for v in counts.values()
     ):
         attempts += 1
-        n_digits = rng.choice([1, 2])
+        n_digits = 2
         lo = 10 ** (n_digits - 1) if n_digits > 1 else 1
         hi = 10**n_digits - 1
 

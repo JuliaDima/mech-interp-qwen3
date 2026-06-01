@@ -33,6 +33,7 @@ Registered concepts
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import logging
 import sys
@@ -53,6 +54,11 @@ from experiments.concept_localization.extract_deltas_generic import (
     extract_layer_deltas_generic,
     resolve_anchor_token,
 )
+from experiments.concept_localization.plot_anchor_analysis import (
+    load_emergence,
+    top_k_anchors,
+)
+from experiments.concept_localization.plot_localisation import plot_cross_layer_sim_data
 from experiments.concept_localization.visualize import (
     plot_causal_overlay,
     plot_causal_scores,
@@ -180,10 +186,23 @@ SYMBOLIC_SUBSET = [
 ]
 
 
+def _get_dataset_attr(concept: str, attr: str, default=None):
+    """Load an attribute from a concept's dataset module, returning default if absent."""
+    try:
+        mod = importlib.import_module(f"data.concept_datasets.{concept}_dataset")
+        return getattr(mod, attr, default)
+    except ImportError:
+        return default
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument("--concept", required=True, choices=CONCEPTS + ["all", "symbolic"],
-                        help="Concept name, 'all' to run every concept, or 'symbolic' for the symbolic subset")
+    parser.add_argument(
+        "--concept",
+        required=True,
+        choices=CONCEPTS + ["all", "symbolic"],
+        help="Concept name, 'all' to run every concept, or 'symbolic' for the symbolic subset",
+    )
     parser.add_argument("--model", default=_MODEL)
     parser.add_argument("--transcoder_set", default=_TRANSCODER_SET)
     parser.add_argument("--dtype", default="bfloat16")
@@ -207,6 +226,22 @@ def main() -> None:
     )
     parser.add_argument(
         "--skip_features", action="store_true", help="Skip transcoder feature projection (faster)"
+    )
+    parser.add_argument(
+        "--template",
+        default=None,
+        help="Filter pairs to a single template (e.g. 'T0'). Default: use all templates.",
+    )
+    parser.add_argument(
+        "--top_n_feature_anchors",
+        type=int,
+        default=1,
+        help=(
+            "Number of steepest anchors for which to run feature projection (default: 1 = "
+            "current anchor_mode only). When >1, loads emergence.npy and uses top_k_anchors "
+            "to find the N most abrupt token positions, then re-runs extraction + projection "
+            "for each. Saves feature_projections_scatter_pos{idx}.png per anchor."
+        ),
     )
     parser.add_argument(
         "--causal", action="store_true", help="Run activation patching + gradient-dot-delta"
@@ -246,10 +281,15 @@ def _run_single(args, base_subdir: str | None = None) -> None:
 
     device = get_default_device()
     dtype = parse_dtype(args.dtype)
+    anchor_factory = _get_dataset_attr(args.concept, "ANCHOR_FACTORY")
+    anchor_modes = _get_dataset_attr(args.concept, "ANCHOR_MODES") or ()
 
     # ── 1. Dataset ────────────────────────────────────────────────────────────
     log.info("Generating %d pairs/template for concept '%s'", args.n, args.concept)
     pairs = _load_concept(args.concept, args.n, args.seed)
+    if args.template:
+        pairs = [p for p in pairs if p.template == args.template]
+        log.info("Filtered to template '%s': %d pairs", args.template, len(pairs))
     templates = list(dict.fromkeys(p.template for p in pairs))
     log.info(
         "Generated %d pairs total across %d templates: %s", len(pairs), len(templates), templates
@@ -277,7 +317,14 @@ def _run_single(args, base_subdir: str | None = None) -> None:
     log.info("Extracting per-layer residual-stream deltas…")
     log.info("Anchor mode: %s", args.anchor_mode)
     layer_results = extract_layer_deltas_generic(
-        model, pairs, layers, device, dtype, per_template=True, anchor_mode=args.anchor_mode
+        model,
+        pairs,
+        layers,
+        device,
+        dtype,
+        per_template=True,
+        anchor_mode=args.anchor_mode,
+        anchor_factory=anchor_factory,
     )
     ld = layer_results["all"]
 
@@ -337,7 +384,11 @@ def _run_single(args, base_subdir: str | None = None) -> None:
 
     # ── 6. Save ───────────────────────────────────────────────────────────────
     anchor_pos, anchor_tok = resolve_anchor_token(
-        pairs[0].prompt_pos, model.tokenizer, args.anchor_mode
+        pairs[0].prompt_pos,
+        model.tokenizer,
+        args.anchor_mode,
+        anchor_factory=anchor_factory,
+        pair=pairs[0],
     )
     results_json = {
         "config": {
@@ -417,6 +468,64 @@ def _run_single(args, base_subdir: str | None = None) -> None:
             concept=args.concept,
         )
         log.info("Saved feature projection plots")
+
+    # ── 8. Multi-anchor feature projections ───────────────────────────────────
+    if not args.skip_features and args.top_n_feature_anchors > 1:
+        # Anchor modes come from the dataset's ANCHOR_MODES; fall back to emergence.npy
+        if anchor_modes:
+            anchors_to_run = [(k, k) for k in anchor_modes]
+            log.info("Using dataset anchor modes for %s: %s", args.concept, list(anchor_modes))
+        else:
+            em = load_emergence(args.concept)
+            if em is None:
+                log.warning(
+                    "emergence.npy not found for %s and no ANCHOR_MODES in dataset — "
+                    "skipping multi-anchor feature scatter",
+                    args.concept,
+                )
+                anchors_to_run = []
+            else:
+                top_anchors = top_k_anchors(em, args.concept, k=args.top_n_feature_anchors)
+                anchors_to_run = [(str(idx), str(idx)) for idx, _, _ in top_anchors]
+                log.info(
+                    "Using emergence-based anchors for %s: %s",
+                    args.concept,
+                    [a[0] for a in anchors_to_run],
+                )
+
+        for anchor_label, amode in anchors_to_run:
+            log.info("  Anchor '%s' (mode=%r) — extracting deltas…", anchor_label, amode)
+            lr_anchor = extract_layer_deltas_generic(
+                model,
+                pairs,
+                layers,
+                device,
+                dtype,
+                per_template=False,
+                anchor_mode=amode,
+                anchor_factory=anchor_factory,
+            )
+            ld_anchor = lr_anchor["all"]
+            proj_anchor = project_onto_features(model, ld_anchor, top_k=args.top_k)
+            out_scatter = out_dir / f"feature_projections_scatter_{anchor_label}.png"
+            plot_feature_projections(
+                proj_anchor,
+                out_scatter,
+                top_k=args.top_k,
+                concept=args.concept,
+            )
+            log.info("  Saved %s", out_scatter)
+
+            anchor_tok_str = resolve_anchor_token(
+                pairs[0].prompt_pos,
+                model.tokenizer,
+                amode,
+                anchor_factory=anchor_factory,
+                pair=pairs[0],
+            )[1]
+            out_sim = out_dir / f"cross_layer_sim_{anchor_label}.pdf"
+            plot_cross_layer_sim_data(lr_anchor, n_layers, anchor_tok_str, args.concept, out_sim)
+            log.info("  Saved %s", out_sim)
 
     if causal is not None:
         plot_causal_scores(

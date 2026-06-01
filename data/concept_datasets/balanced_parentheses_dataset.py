@@ -1,13 +1,13 @@
 """Balanced parentheses concept dataset.
 
+Parentheses are space-separated to ensure each '(' and ')' tokenizes individually.
+Without spaces, consecutive parentheses compress into multi-character tokens.
+
 Modular structure: depth counter increments on '(' and decrements on ')'.
 Valid iff depth never goes negative and returns to 0.
 
-Pos: balanced sequence of length 4, 6, or 8.
+Pos: balanced sequence with spaces, length 4-8 parens → 7-15 token chars.
 Neg: same sequence with one ')' replaced by '(' — same length, guaranteed unbalanced.
-
-Because only one character changes and '(' and ')' are single tokens,
-pos and neg tokenize to the same length; anchor = the substituted position.
 """
 
 from __future__ import annotations
@@ -22,17 +22,22 @@ TEMPLATES = {
         "Yes or No: the sequence {seq} has matched brackets: ",
         "Yes or No: the sequence {seq} has matched brackets: ",
     ),
-    "T2": ("Yes or No: is {seq} a valid bracket string? ", "Yes or No: is {seq} a valid bracket string? "),
+    "T2": (
+        "Yes or No: is {seq} a valid bracket string? ",
+        "Yes or No: is {seq} a valid bracket string? ",
+    ),
 }
 
 
 def _generate_balanced(n: int) -> list[str]:
-    """All balanced parentheses strings of length 2*n."""
+    """All balanced parentheses strings of length 2*n, space-separated."""
     results: list[str] = []
 
     def _gen(s: str, opens: int, closes: int) -> None:
         if len(s) == 2 * n:
-            results.append(s)
+            # Convert "(()" to "( ( )" with spaces so that Qwen tokenizes each paren separately
+            spaced = " ".join(s)
+            results.append(spaced)
             return
         if opens < n:
             _gen(s + "(", opens + 1, closes)
@@ -47,7 +52,8 @@ _BALANCED: list[str] = _generate_balanced(2) + _generate_balanced(3) + _generate
 
 
 def _make_unbalanced(s: str, rng: random.Random) -> str | None:
-    """Replace a random ')' with '(' — same length, guaranteed unbalanced."""
+    """Replace a random ')' with '(' in the spaced string to make it unbalanced."""
+    # s is like "( ( ) )" — find ')' characters and replace one with '('
     close_positions = [i for i, c in enumerate(s) if c == ")"]
     if not close_positions:
         return None

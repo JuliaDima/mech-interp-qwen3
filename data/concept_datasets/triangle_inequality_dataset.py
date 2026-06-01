@@ -6,8 +6,7 @@ a+b>c, a+c>b, b+c>a. Single boundary region.
 Pos: c_pos satisfies all inequalities given fixed a, b → "yes"
 Neg: c_neg ≥ a+b (violates the main inequality) → "no"
 
-a and b are 2-digit integers so that c_pos and c_neg can both be
-2-digit as well, ensuring matched tokenization lengths.
+a and b are 2-digit integers.
 """
 
 from __future__ import annotations

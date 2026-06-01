@@ -271,13 +271,7 @@ def score_teacher_forced(
         Tuple of (prompt_token_ids, answer_token_ids, answer_token_strs, per_pos_stats)
     """
     # Tokenize prompt and answer
-    if hasattr(model, "tokenize_qwen_input"):
-        # tokenize_qwen_input adds the sink token
-        prompt_tokens = tokenize_qwen_input(prompt_str, model.tokenizer, model.cfg.device).cpu()
-    else:
-        prompt_tokens = model.tokenizer(
-            prompt_str, return_tensors="pt", add_special_tokens=False
-        ).input_ids.squeeze(0)
+    prompt_tokens = tokenize_qwen_input(prompt_str, model.tokenizer, model.cfg.device).cpu()
 
     answer_tokens = model.tokenizer(
         true_answer_str, return_tensors="pt", add_special_tokens=False

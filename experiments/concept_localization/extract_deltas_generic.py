@@ -8,70 +8,91 @@ a single group.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 
 import torch
 from tqdm import tqdm
 
+# Concept-specific anchor factory: (pair, tokenizer) → {mode_name: token_position}
+AnchorFactory = Callable[[object, object], dict[str, int]]
+
 from experiments.concept_localization.concept_pair import ConceptPair
 from experiments.concept_localization.extract_deltas import LayerDeltas
+from mechinterp_qwen3.utils.token_utils import tokenize_qwen_input
 
 log = logging.getLogger(__name__)
 
 # Token strings that mark "end of expression / about to answer".
 # The model compresses the computed result onto these tokens (per biology-of-LLMs paper).
 _DELIMITER_STRINGS = (
-    "=", "Ġ=",
-    ":", "Ġ:",
-    "?", "Ġ?",
-    ")", "Ġ)",
-    ")=", "Ġ)=",
-    ")?", "Ġ)?",
-    ").", "Ġ).",
-    "),", "Ġ),",
-    "\n", "Ċ",
+    "=",
+    "Ġ=",
+    ":",
+    "Ġ:",
+    "?",
+    "Ġ?",
+    "\n",
+    "Ċ",
 )
 
+_DELIMITER_CHARS = {"=", ":", "?", ")", "\n"}
 
-def resolve_anchor_token(prompt: str, tokenizer, anchor_mode: str) -> tuple[int, str]:
-    """Return (0-indexed position, decoded token string) for the resolved anchor.
 
-    Mirrors the per-pair anchor logic in extract_layer_deltas_generic so callers
-    can inspect and save the anchor without re-running the full extraction.
-    """
+def resolve_anchor_token(
+    prompt: str,
+    tokenizer,
+    anchor_mode: str,
+    anchor_factory: AnchorFactory | None = None,
+    pair: object = None,
+) -> tuple[int, str]:
+    """Return (0-indexed position, decoded token string) for the resolved anchor."""
     ids = tokenizer(prompt, add_special_tokens=False).input_ids
-    _fixed_pos: int | None = None
-    if anchor_mode not in ("delimiter", "last"):
-        try:
-            _fixed_pos = int(anchor_mode)
-        except ValueError:
-            pass
-
-    if _fixed_pos is not None:
-        pos = min(_fixed_pos, len(ids) - 1)
-    elif anchor_mode == "last":
-        pos = len(ids) - 1
-    else:
-        pos = _find_delimiter_anchor(ids, tokenizer)
-
-    tok_str = tokenizer.convert_tokens_to_string(
-        [tokenizer.convert_ids_to_tokens(ids[pos])]
-    )
+    pos = _resolve_anchor(ids, tokenizer, anchor_mode, anchor_factory, pair)
+    tok_str = tokenizer.convert_tokens_to_string([tokenizer.convert_ids_to_tokens(ids[pos])])
     return pos, tok_str
+
+
+def _resolve_anchor(
+    ids: list[int],
+    tokenizer,
+    anchor_mode: str,
+    anchor_factory: AnchorFactory | None,
+    pair: object = None,
+) -> int:
+    """Resolve anchor_mode to a 0-indexed token position for one sequence.
+
+    Raises ValueError for unrecognised anchor_mode rather than silently
+    falling back to a delimiter scan.
+    """
+    if anchor_factory and pair is not None:
+        positions = anchor_factory(pair, tokenizer)
+        if anchor_mode in positions:
+            return positions[anchor_mode]
+    if anchor_mode == "last":
+        return len(ids) - 1
+    if anchor_mode == "delimiter":
+        return _find_delimiter_anchor(ids, tokenizer)
+    try:
+        return min(int(anchor_mode), len(ids) - 1)
+    except ValueError:
+        raise ValueError(
+            f"Unknown anchor_mode {anchor_mode!r}. "
+            f"Expected 'last', 'delimiter', an integer position string, "
+            f"or a concept-specific mode defined in ANCHOR_MODES."
+        ) from None
 
 
 def _find_delimiter_anchor(ids: list[int], tokenizer) -> int:
     """Return the position of the last expression-end delimiter token.
 
-    Searches backwards for structural punctuation.  Falls back to the final
-    token if none found.
+    Matches any token whose decoded string ends with a structural delimiter
+    character.  This handles merged tokens such as '():' or ')?' that would
+    be missed by exact token-ID lookup.  Falls back to the final token.
     """
-    delim_ids = {
-        tokenizer.convert_tokens_to_ids(s)
-        for s in _DELIMITER_STRINGS
-        if tokenizer.convert_tokens_to_ids(s) != tokenizer.unk_token_id
-    }
-    for i in range(len(ids) - 1, -1, -1):
-        if ids[i] in delim_ids:
+    tokens = tokenizer.convert_ids_to_tokens(ids)
+    for i in range(len(tokens) - 1, -1, -1):
+        tok = tokens[i].replace("Ġ", "").replace("Ċ", "\n")
+        if tok and tok[-1] in _DELIMITER_CHARS:
             return i
     return len(ids) - 1  # fallback: last token
 
@@ -84,31 +105,28 @@ def extract_layer_deltas_generic(
     dtype: torch.dtype,
     per_template: bool = True,
     anchor_mode: str = "delimiter",
+    delta_aggregation: str = "mean",
+    anchor_factory: AnchorFactory | None = None,
 ) -> dict[str, LayerDeltas]:
-    """Capture residual stream at the anchor token; return mean pos − neg delta.
+    """Capture residual stream at the anchor token; return aggregated pos − neg delta.
 
     anchor_mode="delimiter" (default) — last structural delimiter token ('=', ':',
-                              '?', ')').  Per the biology-of-LLMs paper, models
-                              store computed results on punctuation tokens that
-                              close the expression.  Falls back to the last token
-                              when no delimiter is found.
+                              '?', ')').  Falls back to the last token when none found.
     anchor_mode="last"      — absolute last token of the sequence.
-    anchor_mode="<int>"     — explicit 0-indexed token position (e.g. "5" for the
-                              ones digit of the first operand in "calc: 36+59=").
+    anchor_mode="<int>"     — explicit 0-indexed token position.
+    anchor_mode=<concept key> — resolved via anchor_factory(pair, tokenizer) if provided;
+                              the factory returns a dict of named positions computed from
+                              the template structure and actual operand values.
+
+    delta_aggregation="mean" (default) — plain mean of per-pair deltas δ̄ = mean_i(δ_i).
+    delta_aggregation="cosine_weighted" — weight each δ_i by its cosine alignment with
+                              the initial mean direction, then renormalise.
 
     Pairs where tokenization lengths differ are always skipped.
 
     Returns a dict keyed by "all" (aggregate) and per template name if
     per_template=True and pairs have a non-empty template field.
     """
-    _fixed_pos: int | None = None
-    if anchor_mode not in ("delimiter", "last"):
-        try:
-            _fixed_pos = int(anchor_mode)
-        except ValueError:
-            raise ValueError(
-                f"anchor_mode must be 'delimiter', 'last', or an integer position string, got {anchor_mode!r}"
-            )
 
     template_keys = list(dict.fromkeys(p.template for p in pairs)) if per_template else []
     all_keys = ["all"] + template_keys
@@ -129,17 +147,15 @@ def extract_layer_deltas_generic(
                 skipped += 1
                 continue
 
-            if _fixed_pos is not None:
-                anchor = _fixed_pos
-            elif anchor_mode == "last":
-                anchor = len(ids_pos) - 1
-            else:
-                anchor = _find_delimiter_anchor(ids_pos, model.tokenizer)
+            # Anchor is computed on raw ids; +1 for the sink token prepended by tokenize_qwen_input
+            anchor = (
+                _resolve_anchor(ids_pos, model.tokenizer, anchor_mode, anchor_factory, pair) + 1
+            )
 
             tmpl_key = pair.template
 
             for ids, bucket_name in [(ids_pos, "pos"), (ids_neg, "neg")]:
-                input_ids = torch.tensor([ids], dtype=torch.long, device=device)
+                input_ids = tokenize_qwen_input(ids, model.tokenizer, device).unsqueeze(0)
                 cache: dict[int, torch.Tensor] = {}
 
                 hooks = [
@@ -147,8 +163,10 @@ def extract_layer_deltas_generic(
                         f"blocks.{layer}.hook_resid_post",
                         lambda act, hook, _l=layer, _pos=anchor: (
                             cache.update({_l: act[0, _pos, :].detach().clone()})
-                            if _pos < act.shape[1] else None
-                        ) or act,
+                            if _pos < act.shape[1]
+                            else None
+                        )
+                        or act,
                     )
                     for layer in layers
                 ]
@@ -173,8 +191,31 @@ def extract_layer_deltas_generic(
             neg_vecs = layer_buckets[layer]["neg"]
             if not pos_vecs or not neg_vecs:
                 continue
-            n = min(len(pos_vecs), len(neg_vecs))
-            ld.delta[layer] = torch.stack(pos_vecs[:n]).mean(0) - torch.stack(neg_vecs[:n]).mean(0)
+            n = len(pos_vecs)
+            assert n == len(neg_vecs), (
+                f"Layer {layer}: {n} pos vectors but {len(neg_vecs)} neg vectors — "
+                "pos/neg should always be appended together"
+            )
+            pair_deltas = torch.stack(pos_vecs) - torch.stack(neg_vecs)  # (n, d_model)
+            mean_delta = pair_deltas.mean(0)  # (d_model,)
+            mean_norm = mean_delta.norm()
+
+            cos: torch.Tensor | None = None
+            if mean_norm > 1e-8:
+                cos = torch.nn.functional.cosine_similarity(
+                    pair_deltas.float(),
+                    mean_delta.float().unsqueeze(0).expand_as(pair_deltas.float()),
+                    dim=-1,
+                )  # (n,)
+                ld.mean_pair_cos[layer] = cos.mean().item()
+
+                if delta_aggregation == "cosine_weighted":
+                    weights = cos.clamp(min=0)  # zero-out anti-aligned pairs
+                    w_sum = weights.sum()
+                    if w_sum > 1e-8:
+                        mean_delta = (pair_deltas.float() * weights.unsqueeze(1)).sum(0) / w_sum
+
+            ld.delta[layer] = mean_delta
             ld.n_pairs = max(ld.n_pairs, n)
             all_vecs = pos_vecs + neg_vecs
             ld.mean_act_norm[layer] = torch.stack(all_vecs).norm(dim=-1).mean().item()

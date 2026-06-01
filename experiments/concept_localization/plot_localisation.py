@@ -23,6 +23,7 @@ import sys
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
@@ -33,17 +34,37 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO_ROOT))
 
 CONCEPTS = [
-    "carry", "gcd", "residue_class", "transitive_ordering", "conservation",
-    "causal_direction", "negation_scope", "balanced_parentheses", "decimal_termination",
-    "doppler_shift", "dot_product_sign", "geometric_series", "momentum_conservation",
-    "perfect_square", "syllogism", "triangle_inequality", "wave_interference",
+    "carry",
+    "gcd",
+    "residue_class",
+    "transitive_ordering",
+    "conservation",
+    "causal_direction",
+    "negation_scope",
+    "balanced_parentheses",
+    "decimal_termination",
+    "doppler_shift",
+    "dot_product_sign",
+    "geometric_series",
+    "momentum_conservation",
+    "perfect_square",
+    "syllogism",
+    "triangle_inequality",
+    "wave_interference",
 ]
 SYMBOLIC_SUBSET = [
-    "carry", "residue_class", "gcd", "perfect_square", "decimal_termination",
-    "dot_product_sign", "triangle_inequality", "transitive_ordering",
-    "balanced_parentheses", "syllogism",
+    "carry",
+    "residue_class",
+    "gcd",
+    "perfect_square",
+    "decimal_termination",
+    "dot_product_sign",
+    "triangle_inequality",
+    "transitive_ordering",
+    "balanced_parentheses",
+    "syllogism",
 ]
-from experiments.plot_style import CMAP_DIV, GRAY, MAUVE, NAVY, RED, TEAL, VIOLET, apply
+from experiments.plot_style import CMAP_DIV, GRAY, MAUVE, NAVY, TEAL, VIOLET, apply
 
 apply()
 
@@ -82,26 +103,25 @@ def _vecs(deltas: dict, key: str, n_layers: int) -> torch.Tensor:
     return torch.stack(rows)
 
 
-def plot_cross_layer_sim(concept: str) -> None:
-    out_dir = _RUNS / concept
-    res, deltas = _load(out_dir)
-    if res is None:
-        print(f"  [skip] {concept}: no data")
-        return
-
-    cfg = res.get("config", {})
-    anchor_tok = cfg.get("anchor_token", cfg.get("anchor_mode", "?"))
-    n_layers = len(res["sharpness"]["norm_by_layer"])
+def _plot_cross_layer_sim_core(
+    deltas: dict,
+    n_layers: int,
+    anchor_tok: str,
+    concept: str,
+    out_path: Path,
+) -> None:
+    """Shared rendering logic for cross-layer cosine similarity figures."""
     tmpl_keys = [k for k in deltas if k != "all"]
     keys = ["all"] + tmpl_keys
     n_panels = len(keys)
 
-    fig, axes = plt.subplots(1, n_panels, figsize=(4.5 * n_panels, 4.5),
-                             gridspec_kw={"wspace": 0.4})
+    fig, axes = plt.subplots(
+        1, n_panels, figsize=(4.5 * n_panels, 4.5), gridspec_kw={"wspace": 0.4}
+    )
     if n_panels == 1:
         axes = [axes]
 
-    for ax, key in zip(axes, keys):
+    for ax, key in zip(axes, keys, strict=False):
         D = _vecs(deltas, key, n_layers)
         D_n = F.normalize(D.float(), dim=-1)
         mat = (D_n @ D_n.T).numpy()
@@ -113,8 +133,15 @@ def plot_cross_layer_sim(concept: str) -> None:
             abs_max = max(abs(vmin), vmax)
             vmin, vmax = -abs_max, abs_max
 
-        im = ax.imshow(mat, vmin=vmin, vmax=vmax, cmap=cmap,
-                       aspect="auto", origin="upper", interpolation="nearest")
+        im = ax.imshow(
+            mat,
+            vmin=vmin,
+            vmax=vmax,
+            cmap=cmap,
+            aspect="auto",
+            origin="upper",
+            interpolation="nearest",
+        )
         cb = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
         cb.set_label(r"$\cos(\delta_i,\, \delta_j)$", fontsize=8)
         cb.ax.tick_params(labelsize=7)
@@ -133,10 +160,39 @@ def plot_cross_layer_sim(concept: str) -> None:
         ax.set_title(f'{label}   anchor: "{anchor_tok}"', fontsize=9, pad=5)
 
     fig.suptitle(f"Cross-layer cosine similarity — {concept}", fontsize=12, y=1.02)
-    out = out_dir / "cross_layer_sim.pdf"
-    fig.savefig(out, bbox_inches="tight")
+    fig.savefig(out_path, bbox_inches="tight")
     plt.close(fig)
-    print(f"  Saved {out}")
+    print(f"  Saved {out_path}")
+
+
+def plot_cross_layer_sim(concept: str) -> None:
+    out_dir = _RUNS / concept
+    res, deltas = _load(out_dir)
+    if res is None:
+        print(f"  [skip] {concept}: no data")
+        return
+
+    cfg = res.get("config", {})
+    anchor_tok = cfg.get("anchor_token", cfg.get("anchor_mode", "?"))
+    n_layers = len(res["sharpness"]["norm_by_layer"])
+    _plot_cross_layer_sim_core(
+        deltas, n_layers, anchor_tok, concept, out_dir / "cross_layer_sim.pdf"
+    )
+
+
+def plot_cross_layer_sim_data(
+    layer_deltas: dict,
+    n_layers: int,
+    anchor_tok: str,
+    concept: str,
+    out_path: Path,
+) -> None:
+    """Plot cross-layer cosine similarity from in-memory LayerDeltas objects.
+
+    layer_deltas: dict mapping key -> LayerDeltas (as returned by extract_layer_deltas_generic).
+    """
+    deltas = {key: ld.delta for key, ld in layer_deltas.items()}
+    _plot_cross_layer_sim_core(deltas, n_layers, anchor_tok, concept, out_path)
 
 
 def plot_template_consistency(concept: str) -> None:
@@ -169,7 +225,7 @@ def plot_template_consistency(concept: str) -> None:
         tmpl_norms[t] = arr
 
     # Template consistency: pairwise cosine per layer, computed from deltas
-    pairs = [(t1, t2) for i, t1 in enumerate(tmpl_keys) for t2 in tmpl_keys[i+1:]]
+    pairs = [(t1, t2) for i, t1 in enumerate(tmpl_keys) for t2 in tmpl_keys[i + 1 :]]
     tc: dict[str, np.ndarray] = {}
     for t1, t2 in pairs:
         vals = []
@@ -191,7 +247,7 @@ def plot_template_consistency(concept: str) -> None:
     ax_tc.spines["right"].set_visible(False)
 
     colors = [NAVY, TEAL, MAUVE, GRAY]
-    for (label, vals), col in zip(tc.items(), colors):
+    for (label, vals), col in zip(tc.items(), colors, strict=False):
         ax_tc.plot(layers, vals, color=col, lw=1.8, label=label)
     ax_tc.axhline(1.0, color=GRAY, lw=0.7, ls="--", alpha=0.5)
     ax_tc.set_ylabel("Template consistency", fontsize=10)
@@ -208,9 +264,23 @@ def plot_template_consistency(concept: str) -> None:
 
 # Semantic ordering for cross-concept heatmap: group by concept family
 _CONCEPT_ORDER = [
-    "carry", "gcd", "residue_class", "perfect_square", "decimal_termination", "dot_product_sign",
-    "conservation", "geometric_series", "wave_interference", "doppler_shift", "momentum_conservation", "triangle_inequality",
-    "balanced_parentheses", "negation_scope", "syllogism", "transitive_ordering", "causal_direction",
+    "carry",
+    "gcd",
+    "residue_class",
+    "perfect_square",
+    "decimal_termination",
+    "dot_product_sign",
+    "conservation",
+    "geometric_series",
+    "wave_interference",
+    "doppler_shift",
+    "momentum_conservation",
+    "triangle_inequality",
+    "balanced_parentheses",
+    "negation_scope",
+    "syllogism",
+    "transitive_ordering",
+    "causal_direction",
 ]
 _GROUP_SIZES = [6, 6, 5]  # modular / physical / logical
 _GROUP_LABELS = ["Modular / arithmetic", "Physical / continuous", "Logical / linguistic"]
@@ -220,7 +290,8 @@ def plot_cross_layer_sim_grid(concepts: list[str], ncols: int = 6) -> None:
     """Grid of L×L cross-layer cosine matrices for all concepts (aggregate key)."""
     nrows = (len(concepts) + ncols - 1) // ncols
     fig, axes = plt.subplots(
-        nrows, ncols,
+        nrows,
+        ncols,
         figsize=(2.6 * ncols, 2.7 * nrows),
         gridspec_kw={"hspace": 0.55, "wspace": 0.25},
     )
@@ -250,8 +321,13 @@ def plot_cross_layer_sim_grid(concepts: list[str], ncols: int = 6) -> None:
         mat = (D_n @ D_n.T).numpy()
 
         last_im = ax.imshow(
-            mat, vmin=-1, vmax=1, cmap=CMAP_DIV,
-            aspect="equal", origin="upper", interpolation="nearest",
+            mat,
+            vmin=-1,
+            vmax=1,
+            cmap=CMAP_DIV,
+            aspect="equal",
+            origin="upper",
+            interpolation="nearest",
         )
 
         # Phase boundaries from phases.json as violet dashed lines on both axes.
@@ -275,14 +351,19 @@ def plot_cross_layer_sim_grid(concepts: list[str], ncols: int = 6) -> None:
 
     if last_im is not None:
         cb = fig.colorbar(
-            last_im, ax=axes_flat, fraction=0.012, pad=0.02, shrink=0.6,
+            last_im,
+            ax=axes_flat,
+            fraction=0.012,
+            pad=0.02,
+            shrink=0.6,
         )
         cb.set_label(r"$\cos(\delta_l,\,\delta_{l'})$", fontsize=8)
         cb.ax.tick_params(labelsize=6)
 
     fig.suptitle(
         r"Cross-layer cosine similarity $\cos(\delta_l,\,\delta_{l'})$ — all concepts",
-        fontsize=11, y=1.01,
+        fontsize=11,
+        y=1.01,
     )
     out = _RUNS / "cross_layer_sim_all.png"
     fig.savefig(out, bbox_inches="tight")
@@ -290,18 +371,22 @@ def plot_cross_layer_sim_grid(concepts: list[str], ncols: int = 6) -> None:
     print(f"Saved {out}")
 
 
-
-
 def main() -> None:
     ap = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    ap.add_argument("--concept", default="carry",
-                    help="Concept name, 'all', or 'symbolic'")
-    ap.add_argument("--runs_dir", default=None,
-                    help="Override runs directory")
-    ap.add_argument("--heatmaps", action="store_true",
-                    help="Generate cross-layer grid and cross-concept similarity heatmaps")
-    ap.add_argument("--key_layers", nargs="+", type=int, default=[10, 17, 22, 30],
-                    help="Layers for cross-concept similarity plot")
+    ap.add_argument("--concept", default="carry", help="Concept name, 'all', or 'symbolic'")
+    ap.add_argument("--runs_dir", default=None, help="Override runs directory")
+    ap.add_argument(
+        "--heatmaps",
+        action="store_true",
+        help="Generate cross-layer grid and cross-concept similarity heatmaps",
+    )
+    ap.add_argument(
+        "--key_layers",
+        nargs="+",
+        type=int,
+        default=[10, 17, 22, 30],
+        help="Layers for cross-concept similarity plot",
+    )
     args = ap.parse_args()
 
     global _RUNS

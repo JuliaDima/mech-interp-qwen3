@@ -6,9 +6,9 @@ Neg: n is not a perfect square → "No"
 All templates use "Yes or No: " prefix so the model reliably outputs "Yes" or
 "No" rather than a number or other continuation.
 
-n_pos = k² for k in [2, 31]; n_neg = n_pos + offset for a random
-small offset in {-3,-2,-1,1,2,3} that avoids other perfect squares.
-Offset is varied to avoid the fixed-gap confound.
+n_pos = k² for k in [10, 31], giving 3-digit numbers [100, 961];
+n_neg = n_pos + offset for a random small offset in {-3,-2,-1,1,2,3}
+that avoids other perfect squares. Offset is varied to avoid the fixed-gap confound.
 """
 
 from __future__ import annotations
@@ -51,7 +51,7 @@ def generate_perfect_square_pairs(
         v < n_per_template for v in counts.values()
     ):
         attempts += 1
-        k = rng.randint(2, 31)
+        k = rng.randint(10, 31)
         n_pos = k * k
 
         offsets = [-3, -2, -1, 1, 2, 3]

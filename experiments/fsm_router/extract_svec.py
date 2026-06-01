@@ -59,6 +59,7 @@ from experiments.fsm_router.primitives import FSM_SPECS, PRIMITIVE_DEFS  # noqa:
 from mechinterp_qwen3.attribution_model import AttributionModel  # noqa: E402
 from mechinterp_qwen3.utils.hf_utils import load_transcoder_from_hub  # noqa: E402
 from mechinterp_qwen3.utils.model_utils import get_default_device, parse_dtype  # noqa: E402
+from mechinterp_qwen3.utils.token_utils import tokenize_qwen_input  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -206,7 +207,9 @@ def _run_greedy(
 
     with torch.no_grad():
         for pos, target_id in enumerate(answer_ids):
-            input_ids = torch.tensor([prompt_ids + generated], dtype=torch.long, device=device)
+            input_ids = tokenize_qwen_input(
+                prompt_ids + generated, model.tokenizer, device
+            ).unsqueeze(0)
             if fwd_hooks:
                 logits = model.run_with_hooks(input_ids, fwd_hooks=fwd_hooks)[0, -1, :]
             else:

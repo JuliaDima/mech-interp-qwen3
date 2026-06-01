@@ -1,23 +1,22 @@
-"""Decimal expansion termination concept dataset.
+"""Decimal termination dataset restricted to smooth vs large-prime denominators.
 
-Modular structure: 1/n terminates iff n = 2^a * 5^b (only factors 2 and 5).
+A variant of decimal_termination_dataset where:
+  Pos: same smooth denominators (1/n terminates — n = 2^a * 5^b)
+  Neg: denominators whose every prime factor is > 20 (primes, or products of
+       large primes).  No multiples of 3, 7, 11, 13 appear in the neg set.
 
-Pos: n_pos has only factors 2 and 5 → terminating decimal → "yes"
-Neg: n_neg has another prime factor → repeating decimal → "no"
+This isolates a specific regime: can the model distinguish smooth numbers from
+numbers that have no small non-2/5 prime factors?  The concept is still
+"1/n terminates" but probed only where the non-terminating examples involve
+large, opaque prime structure rather than easily recognisable small factors.
 
-All denominators are 3-digit (100–999).  _POS is the complete set of 14
-terminating denominators.  _NEG is sampled to cover each small prime factor
-class (3, 7, 11, 13, 17, 19, …) so the dataset tests the full mathematical
-rule, not just smooth vs large-prime denominators.
-
-See also: decimal_termination_large_prime_dataset.py, which isolates the
-smooth vs large-prime contrast specifically.
+Compare results against decimal_termination_dataset to see whether the model
+uses different mechanisms for large-prime vs small-prime denominators.
 """
 
 from __future__ import annotations
 
 import random
-from collections import defaultdict
 
 from sympy import factorint
 
@@ -28,29 +27,10 @@ def _terminates(n: int) -> bool:
     return all(p in (2, 5) for p in factorint(n))
 
 
-def _smallest_non25(n: int) -> int | None:
-    return min((p for p in factorint(n) if p not in (2, 5)), default=None)
-
-
-def _build_neg(seed: int = 42) -> list[int]:
-    """Sample NEG with ~12 values per small-prime factor class."""
-    rng = random.Random(seed)
-    by_factor: dict[int, list[int]] = defaultdict(list)
-    for n in range(100, 1000):
-        if not _terminates(n):
-            p = _smallest_non25(n)
-            if p is not None:
-                by_factor[p].append(n)
-    result: set[int] = set()
-    for p in [3, 7, 11, 13, 17, 19]:
-        result.update(rng.sample(by_factor[p], min(12, len(by_factor[p]))))
-    for p in sorted(by_factor)[6:15]:
-        result.update(rng.sample(by_factor[p], min(5, len(by_factor[p]))))
-    return sorted(result)
-
-
 _POS: list[int] = [n for n in range(100, 1000) if _terminates(n)]
-_NEG: list[int] = _build_neg()
+_NEG: list[int] = [
+    n for n in range(100, 1000) if not _terminates(n) and all(p > 20 for p in factorint(n))
+]
 
 TEMPLATES = {
     "T0": ("Yes or No: 1/{n} terminates: ", "Yes or No: 1/{n} terminates: "),
@@ -66,39 +46,32 @@ TEMPLATES = {
 
 
 def make_anchor_positions(template_str: str, n: int, tokenizer) -> dict[str, int]:
-    """Compute token positions for each digit of n.
-
-    Keys are digit_1 (ones), digit_2 (tens), digit_3 (hundreds), numbered from
-    the right.  Only keys up to len(str(n)) are present, so digit_2 is absent
-    for single-digit n.
-    """
+    """Compute token positions for each digit of n (digit_1 = ones, digit_2 = tens, …)."""
     n_str = str(n)
     pre_n = template_str[: template_str.index("{n}")]
-    n_digits = len(n_str)
     positions: dict[str, int] = {}
-    for i in range(n_digits):
+    for i in range(len(n_str)):
         prefix = pre_n + n_str[: i + 1]
         pos = len(tokenizer(prefix, add_special_tokens=False).input_ids) - 1
-        digit_from_right = n_digits - i  # n_digits → ... → 2 → 1
-        positions[f"digit_{digit_from_right}"] = pos
+        positions[f"digit_{len(n_str) - i}"] = pos
     return positions
 
 
-def _decimal_anchor_factory(pair, tokenizer) -> dict[str, int]:
+def _anchor_factory(pair, tokenizer) -> dict[str, int]:
     tmpl_str = TEMPLATES[pair.template][0]
     return make_anchor_positions(tmpl_str, pair.meta["n_pos"], tokenizer)
 
 
-ANCHOR_FACTORY = _decimal_anchor_factory
+ANCHOR_FACTORY = _anchor_factory
 ANCHOR_MODES = ("digit_1", "digit_2", "digit_3")
 
 
-def generate_decimal_pairs(
-    n_per_template: int = 80,
+def generate_large_prime_pairs(
+    n_per_template: int = 100,
     templates: list[str] | None = None,
     seed: int = 42,
 ) -> list[ConceptPair]:
-    """Pairs n_pos (terminates) vs n_neg (repeats), matched by magnitude."""
+    """Pairs smooth n_pos vs large-prime n_neg, matched by magnitude."""
     if templates is None:
         templates = list(TEMPLATES)
 

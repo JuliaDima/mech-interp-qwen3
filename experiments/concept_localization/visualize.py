@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import numpy as np
 import torch.nn.functional as F
 
 import experiments.plot_style as ps
@@ -12,12 +14,6 @@ from experiments.concept_localization.analyze import FeatureMatch
 from experiments.concept_localization.extract_deltas import LayerDeltas
 
 _TEMPLATE_COLORS = [ps.NAVY, ps.TEAL, ps.MAUVE]
-
-
-def _norm01(vals: list[float]) -> list[float]:
-    """Scale to [0, 1] by absolute peak; preserves sign and zero-crossings."""
-    peak = max(abs(v) for v in vals) if vals else 1.0
-    return [v / peak if peak > 0 else 0.0 for v in vals]
 
 
 def plot_norm_and_alignment(
@@ -42,7 +38,7 @@ def plot_norm_and_alignment(
     tmpl_keys = [k for k in results if k != "all"]
 
     # Template-consistency pairs
-    tc_pairs = [(t1, t2) for i, t1 in enumerate(tmpl_keys) for t2 in tmpl_keys[i + 1:]]
+    tc_pairs = [(t1, t2) for i, t1 in enumerate(tmpl_keys) for t2 in tmpl_keys[i + 1 :]]
     tc: dict[str, tuple[list[int], list[float]]] = {}
     for t1, t2 in tc_pairs:
         ld1, ld2 = results.get(t1), results.get(t2)
@@ -60,15 +56,18 @@ def plot_norm_and_alignment(
 
     has_tc = bool(tc)
     n_rows = 2 + use_norm + has_tc  # raw, (act_norm?), cos_sim, (tc?)
-    fig, axs = plt.subplots(n_rows, 1, figsize=(5, 5 * n_rows),
-                            sharex=True,
-                            gridspec_kw={"hspace": 0.08})
+    fig, axs = plt.subplots(
+        n_rows, 1, figsize=(5, 5 * n_rows), sharex=True, gridspec_kw={"hspace": 0.08}
+    )
     axs = list(axs) if n_rows > 1 else [axs]
     row = 0
-    ax_raw = axs[row]; row += 1
+    ax_raw = axs[row]
+    row += 1
     ax_normed = axs[row] if use_norm else None
-    if use_norm: row += 1
-    ax_cos = axs[row]; row += 1
+    if use_norm:
+        row += 1
+    ax_cos = axs[row]
+    row += 1
     ax_tc = axs[row] if has_tc else None
 
     # peak of the "all" series — used to normalise every curve to [0, 1]
@@ -94,20 +93,38 @@ def plot_norm_and_alignment(
         color = ps.VIOLET if is_agg else _TEMPLATE_COLORS[(i - 1) % len(_TEMPLATE_COLORS)]
         label = "all templates" if is_agg else key
 
-        ax_raw.plot(layers, peak_normed, label=label, color=color, linewidth=lw, linestyle=ls, alpha=alpha)
+        ax_raw.plot(
+            layers, peak_normed, label=label, color=color, linewidth=lw, linestyle=ls, alpha=alpha
+        )
 
         if use_norm and ax_normed is not None and ld.mean_act_norm:
-            normed = [r / ld.mean_act_norm.get(l, 1.0) for l, r in zip(layers, raw)]
-            ax_normed.plot(layers, normed, label=label, color=color, linewidth=lw, linestyle=ls, alpha=alpha)
+            normed = [r / ld.mean_act_norm.get(l, 1.0) for l, r in zip(layers, raw, strict=False)]
+            ax_normed.plot(
+                layers, normed, label=label, color=color, linewidth=lw, linestyle=ls, alpha=alpha
+            )
 
         if is_agg and ld.mean_pair_cos:
             cos_layers = sorted(ld.mean_pair_cos.keys())
             cos_vals = [ld.mean_pair_cos[l] for l in cos_layers]
-            ax_raw.plot(cos_layers, cos_vals, color=ps.TEAL, linewidth=1.6,
-                        linestyle=":", label=r"mean $\cos(\delta_i,\,\bar{\delta}_l)$", zorder=4)
+            ax_raw.plot(
+                cos_layers,
+                cos_vals,
+                color=ps.TEAL,
+                linewidth=1.6,
+                linestyle=":",
+                label=r"mean $\cos(\delta_i,\,\bar{\delta}_l)$",
+                zorder=4,
+            )
             if use_norm and ax_normed is not None:
-                ax_normed.plot(cos_layers, cos_vals, color=ps.TEAL, linewidth=1.6,
-                               linestyle=":", label=r"mean $\cos(\delta_i,\,\bar{\delta}_l)$", zorder=4)
+                ax_normed.plot(
+                    cos_layers,
+                    cos_vals,
+                    color=ps.TEAL,
+                    linewidth=1.6,
+                    linestyle=":",
+                    label=r"mean $\cos(\delta_i,\,\bar{\delta}_l)$",
+                    zorder=4,
+                )
 
     ax_raw.set_ylabel(r"$\|\delta_l\| / \max_l(\|\delta_l\|)$")
     ax_raw.set_title(f"{concept} — norm trajectory", fontsize=11)
@@ -140,7 +157,7 @@ def plot_norm_and_alignment(
     # Template consistency (bottom panel — carries the x-axis label)
     if ax_tc is not None:
         colors = [ps.NAVY, ps.TEAL, ps.MAUVE, ps.GRAY]
-        for (label, (layers_tc, vals)), col in zip(tc.items(), colors):
+        for (label, (layers_tc, vals)), col in zip(tc.items(), colors, strict=False):
             ax_tc.plot(layers_tc, vals, color=col, lw=1.8, label=label)
         ax_tc.axhline(1.0, color=ps.GRAY, lw=0.7, ls="--", alpha=0.5)
         ax_tc.set_xlabel("Layer")
@@ -452,7 +469,9 @@ def plot_causal_efficiency(
     ax.plot(layers, eff_all, color=ps.TEAL, linewidth=2.2, zorder=3, label="mean (all templates)")
     ax.axhline(0, color=ps.GRAY, linewidth=0.8, linestyle="--")
     ax.set_xlabel("Layer")
-    ax.set_ylabel(r"$(\nabla_h \,[\mathrm{logit}^+ - \mathrm{logit}^-] \cdot \delta)\,/\,\|\delta\|$")
+    ax.set_ylabel(
+        r"$(\nabla_h \,[\mathrm{logit}^+ - \mathrm{logit}^-] \cdot \delta)\,/\,\|\delta\|$"
+    )
     ax.set_title(
         f"Causal efficiency — {concept}  (n={agg.n_pairs} pairs)\n"
         "How much of each layer's delta is pointing at the output"
@@ -484,8 +503,7 @@ def plot_causal_scores(
     tmpl_keys = [k for k in causal_results if k != "all"]
 
     ps.apply()
-    fig, axes = plt.subplots(3, 1, figsize=(5, 15), sharex=True,
-                             gridspec_kw={"hspace": 0.08})
+    fig, axes = plt.subplots(3, 1, figsize=(5, 15), sharex=True, gridspec_kw={"hspace": 0.08})
 
     dn = [delta_norms.get(l, 0.0) for l in layers]
 
@@ -494,12 +512,12 @@ def plot_causal_scores(
             cs = causal_results[t]
             vals = [getattr(cs, attr + "_mean").get(l, 0.0) for l in layers]
             if norm_by is not None:
-                vals = [v / n if n > 1e-6 else 0.0 for v, n in zip(vals, norm_by)]
+                vals = [v / n if n > 1e-6 else 0.0 for v, n in zip(vals, norm_by, strict=False)]
             tc = _TEMPLATE_COLORS[i % len(_TEMPLATE_COLORS)]
             ax.plot(layers, vals, color=tc, linewidth=0.9, alpha=0.55, linestyle="--", label=t)
         vals_all = [getattr(agg, attr + "_mean").get(l, 0.0) for l in layers]
         if norm_by is not None:
-            vals_all = [v / n if n > 1e-6 else 0.0 for v, n in zip(vals_all, norm_by)]
+            vals_all = [v / n if n > 1e-6 else 0.0 for v, n in zip(vals_all, norm_by, strict=False)]
         ax.plot(layers, vals_all, color=color, linewidth=2.2, label="all", zorder=3)
         ax.axhline(0, color=ps.GRAY, linestyle="--", linewidth=0.8)
         ax.set_ylabel(ylabel)
@@ -507,25 +525,39 @@ def plot_causal_scores(
         if bottom:
             ax.set_xlabel("Layer")
 
-    _draw_panel(axes[0], "patching", ps.VIOLET,
-                r"$\Delta(\mathrm{logit}^+ - \mathrm{logit}^-)$")
-    _draw_panel(axes[1], "grad_dot_delta", ps.TEAL,
-                r"$(\nabla_h\,[\mathrm{logit}^+ - \mathrm{logit}^-] \cdot \delta)\;/\;\|\delta\|$",
-                norm_by=dn)
+    _draw_panel(axes[0], "patching", ps.VIOLET, r"$\Delta(\mathrm{logit}^+ - \mathrm{logit}^-)$")
+    _draw_panel(
+        axes[1],
+        "grad_dot_delta",
+        ps.TEAL,
+        r"$(\nabla_h\,[\mathrm{logit}^+ - \mathrm{logit}^-] \cdot \delta)\;/\;\|\delta\|$",
+        norm_by=dn,
+    )
 
     # Bottom panel: delta norm
     ax = axes[2]
     dn_raw = [delta_norms.get(l, 0.0) for l in layers]
     peak_raw = max(dn_raw) if dn_raw else 1.0
     dn_raw_01 = [v / peak_raw if peak_raw > 0 else 0.0 for v in dn_raw]
-    ax.plot(layers, dn_raw_01, color=ps.NAVY, linewidth=2.0,
-            label=r"$\|\delta_l\| / \max_l(\|\delta_l\|)$")
+    ax.plot(
+        layers,
+        dn_raw_01,
+        color=ps.NAVY,
+        linewidth=2.0,
+        label=r"$\|\delta_l\| / \max_l(\|\delta_l\|)$",
+    )
     if mean_act_norms:
         dn_anorm = [delta_norms.get(l, 0.0) / mean_act_norms.get(l, 1.0) for l in layers]
         peak_anorm = max(dn_anorm) if dn_anorm else 1.0
         dn_anorm_01 = [v / peak_anorm if peak_anorm > 0 else 0.0 for v in dn_anorm]
-        ax.plot(layers, dn_anorm_01, color=ps.TEAL, linewidth=1.4, linestyle="--",
-                label=r"$(\|\delta_l\| / \mathbb{E}\|\mathbf{h}_l\|) / \max_l(\|\delta_l\| / \mathbb{E}\|\mathbf{h}_l\|)$")
+        ax.plot(
+            layers,
+            dn_anorm_01,
+            color=ps.TEAL,
+            linewidth=1.4,
+            linestyle="--",
+            label=r"$(\|\delta_l\| / \mathbb{E}\|\mathbf{h}_l\|) / \max_l(\|\delta_l\| / \mathbb{E}\|\mathbf{h}_l\|)$",
+        )
     ax.set_xlabel("Layer")
     ax.set_ylabel("Normalised to [0, 1]")
     ax.set_ylim(bottom=0)
@@ -575,7 +607,145 @@ def plot_top_features_per_layer(
     for idx in range(n, rows * cols):
         axes[idx // cols][idx % cols].set_visible(False)
 
-    fig.suptitle(rf"Top-{top_k} {concept} features by layer  ($\hat{{W}}_{{\mathrm{{enc}}}}\,\delta_l$ projection)", fontsize=10)
+    fig.suptitle(
+        rf"Top-{top_k} {concept} features by layer  ($\hat{{W}}_{{\mathrm{{enc}}}}\,\delta_l$ projection)",
+        fontsize=10,
+    )
     fig.tight_layout()
     fig.savefig(out_path)
+    plt.close(fig)
+
+
+def plot_feature_activation_grid(
+    activations: dict[tuple[int, int], tuple[np.ndarray, np.ndarray]],
+    projections: dict[int, list[FeatureMatch]],
+    out_path: Path,
+    concept: str,
+    anchor_label: str,
+    ncols: int = 5,
+) -> None:
+    """Grid of act_pos vs act_neg scatter plots, one panel per feature.
+
+    Each subplot shows transcoder feature activation across all concept pairs,
+    with positive examples on the y-axis and negative examples on the x-axis.
+    Points above the diagonal indicate the feature fires more for positive examples.
+    """
+    proj_lookup: dict[tuple[int, int], float] = {
+        (m.layer, m.feature_id): m.projection for matches in projections.values() for m in matches
+    }
+
+    items = list(activations.items())
+    if not items:
+        return
+
+    n = len(items)
+    nrows = math.ceil(n / ncols)
+    cell = 3.2
+    ps.apply()
+    fig, axes = plt.subplots(
+        nrows,
+        ncols,
+        figsize=(ncols * cell, nrows * cell + 1.2),
+        squeeze=False,
+    )
+
+    for idx, ((layer, feat_id), (vpos, vneg)) in enumerate(items):
+        ax = axes[idx // ncols][idx % ncols]
+        proj = proj_lookup.get((layer, feat_id), float("nan"))
+
+        all_vals = np.concatenate([vpos, vneg])
+        lo, hi = float(all_vals.min()), float(all_vals.max())
+        pad = (hi - lo) * 0.08 if hi > lo else 0.1
+        lim = (lo - pad, hi + pad)
+        ax.plot(lim, lim, color=ps.GRAY, lw=0.8, ls="--", alpha=0.6, zorder=1)
+
+        ax.scatter(vneg, vpos, s=18, alpha=0.55, color=ps.NAVY, linewidths=0, zorder=2)
+        ax.set_xlim(lim)
+        ax.set_ylim(lim)
+        ax.set_xlabel("act (neg)", fontsize=7, labelpad=2)
+        ax.set_ylabel("act (pos)", fontsize=7, labelpad=2)
+        ax.tick_params(labelsize=6)
+        ax.set_title(f"L{layer:02d} F{feat_id:06d}  proj={proj:.2f}", fontsize=8, pad=3)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+
+    for idx in range(n, nrows * ncols):
+        axes[idx // ncols][idx % ncols].set_visible(False)
+
+    fig.suptitle(
+        f"{concept} — feature activations at anchor pos {anchor_label}",
+        fontsize=10,
+        y=1.01,
+    )
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+
+def plot_feature_heatmap_grid(
+    matrices: dict[tuple[int, int], np.ndarray],
+    projections: dict[int, list[FeatureMatch]],
+    out_path: Path,
+    concept: str,
+    anchor_label: str,
+    xlabel: str = "ones(a)",
+    ylabel: str = "ones(b)",
+    ncols: int = 5,
+) -> None:
+    """Grid of 2-D heatmaps over swept input digits, one panel per feature.
+
+    matrices: (layer, feat_id) → (n_x, n_y) activation array.
+    Axes correspond to the swept digit values (e.g. 0–9 for ones digits).
+    """
+    proj_lookup: dict[tuple[int, int], float] = {
+        (m.layer, m.feature_id): m.projection for matches in projections.values() for m in matches
+    }
+
+    items = list(matrices.items())
+    if not items:
+        return
+
+    n = len(items)
+    nrows = math.ceil(n / ncols)
+    cell = 3.2
+    ps.apply()
+    fig, axes = plt.subplots(
+        nrows,
+        ncols,
+        figsize=(ncols * cell, nrows * cell + 1.2),
+        squeeze=False,
+    )
+
+    for idx, ((layer, feat_id), mat) in enumerate(items):
+        ax = axes[idx // ncols][idx % ncols]
+        proj = proj_lookup.get((layer, feat_id), float("nan"))
+        n_x, n_y = mat.shape
+
+        im = ax.imshow(
+            mat.T,
+            origin="lower",
+            aspect="auto",
+            cmap="Blues",
+            vmin=0,
+            vmax=float(mat.max()) or 1.0,
+            extent=[-0.5, n_x - 0.5, -0.5, n_y - 0.5],
+        )
+        ax.set_title(f"L{layer:02d} F{feat_id:06d}  proj={proj:.2f}", fontsize=8, pad=3)
+        ax.set_xlabel(xlabel, fontsize=7, labelpad=2)
+        ax.set_ylabel(ylabel, fontsize=7, labelpad=2)
+        ax.set_xticks(range(n_x))
+        ax.set_yticks(range(n_y))
+        ax.tick_params(labelsize=5)
+        fig.colorbar(im, ax=ax, shrink=0.8, pad=0.02)
+
+    for idx in range(n, nrows * ncols):
+        axes[idx // ncols][idx % ncols].set_visible(False)
+
+    fig.suptitle(
+        f"{concept} — feature activations at anchor {anchor_label}  " f"(x={xlabel}, y={ylabel})",
+        fontsize=10,
+        y=1.01,
+    )
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
