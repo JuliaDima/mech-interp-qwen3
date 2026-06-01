@@ -29,10 +29,12 @@ import numpy as np
 import torch
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
+_SWEEPS_DIR = Path(__file__).resolve().parent
+for _p in (_REPO_ROOT, _SWEEPS_DIR):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 
-from sweep_utils import apply_transcoder_all, score_and_rank
+from sweep_utils import apply_transcoder_all, resolve_anchor_from_positions, score_and_rank
 
 from experiments.concept_localization.analyze import collect_layer_residuals
 from experiments.concept_localization.extract_deltas_generic import (
@@ -111,7 +113,7 @@ def _build_inputs(model, pairs, anchor_mode, anchor_factory, max_pairs):
 
         if anchor_factory:
             positions = anchor_factory(pair, model.tokenizer)
-            anchor = positions.get(anchor_mode, len(ids_pos) - 1)
+            anchor = resolve_anchor_from_positions(positions, anchor_mode, len(ids_pos) - 1)
         else:
             anchor = _resolve_anchor(ids_pos, model.tokenizer, anchor_mode, None, None)
 
@@ -225,9 +227,8 @@ def main() -> None:
     )
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    anchor_factory = _get_dataset_attr(args.concept, "ANCHOR_FACTORY")
-    anchor_modes = _get_dataset_attr(args.concept, "ANCHOR_MODES") or ()
-    anchor_mode = args.anchor or (anchor_modes[0] if anchor_modes else "delimiter")
+    anchor_factory = None
+    anchor_mode = args.anchor or "delimiter"
 
     log.info("Concept: %s  anchor: %s  layers: %s", args.concept, anchor_mode, target_layers)
 

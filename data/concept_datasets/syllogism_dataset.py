@@ -1,42 +1,29 @@
-"""Syllogism validity concept dataset (psycholinguistics dataset for testing abstract reasoning).
+"""Syllogism validity concept dataset.
 
 Pos: valid Barbara syllogism — all A are B; all B are C; so all A are C → "yes"
 Neg: invalid undistributed middle — all A are B; all C are B; so all A are C → "no"
 
 The only surface difference is the second premise: "all B are C" vs "all C are B".
-Nonce words are used so the model cannot rely on world knowledge; it must
-process the logical structure of the premises.
 
-The dataset is contains made-up nonsense words ("dax", "wug", "fep", etc.) used as stand-ins
-for the logical variables A, B, C in the syllogism templates. This is to prevent the model
-from using world knowledge to judge validity (e.g., if one used real entities like "cats", "mammals", "animals",
-the model might answer "yes" because it knows cats are animals, not necessarily because it processed the logical
-structure of the premises).
+Single uppercase letters are used as logical variables so that each variable
+tokenises as exactly one token under Qwen's BPE, keeping anchor positions stable
+across all pairs.  Letters carry no world-knowledge associations that could bias
+the model's logical judgement.
 """
 
 from __future__ import annotations
 
+import itertools
 import random
 
 from experiments.concept_localization.concept_pair import ConceptPair
 
-_NONCE_TRIPLES: list[tuple[str, str, str]] = [
-    ("dax", "wug", "fep"),
-    ("blik", "zorn", "mip"),
-    ("tov", "rath", "pim"),
-    ("glurp", "snorf", "vem"),
-    ("drig", "plon", "quet"),
-    ("zing", "morb", "kel"),
-    ("frob", "nack", "dug"),
-    ("stip", "bant", "yux"),
-    ("flep", "gors", "tunk"),
-    ("criv", "dawt", "sulf"),
-    ("morf", "jisp", "brek"),
-    ("hund", "volp", "rast"),
-    ("quiv", "stel", "borm"),
-    ("drox", "fimp", "yeld"),
-    ("clug", "snev", "worp"),
-]
+# 50 distinct ordered triples from {B,C,D,F,G,H,J,K,L,M}.
+# Fixed shuffle seed so the list is stable across runs.
+_POOL = list("BCDFGHJKLM")
+_all_triples = list(itertools.permutations(_POOL, 3))
+random.Random(0).shuffle(_all_triples)
+_LETTER_TRIPLES: list[tuple[str, str, str]] = _all_triples[:50]
 
 TEMPLATES = {
     "T0": (
@@ -55,7 +42,7 @@ TEMPLATES = {
 
 
 def generate_syllogism_pairs(
-    n_per_template: int = 45,
+    n_per_template: int = 50,
     templates: list[str] | None = None,
     seed: int = 42,
 ) -> list[ConceptPair]:
@@ -64,14 +51,14 @@ def generate_syllogism_pairs(
         templates = list(TEMPLATES)
 
     rng = random.Random(seed)
-    triples = list(_NONCE_TRIPLES)
+    triples = list(_LETTER_TRIPLES)
     rng.shuffle(triples)
 
     pairs: list[ConceptPair] = []
     seen: set[tuple[str, str, str, str]] = set()
     counts = {t: 0 for t in templates}
 
-    for a, b, c in triples * 4:
+    for a, b, c in triples * 2:
         for t in templates:
             if counts[t] >= n_per_template:
                 continue

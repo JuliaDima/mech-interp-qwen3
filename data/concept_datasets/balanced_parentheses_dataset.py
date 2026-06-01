@@ -6,8 +6,9 @@ Without spaces, consecutive parentheses compress into multi-character tokens.
 Modular structure: depth counter increments on '(' and decrements on ')'.
 Valid iff depth never goes negative and returns to 0.
 
-Pos: balanced sequence with spaces, length 4-8 parens → 7-15 token chars.
-Neg: same sequence with one ')' replaced by '(' — same length, guaranteed unbalanced.
+Pos: balanced sequence with spaces, length 12 parens (6 pairs) → 23 token chars.
+Neg: same sequence with one ')' in the last 3 paren positions replaced by '(' —
+same length, guaranteed unbalanced, divergence always in the final paren window.
 """
 
 from __future__ import annotations
@@ -35,7 +36,6 @@ def _generate_balanced(n: int) -> list[str]:
 
     def _gen(s: str, opens: int, closes: int) -> None:
         if len(s) == 2 * n:
-            # Convert "(()" to "( ( )" with spaces so that Qwen tokenizes each paren separately
             spaced = " ".join(s)
             results.append(spaced)
             return
@@ -47,18 +47,25 @@ def _generate_balanced(n: int) -> list[str]:
     _gen("", 0, 0)
     return results
 
-
-_BALANCED: list[str] = _generate_balanced(2) + _generate_balanced(3) + _generate_balanced(4)
+# C(6) = 132 balanced sequences of 6 pairs (12 parens)
+_BALANCED: list[str] = _generate_balanced(6)
 
 
 def _make_unbalanced(s: str, rng: random.Random) -> str | None:
-    """Replace a random ')' with '(' in the spaced string to make it unbalanced."""
-    # s is like "( ( ) )" — find ')' characters and replace one with '('
-    close_positions = [i for i, c in enumerate(s) if c == ")"]
+    """Replace a ')' in the last 3 paren positions with '(' to make s unbalanced.
+
+    The flip is constrained to the final paren window so that pos and neg prompts
+    diverge only in a known, anchorable region of the sequence.
+    """
+    paren_str_positions = [i for i, c in enumerate(s) if c in "()"]
+    last_3 = paren_str_positions[-3:]
+    close_positions = [i for i in last_3 if s[i] == ")"]
     if not close_positions:
         return None
     pos = rng.choice(close_positions)
     return s[:pos] + "(" + s[pos + 1 :]
+
+
 
 
 def generate_parentheses_pairs(

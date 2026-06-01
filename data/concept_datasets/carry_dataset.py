@@ -42,14 +42,6 @@ def make_anchor_positions(template_str: str, a: int, b: int, tokenizer) -> dict[
     return {"ones_a": ones_a, "ones_b": ones_b, "separator": ones_a + 1}
 
 
-def _carry_anchor_factory(pair, tokenizer) -> dict[str, int]:
-    tmpl_str = TEMPLATES[pair.template][0]
-    return make_anchor_positions(tmpl_str, pair.meta["a_pos"], pair.meta["b_pos"], tokenizer)
-
-
-ANCHOR_FACTORY = _carry_anchor_factory
-ANCHOR_MODES = ("ones_b", "ones_a", "separator")
-
 
 def _digits(n: int, n_digits: int) -> list[int]:
     """Return digits of n least-significant-first."""

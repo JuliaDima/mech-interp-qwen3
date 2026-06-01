@@ -28,6 +28,8 @@ TEMPLATES = {
 }
 
 
+
+
 def generate_conservation_pairs(
     n_per_template: int = 100,
     templates: list[str] | None = None,

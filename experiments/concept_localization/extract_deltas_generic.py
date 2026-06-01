@@ -8,6 +8,7 @@ a single group.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable
 
 import torch
@@ -68,6 +69,14 @@ def _resolve_anchor(
         positions = anchor_factory(pair, tokenizer)
         if anchor_mode in positions:
             return positions[anchor_mode]
+        m = re.match(r"^(.*?)(\d+)$", anchor_mode)
+        if m:
+            prefix, n = m.group(1), int(m.group(2))
+            for k in range(n - 1, 0, -1):
+                candidate = f"{prefix}{k}"
+                if candidate in positions:
+                    log.warning("Anchor '%s' not in positions — using '%s' instead", anchor_mode, candidate)
+                    return positions[candidate]
     if anchor_mode == "last":
         return len(ids) - 1
     if anchor_mode == "delimiter":

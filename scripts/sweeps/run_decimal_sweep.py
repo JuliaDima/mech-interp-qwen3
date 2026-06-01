@@ -33,7 +33,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 import matplotlib.pyplot as plt
-from sweep_utils import apply_transcoder_all, cluster_top_features  # noqa: E402
+from sweep_utils import apply_transcoder_all, cluster_top_features, resolve_anchor_from_positions  # noqa: E402
 
 import experiments.plot_style as ps
 from data.concept_datasets.decimal_termination_dataset import (
@@ -66,11 +66,10 @@ def _build_inputs(
     inputs, valid_n = [], []
     for n in n_values:
         positions = make_anchor_positions(template_str, n, model.tokenizer)
-        if anchor_mode not in positions:
-            continue
         prompt = template_str.format(n=n)
         ids = model.tokenizer(prompt, add_special_tokens=False).input_ids
-        inputs.append((ids, positions[anchor_mode]))
+        anchor = resolve_anchor_from_positions(positions, anchor_mode, len(ids) - 1)
+        inputs.append((ids, anchor))
         valid_n.append(n)
     return inputs, valid_n
 

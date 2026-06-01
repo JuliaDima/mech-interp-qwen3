@@ -55,6 +55,8 @@ TEMPLATES = {
 }
 
 
+
+
 def generate_doppler_pairs(
     n_per_template: int = 60,
     templates: list[str] | None = None,
