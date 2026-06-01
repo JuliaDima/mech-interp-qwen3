@@ -32,7 +32,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 import matplotlib.pyplot as plt
-from sweep_utils import apply_transcoder_all, score_and_rank  # noqa: E402
+from sweep_utils import apply_transcoder_all, resolve_anchor_from_positions, score_and_rank  # noqa: E402
 
 import experiments.plot_style as ps
 from data.concept_datasets.carry_dataset import TEMPLATES as _TEMPLATES
@@ -76,7 +76,8 @@ def _build_ones_grid_inputs(
             b = higher_b * 10 + d_b
             prompt = template_str.format(a=a, b=b)
             ids = model.tokenizer(prompt, add_special_tokens=False).input_ids
-            anchor = make_anchor_positions(template_str, a, b, model.tokenizer)[anchor_mode]
+            positions = make_anchor_positions(template_str, a, b, model.tokenizer)
+            anchor = resolve_anchor_from_positions(positions, anchor_mode, len(ids) - 1)
             result.append((ids, anchor))
     return result
 

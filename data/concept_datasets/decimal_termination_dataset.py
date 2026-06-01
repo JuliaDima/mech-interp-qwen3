@@ -33,17 +33,25 @@ def _smallest_non25(n: int) -> int | None:
 
 
 def _build_neg(seed: int = 42) -> list[int]:
-    """Sample NEG with ~12 values per small-prime factor class."""
+    """Sample NEG with ~12 values per small-prime factor class.
+
+    by_factor maps each prime p → list of 3-digit n values whose smallest
+    non-{2,5} factor is p.  p is a grouping label;
+    all collected n values are in range(100, 1000).
+    """
     rng = random.Random(seed)
+    # Keys are prime factors; values are 3-digit n that belong to that class.
     by_factor: dict[int, list[int]] = defaultdict(list)
     for n in range(100, 1000):
         if not _terminates(n):
-            p = _smallest_non25(n)
+            p = _smallest_non25(n)  # e.g. 3 for n=300, 7 for n=700
             if p is not None:
-                by_factor[p].append(n)
+                by_factor[p].append(n)  # n is 3-digit; p is the bucket key
     result: set[int] = set()
+    # Sample ~12 three-digit n values per common small-prime class.
     for p in [3, 7, 11, 13, 17, 19]:
         result.update(rng.sample(by_factor[p], min(12, len(by_factor[p]))))
+    # Add a few more from the next 9 prime-factor classes for coverage.
     for p in sorted(by_factor)[6:15]:
         result.update(rng.sample(by_factor[p], min(5, len(by_factor[p]))))
     return sorted(result)
@@ -83,14 +91,6 @@ def make_anchor_positions(template_str: str, n: int, tokenizer) -> dict[str, int
         positions[f"digit_{digit_from_right}"] = pos
     return positions
 
-
-def _decimal_anchor_factory(pair, tokenizer) -> dict[str, int]:
-    tmpl_str = TEMPLATES[pair.template][0]
-    return make_anchor_positions(tmpl_str, pair.meta["n_pos"], tokenizer)
-
-
-ANCHOR_FACTORY = _decimal_anchor_factory
-ANCHOR_MODES = ("digit_1", "digit_2", "digit_3")
 
 
 def generate_decimal_pairs(

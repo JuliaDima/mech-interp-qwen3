@@ -215,13 +215,15 @@ def main() -> None:
     )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
-        "--anchor_mode",
-        default="delimiter",
+        "--anchor_modes",
+        default=None,
         help=(
-            "delimiter (default): anchor at the last structural delimiter ('=', ':', '?', ')') — "
-            "the token where the model closes the expression. Falls back to the last token if none found. "
-            "last: anchor at the absolute last token of the sequence. "
-            "<int>: explicit 0-indexed token position (e.g. '5' for ones digit of first operand in 'calc: 36+59=')."
+            "Which token positions to run the full pipeline for. "
+            "Model and pairs are loaded once; each anchor saves to its own output directory. "
+            "Omit to run the single delimiter anchor. "
+            "'topN' (e.g. 'top5') — top-N anchors by non-monotonicity from emergence.npy "
+            "(requires make_gif to have been run; N is clamped to the number of non-zero anchors). "
+            "Comma-separated integers (e.g. '5,6,7') — explicit 0-indexed token positions."
         ),
     )
     parser.add_argument(
@@ -231,17 +233,6 @@ def main() -> None:
         "--template",
         default=None,
         help="Filter pairs to a single template (e.g. 'T0'). Default: use all templates.",
-    )
-    parser.add_argument(
-        "--top_n_feature_anchors",
-        type=int,
-        default=1,
-        help=(
-            "Number of steepest anchors for which to run feature projection (default: 1 = "
-            "current anchor_mode only). When >1, loads emergence.npy and uses top_k_anchors "
-            "to find the N most abrupt token positions, then re-runs extraction + projection "
-            "for each. Saves feature_projections_scatter_pos{idx}.png per anchor."
-        ),
     )
     parser.add_argument(
         "--causal", action="store_true", help="Run activation patching + gradient-dot-delta"
@@ -270,21 +261,11 @@ def main() -> None:
 
 
 def _run_single(args, base_subdir: str | None = None) -> None:
-    suffix = f"_{args.anchor_mode}" if args.anchor_mode != "delimiter" else ""
-    if args.out_dir:
-        out_dir = Path(args.out_dir)
-    elif base_subdir:
-        out_dir = Path(f"runs/concept_localization/{base_subdir}/{args.concept}{suffix}")
-    else:
-        out_dir = Path(f"runs/concept_localization/{args.concept}{suffix}")
-    out_dir.mkdir(parents=True, exist_ok=True)
-
     device = get_default_device()
     dtype = parse_dtype(args.dtype)
-    anchor_factory = _get_dataset_attr(args.concept, "ANCHOR_FACTORY")
-    anchor_modes = _get_dataset_attr(args.concept, "ANCHOR_MODES") or ()
+    anchor_factory = None
 
-    # ── 1. Dataset ────────────────────────────────────────────────────────────
+    # ── 1. Dataset (loaded once) ──────────────────────────────────────────────
     log.info("Generating %d pairs/template for concept '%s'", args.n, args.concept)
     pairs = _load_concept(args.concept, args.n, args.seed)
     if args.template:
@@ -299,7 +280,7 @@ def _run_single(args, base_subdir: str | None = None) -> None:
         if t_pairs:
             log.info("  %s (%d pairs)  e.g. pos=%r", t, len(t_pairs), t_pairs[0].prompt_pos)
 
-    # ── 2. Model ──────────────────────────────────────────────────────────────
+    # ── 2. Model (loaded once) ────────────────────────────────────────────────
     log.info("Loading model %s", args.model)
     transcoder_set, _ = load_transcoder_from_hub(
         args.transcoder_set, dtype=dtype, lazy_encoder=True, lazy_decoder=True
@@ -313,239 +294,227 @@ def _run_single(args, base_subdir: str | None = None) -> None:
     layers = list(range(n_layers))
     log.info("Model loaded: %d layers", n_layers)
 
-    # ── 3. Delta extraction ───────────────────────────────────────────────────
-    log.info("Extracting per-layer residual-stream deltas…")
-    log.info("Anchor mode: %s", args.anchor_mode)
-    layer_results = extract_layer_deltas_generic(
-        model,
-        pairs,
-        layers,
-        device,
-        dtype,
-        per_template=True,
-        anchor_mode=args.anchor_mode,
-        anchor_factory=anchor_factory,
-    )
-    ld = layer_results["all"]
-
-    # ── 4. Sharpness ──────────────────────────────────────────────────────────
-    sharpness = compute_sharpness(ld)
-    log.info(
-        "Peak layer: %d  sharpness_index: %.3f", sharpness.peak_layer, sharpness.sharpness_index
-    )
-
-    # Template consistency: cosine sim of delta at peak layer across templates
-    peak = sharpness.peak_layer
-    tmpl_keys = [k for k in layer_results if k != "all"]
-    consistency: dict[str, float] = {}
-    if len(tmpl_keys) >= 2 and peak in ld.delta:
-        ref = ld.delta[peak]
-        ref_norm = ref.norm().item()
-        for k in tmpl_keys:
-            if peak in layer_results[k].delta and ref_norm > 0:
-                v = layer_results[k].delta[peak]
-                cos = (ref @ v / (ref_norm * v.norm().clamp(min=1e-8))).item()
-                consistency[k] = round(cos, 4)
-                log.info("  Template %s  cos with 'all' at peak L%d: %.3f", k, peak, cos)
-
-    # ── 5. Causal analysis ────────────────────────────────────────────────────
-    causal: object = None
-    if args.causal:
-        max_pairs = args.causal_pairs
-        log.info(
-            "Running causal analysis (max_pairs=%s)…",
-            max_pairs if max_pairs is not None else "all",
-        )
-        causal = run_causal_analysis(
-            model,
-            pairs,
-            ld.delta,
-            layers,
-            device,
-            dtype,
-            max_pairs=max_pairs,
-        )
-        log.info("Causal analysis done (n_pairs=%d)", causal["all"].n_pairs)
-
-    # ── 6. Feature projection ─────────────────────────────────────────────────
-    projections: dict = {}
-    if not args.skip_features:
-        log.info("Projecting delta onto transcoder features…")
-        projections = project_onto_features(model, ld, top_k=args.top_k)
-
-    # Normalised delta norms (‖δ_l‖ / E[‖h_l‖]) for plotting
-    mean_act_norms = {l: v for l, v in ld.mean_act_norm.items()} if ld.mean_act_norm else {}
-    delta_norms_raw = {l: ld.delta[l].norm().item() for l in layers if l in ld.delta}
-    delta_norms_plot = (
-        {l: delta_norms_raw[l] / mean_act_norms.get(l, 1.0) for l in delta_norms_raw}
-        if mean_act_norms
-        else delta_norms_raw
-    )
-
-    # ── 6. Save ───────────────────────────────────────────────────────────────
-    anchor_pos, anchor_tok = resolve_anchor_token(
-        pairs[0].prompt_pos,
-        model.tokenizer,
-        args.anchor_mode,
-        anchor_factory=anchor_factory,
-        pair=pairs[0],
-    )
-    results_json = {
-        "config": {
-            "concept": args.concept,
-            "model": args.model,
-            "n_pairs": len(pairs),
-            "n_pairs_used": ld.n_pairs,
-            "skipped": ld.skipped,
-            "templates": tmpl_keys,
-            "anchor_mode": args.anchor_mode,
-            "anchor_pos": anchor_pos,
-            "anchor_token": anchor_tok,
-            "top_k": args.top_k,
-        },
-        "sharpness": {
-            "peak_layer": sharpness.peak_layer,
-            "sharpness_index": round(sharpness.sharpness_index, 4),
-            "normalised": sharpness.normalised,
-            "norm_by_layer": {
-                str(l): round(v, 4) for l, v in zip(sharpness.layers, sharpness.norms, strict=False)
-            },
-            "inter_layer_cos": {
-                f"{sharpness.layers[i]}-{sharpness.layers[i + 1]}": round(v, 4)
-                for i, v in enumerate(sharpness.inter_layer_cos)
-            },
-        },
-        "template_consistency": consistency,
-        "mean_act_norm": {str(l): round(v, 4) for l, v in mean_act_norms.items()},
-        "top_features_by_layer": {
-            str(layer): [
-                {
-                    "feature_id": m.feature_id,
-                    "projection": round(m.projection, 4),
-                }
-                for m in matches
-            ]
-            for layer, matches in projections.items()
-        },
-        "causal": (
-            {
-                key: {
-                    "n_pairs": cs.n_pairs,
-                    "patching_mean": {str(l): round(v, 5) for l, v in cs.patching_mean.items()},
-                    "patching_std": {str(l): round(v, 5) for l, v in cs.patching_std.items()},
-                    "grad_dot_delta_mean": {
-                        str(l): round(v, 5) for l, v in cs.grad_dot_delta_mean.items()
-                    },
-                    "grad_dot_delta_std": {
-                        str(l): round(v, 5) for l, v in cs.grad_dot_delta_std.items()
-                    },
-                }
-                for key, cs in causal.items()
-            }
-            if causal is not None
-            else None
-        ),
-    }
-
-    results_path = out_dir / "results.json"
-    with open(results_path, "w") as f:
-        json.dump(results_json, f, indent=2)
-    log.info("Saved results → %s", results_path)
-
-    deltas_path = out_dir / "deltas.pt"
-    torch.save(
-        {key: {l: v for l, v in lr.delta.items()} for key, lr in layer_results.items()},
-        deltas_path,
-    )
-    log.info("Saved delta tensors → %s", deltas_path)
-
-    # ── 7. Plots ──────────────────────────────────────────────────────────────
-    if projections:
-        plot_feature_projections(
-            projections,
-            out_dir / "feature_projections_scatter.png",
-            top_k=args.top_k,
-            concept=args.concept,
-        )
-        log.info("Saved feature projection plots")
-
-    # ── 8. Multi-anchor feature projections ───────────────────────────────────
-    if not args.skip_features and args.top_n_feature_anchors > 1:
-        # Anchor modes come from the dataset's ANCHOR_MODES; fall back to emergence.npy
-        if anchor_modes:
-            anchors_to_run = [(k, k) for k in anchor_modes]
-            log.info("Using dataset anchor modes for %s: %s", args.concept, list(anchor_modes))
-        else:
+    # ── Determine which anchors to run the full pipeline for ──────────────────
+    if args.anchor_modes:
+        import re as _re
+        _top_m = _re.fullmatch(r"top(\d+)", args.anchor_modes)
+        if _top_m:
+            k = int(_top_m.group(1))
             em = load_emergence(args.concept)
             if em is None:
                 log.warning(
-                    "emergence.npy not found for %s and no ANCHOR_MODES in dataset — "
-                    "skipping multi-anchor feature scatter",
-                    args.concept,
+                    "emergence.npy not found for '%s' — cannot use 'top%d'; "
+                    "run make_gif first. Falling back to delimiter.",
+                    args.concept, k,
                 )
-                anchors_to_run = []
+                anchors_to_run = ["delimiter"]
             else:
-                top_anchors = top_k_anchors(em, args.concept, k=args.top_n_feature_anchors)
-                anchors_to_run = [(str(idx), str(idx)) for idx, _, _ in top_anchors]
-                log.info(
-                    "Using emergence-based anchors for %s: %s",
-                    args.concept,
-                    [a[0] for a in anchors_to_run],
+                norms_raw = em["norms_raw"]
+                n_nonzero = sum(
+                    1 for a in range(norms_raw.shape[0]) if norms_raw[a].max() > 1e-8
                 )
+                actual_k = min(k, n_nonzero)
+                if actual_k < k:
+                    log.info(
+                        "top%d requested but only %d non-zero anchors in emergence.npy — "
+                        "using top%d",
+                        k, n_nonzero, actual_k,
+                    )
+                top_anchors = top_k_anchors(em, args.concept, k=actual_k)
+                anchors_to_run = [str(idx) for idx, _, _ in top_anchors]
+                log.info(
+                    "top%d anchors from emergence.npy for '%s': positions %s",
+                    actual_k, args.concept, anchors_to_run,
+                )
+        else:
+            anchors_to_run = [m.strip() for m in args.anchor_modes.split(",")]
+    else:
+        anchors_to_run = ["delimiter"]
 
-        for anchor_label, amode in anchors_to_run:
-            log.info("  Anchor '%s' (mode=%r) — extracting deltas…", anchor_label, amode)
-            lr_anchor = extract_layer_deltas_generic(
-                model,
-                pairs,
-                layers,
-                device,
-                dtype,
-                per_template=False,
-                anchor_mode=amode,
-                anchor_factory=anchor_factory,
+    log.info("Anchor modes to run: %s", anchors_to_run)
+    multi = len(anchors_to_run) > 1
+
+    # ── Per-anchor loop ───────────────────────────────────────────────────────
+    for anchor_mode in anchors_to_run:
+        if multi:
+            log.info("─" * 50)
+            log.info("Anchor: %s", anchor_mode)
+
+        # Output directory: when running multiple anchors, always use the
+        # auto-suffixed path; when running a single anchor, respect --out_dir.
+        suffix = f"_{anchor_mode}" if anchor_mode != "delimiter" else ""
+        if args.out_dir and not multi:
+            out_dir = Path(args.out_dir)
+        elif base_subdir:
+            out_dir = Path(f"runs/concept_localization/{base_subdir}/{args.concept}{suffix}")
+        else:
+            out_dir = Path(f"runs/concept_localization/{args.concept}{suffix}")
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        # ── 3. Delta extraction ───────────────────────────────────────────────
+        log.info("Extracting per-layer residual-stream deltas (anchor=%s)…", anchor_mode)
+        layer_results = extract_layer_deltas_generic(
+            model,
+            pairs,
+            layers,
+            device,
+            dtype,
+            per_template=True,
+            anchor_mode=anchor_mode,
+            anchor_factory=anchor_factory,
+        )
+        ld = layer_results["all"]
+
+        # ── 4. Sharpness ──────────────────────────────────────────────────────
+        sharpness = compute_sharpness(ld)
+        log.info(
+            "Peak layer: %d  sharpness_index: %.3f", sharpness.peak_layer, sharpness.sharpness_index
+        )
+
+        peak = sharpness.peak_layer
+        tmpl_keys = [k for k in layer_results if k != "all"]
+        consistency: dict[str, float] = {}
+        if len(tmpl_keys) >= 2 and peak in ld.delta:
+            ref = ld.delta[peak]
+            ref_norm = ref.norm().item()
+            for k in tmpl_keys:
+                if peak in layer_results[k].delta and ref_norm > 0:
+                    v = layer_results[k].delta[peak]
+                    cos = (ref @ v / (ref_norm * v.norm().clamp(min=1e-8))).item()
+                    consistency[k] = round(cos, 4)
+                    log.info("  Template %s  cos with 'all' at peak L%d: %.3f", k, peak, cos)
+
+        # ── 5. Causal analysis ────────────────────────────────────────────────
+        causal: object = None
+        if args.causal:
+            max_pairs = args.causal_pairs
+            log.info(
+                "Running causal analysis (max_pairs=%s)…",
+                max_pairs if max_pairs is not None else "all",
             )
-            ld_anchor = lr_anchor["all"]
-            proj_anchor = project_onto_features(model, ld_anchor, top_k=args.top_k)
-            out_scatter = out_dir / f"feature_projections_scatter_{anchor_label}.png"
+            causal = run_causal_analysis(
+                model, pairs, ld.delta, layers, device, dtype, max_pairs=max_pairs,
+            )
+            log.info("Causal analysis done (n_pairs=%d)", causal["all"].n_pairs)
+
+        # ── 6. Feature projection ─────────────────────────────────────────────
+        projections: dict = {}
+        if not args.skip_features:
+            log.info("Projecting delta onto transcoder features…")
+            projections = project_onto_features(model, ld, top_k=args.top_k)
+
+        mean_act_norms = {l: v for l, v in ld.mean_act_norm.items()} if ld.mean_act_norm else {}
+        delta_norms_raw = {l: ld.delta[l].norm().item() for l in layers if l in ld.delta}
+
+        # ── 7. Save ───────────────────────────────────────────────────────────
+        anchor_pos, anchor_tok = resolve_anchor_token(
+            pairs[0].prompt_pos,
+            model.tokenizer,
+            anchor_mode,
+            anchor_factory=anchor_factory,
+            pair=pairs[0],
+        )
+        results_json = {
+            "config": {
+                "concept": args.concept,
+                "model": args.model,
+                "n_pairs": len(pairs),
+                "n_pairs_used": ld.n_pairs,
+                "skipped": ld.skipped,
+                "templates": tmpl_keys,
+                "anchor_mode": anchor_mode,
+                "anchor_pos": anchor_pos,
+                "anchor_token": anchor_tok,
+                "top_k": args.top_k,
+            },
+            "sharpness": {
+                "peak_layer": sharpness.peak_layer,
+                "sharpness_index": round(sharpness.sharpness_index, 4),
+                "normalised": sharpness.normalised,
+                "norm_by_layer": {
+                    str(l): round(v, 4)
+                    for l, v in zip(sharpness.layers, sharpness.norms, strict=False)
+                },
+                "inter_layer_cos": {
+                    f"{sharpness.layers[i]}-{sharpness.layers[i + 1]}": round(v, 4)
+                    for i, v in enumerate(sharpness.inter_layer_cos)
+                },
+            },
+            "template_consistency": consistency,
+            "mean_act_norm": {str(l): round(v, 4) for l, v in mean_act_norms.items()},
+            "top_features_by_layer": {
+                str(layer): [
+                    {"feature_id": m.feature_id, "projection": round(m.projection, 4)}
+                    for m in matches
+                ]
+                for layer, matches in projections.items()
+            },
+            "causal": (
+                {
+                    key: {
+                        "n_pairs": cs.n_pairs,
+                        "patching_mean": {
+                            str(l): round(v, 5) for l, v in cs.patching_mean.items()
+                        },
+                        "patching_std": {
+                            str(l): round(v, 5) for l, v in cs.patching_std.items()
+                        },
+                        "grad_dot_delta_mean": {
+                            str(l): round(v, 5) for l, v in cs.grad_dot_delta_mean.items()
+                        },
+                        "grad_dot_delta_std": {
+                            str(l): round(v, 5) for l, v in cs.grad_dot_delta_std.items()
+                        },
+                    }
+                    for key, cs in causal.items()
+                }
+                if causal is not None
+                else None
+            ),
+        }
+
+        results_path = out_dir / "results.json"
+        with open(results_path, "w") as f:
+            json.dump(results_json, f, indent=2)
+        log.info("Saved results → %s", results_path)
+
+        deltas_path = out_dir / "deltas.pt"
+        torch.save(
+            {key: {l: v for l, v in lr.delta.items()} for key, lr in layer_results.items()},
+            deltas_path,
+        )
+        log.info("Saved delta tensors → %s", deltas_path)
+
+        # ── 8. Plots ──────────────────────────────────────────────────────────
+        if projections:
             plot_feature_projections(
-                proj_anchor,
-                out_scatter,
+                projections,
+                out_dir / "feature_projections_scatter.png",
                 top_k=args.top_k,
                 concept=args.concept,
             )
-            log.info("  Saved %s", out_scatter)
+            log.info("Saved feature projection plots")
 
-            anchor_tok_str = resolve_anchor_token(
-                pairs[0].prompt_pos,
-                model.tokenizer,
-                amode,
-                anchor_factory=anchor_factory,
-                pair=pairs[0],
-            )[1]
-            out_sim = out_dir / f"cross_layer_sim_{anchor_label}.pdf"
-            plot_cross_layer_sim_data(lr_anchor, n_layers, anchor_tok_str, args.concept, out_sim)
-            log.info("  Saved %s", out_sim)
+        if causal is not None:
+            plot_causal_scores(
+                causal,
+                delta_norms_raw,
+                out_dir / "causal_scores.png",
+                concept=args.concept,
+                mean_act_norms=mean_act_norms or None,
+            )
+            plot_causal_overlay(
+                causal,
+                delta_norms_raw,
+                out_dir / "causal_overlay.png",
+                concept=args.concept,
+                mean_act_norms=mean_act_norms or None,
+            )
+            log.info("Saved causal plots")
 
-    if causal is not None:
-        plot_causal_scores(
-            causal,
-            delta_norms_raw,
-            out_dir / "causal_scores.png",
-            concept=args.concept,
-            mean_act_norms=mean_act_norms or None,
-        )
-        log.info("Saved causal_scores.png")
-        plot_causal_overlay(
-            causal,
-            delta_norms_raw,
-            out_dir / "causal_overlay.png",
-            concept=args.concept,
-            mean_act_norms=mean_act_norms or None,
-        )
-        log.info("Saved causal_overlay.png")
+        log.info("Done for anchor '%s'. Outputs in %s", anchor_mode, out_dir)
 
-    log.info("Done. All outputs in %s", out_dir)
+    log.info("All done for concept '%s'.", args.concept)
 
 
 if __name__ == "__main__":

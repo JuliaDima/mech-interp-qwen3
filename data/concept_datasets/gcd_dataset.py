@@ -24,31 +24,6 @@ TEMPLATES = {
 }
 
 
-def make_anchor_positions(template_str: str, a: int, tokenizer) -> dict[str, int]:
-    """Compute token positions for each digit of a.
-
-    Keys are digit_1 (ones), digit_2 (tens), digit_3 (hundreds), numbered from
-    the right.
-    """
-    a_str = str(a)
-    pre_a = template_str[: template_str.index("{a}")]
-    n_digits = len(a_str)
-    positions: dict[str, int] = {}
-    for i in range(n_digits):
-        prefix = pre_a + a_str[: i + 1]
-        pos = len(tokenizer(prefix, add_special_tokens=False).input_ids) - 1
-        digit_from_right = n_digits - i  # n_digits → ... → 2 → 1
-        positions[f"digit_{digit_from_right}"] = pos
-    return positions
-
-
-def _gcd_anchor_factory(pair, tokenizer) -> dict[str, int]:
-    tmpl_str = TEMPLATES[pair.template][0]
-    return make_anchor_positions(tmpl_str, pair.meta["a_pos"], tokenizer)
-
-
-ANCHOR_FACTORY = _gcd_anchor_factory
-ANCHOR_MODES = ("digit_1", "digit_2", "digit_3")
 
 
 def generate_gcd_pairs(

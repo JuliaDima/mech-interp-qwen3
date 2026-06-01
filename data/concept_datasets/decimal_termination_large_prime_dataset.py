@@ -45,26 +45,6 @@ TEMPLATES = {
 }
 
 
-def make_anchor_positions(template_str: str, n: int, tokenizer) -> dict[str, int]:
-    """Compute token positions for each digit of n (digit_1 = ones, digit_2 = tens, …)."""
-    n_str = str(n)
-    pre_n = template_str[: template_str.index("{n}")]
-    positions: dict[str, int] = {}
-    for i in range(len(n_str)):
-        prefix = pre_n + n_str[: i + 1]
-        pos = len(tokenizer(prefix, add_special_tokens=False).input_ids) - 1
-        positions[f"digit_{len(n_str) - i}"] = pos
-    return positions
-
-
-def _anchor_factory(pair, tokenizer) -> dict[str, int]:
-    tmpl_str = TEMPLATES[pair.template][0]
-    return make_anchor_positions(tmpl_str, pair.meta["n_pos"], tokenizer)
-
-
-ANCHOR_FACTORY = _anchor_factory
-ANCHOR_MODES = ("digit_1", "digit_2", "digit_3")
-
 
 def generate_large_prime_pairs(
     n_per_template: int = 100,
