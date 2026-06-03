@@ -52,12 +52,12 @@ def generate_dot_pairs(
         v < n_per_template for v in counts.values()
     ):
         attempts += 1
-        a1 = rng.randint(1, 3)
-        a2 = rng.choice([-2, -1, 1, 2])
-        b2 = rng.randint(-2, 2)
+        a1 = rng.randint(1, 5)
+        a2 = rng.choice([-3, -2, -1, 1, 2, 3])
+        b2 = rng.randint(-3, 3)
 
-        b1_pos_choices = [b for b in range(1, 7) if a1 * b + a2 * b2 > 0]
-        b1_neg_choices = [b for b in range(1, 7) if a1 * b + a2 * b2 < 0]
+        b1_pos_choices = [b for b in range(1, 10) if a1 * b + a2 * b2 > 0]
+        b1_neg_choices = [b for b in range(1, 10) if a1 * b + a2 * b2 < 0]
         if not b1_pos_choices or not b1_neg_choices:
             continue
 

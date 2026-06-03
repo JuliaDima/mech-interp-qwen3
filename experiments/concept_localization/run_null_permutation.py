@@ -83,19 +83,23 @@ _TRANSCODER_SET = "mwhanna/qwen3-4b-transcoders"
 def _group_by_length(
     pairs: list[ConceptPair],
     tokenizer,
-) -> dict[tuple[str, int], list[int]]:
-    """Return pair indices grouped by (template, positive-prompt token length).
+    context_keys: list[str] | None = None,
+) -> dict[tuple, list[int]]:
+    """Return pair indices grouped by (template, token-length [, context-values...]).
 
-    Within each group all positive prompts are the same length.  Because the
-    dataset ensures pos and neg have equal lengths within every original pair,
-    the negative prompts in the same group are also the same length.  Null
-    pairs constructed within a group are therefore guaranteed to match in
-    tokenisation length, avoiding silent skipping inside extract_layer_deltas_generic.
+    Within each group all positive prompts are the same length, so null pairs
+    are guaranteed to match in tokenisation length.
+
+    context_keys: optional list of pair.meta field names to additionally group
+    by.  For transitive_ordering use ['a', 'b'] so that null pairs always share
+    the same (a, b) context and only c varies — matching the structure of the
+    real pairs.
     """
-    groups: dict[tuple[str, int], list[int]] = defaultdict(list)
+    groups: dict[tuple, list[int]] = defaultdict(list)
     for i, p in enumerate(pairs):
         length = len(tokenizer(p.prompt_pos, add_special_tokens=False).input_ids)
-        groups[(p.template, length)].append(i)
+        ctx = tuple(str(p.meta.get(k, "")) for k in (context_keys or []))
+        groups[(p.template, length) + ctx].append(i)
     return dict(groups)
 
 
@@ -261,23 +265,32 @@ def run_null_permutation(
     seed: int = 42,
     real_deltas_path: Path | None = None,
     anchor_mode: str = "delimiter",
+    context_keys: list[str] | None = None,
+    model=None,
+    pairs=None,
 ) -> dict:
-    """Run the permutation null test for one concept and return a summary dict."""
+    """Run the permutation null test for one concept and return a summary dict.
+
+    model and pairs can be passed in to avoid reloading when looping over
+    multiple anchors (see --anchor_modes in the CLI).
+    """
     device = get_default_device()
     dtype = parse_dtype(dtype_str)
 
-    log.info("Loading pairs for concept '%s'  (n_per_template=%d)", concept, n_per_template)
-    pairs = _load_concept(concept, n_per_template, seed)
+    if pairs is None:
+        log.info("Loading pairs for concept '%s'  (n_per_template=%d)", concept, n_per_template)
+        pairs = _load_concept(concept, n_per_template, seed)
     log.info("Total pairs: %d", len(pairs))
 
-    log.info("Loading model %s", model_name)
-    ts_obj, _ = load_transcoder_from_hub(
-        transcoder_set, dtype=dtype, lazy_encoder=True, lazy_decoder=True
-    )
-    model = AttributionModel.from_pretrained_and_transcoders(
-        model_name, ts_obj, dtype=dtype, device=device
-    )
-    model.eval()
+    if model is None:
+        log.info("Loading model %s", model_name)
+        ts_obj, _ = load_transcoder_from_hub(
+            transcoder_set, dtype=dtype, lazy_encoder=True, lazy_decoder=True
+        )
+        model = AttributionModel.from_pretrained_and_transcoders(
+            model_name, ts_obj, dtype=dtype, device=device
+        )
+        model.eval()
 
     n_layers = model.cfg.n_layers
     layers = list(range(n_layers))
@@ -323,7 +336,7 @@ def run_null_permutation(
 
     # ── Group pairs by tokenisation length for length-safe null construction ──
     log.info("Computing tokenisation-length groups…")
-    groups = _group_by_length(pairs, model.tokenizer)
+    groups = _group_by_length(pairs, model.tokenizer, context_keys=context_keys)
     total_null_pairs_per_run = sum(
         len(idx) // 2 for idx in groups.values() if len(idx) >= 2
     )
@@ -441,7 +454,26 @@ def main() -> None:
     parser.add_argument("--k",    type=int,  default=20,  help="Number of null permutations")
     parser.add_argument("--seed", type=int,  default=42)
     parser.add_argument("--dtype",           default="bfloat16")
-    parser.add_argument("--anchor_mode",     default="delimiter")
+    parser.add_argument("--anchor_mode",  default="delimiter",
+                        help="Single anchor position: 'delimiter', 'last', or integer string.")
+    parser.add_argument(
+        "--anchor_modes", default=None,
+        help=(
+            "Run null for multiple anchors in one pass (model loaded once). "
+            "Accepts comma-separated integer positions (e.g. '5,6,7,8') or "
+            "'topN' to select N anchors from emergence.npy. "
+            "Overrides --anchor_mode when set."
+        ),
+    )
+    parser.add_argument(
+        "--context_keys", default=None,
+        help=(
+            "Comma-separated pair.meta field names to group null pairs by, "
+            "in addition to template and token length.  Use 'a,b' for "
+            "transitive_ordering so that null pairs always share the same "
+            "(a, b) context and only c varies."
+        ),
+    )
     parser.add_argument(
         "--out_dir", default=None,
         help="Output directory.  Default: runs/concept_localization/<concept>/null/",
@@ -459,40 +491,94 @@ def main() -> None:
     args = parser.parse_args()
 
     concepts = CONCEPTS if args.concept == "all" else [args.concept]
+    ctx_keys = [k.strip() for k in args.context_keys.split(",")] if args.context_keys else None
 
     summaries = []
     for concept in concepts:
-        out_dir = (
-            Path(args.out_dir) if args.out_dir
-            else Path(f"runs/concept_localization/{concept}/null")
-        )
-
-        real_deltas: Path | None = None
-        if args.concept != "all" and args.real_deltas:
-            real_deltas = Path(args.real_deltas)
-        else:
-            # Auto-detect from standard run_concept.py output layout
-            auto = Path(f"runs/concept_localization/{concept}/deltas.pt")
-            if auto.exists():
-                log.info("Auto-detected real deltas at %s", auto)
-                real_deltas = auto
-
         log.info("=" * 60)
         log.info("Concept: %s", concept)
         log.info("=" * 60)
-        summary = run_null_permutation(
-            concept=concept,
-            model_name=args.model,
-            transcoder_set=args.transcoder_set,
-            n_per_template=args.n,
-            k=args.k,
-            out_dir=out_dir,
-            dtype_str=args.dtype,
-            seed=args.seed,
-            real_deltas_path=real_deltas,
-            anchor_mode=args.anchor_mode,
+
+        # ── Resolve anchor list ───────────────────────────────────────────────
+        if args.anchor_modes:
+            import re as _re
+            from experiments.concept_localization.plot_anchor_analysis import (
+                load_emergence, top_k_anchors,
+            )
+            _top_m = _re.fullmatch(r"top(\d+)", args.anchor_modes)
+            if _top_m:
+                k_anch = int(_top_m.group(1))
+                em = load_emergence(concept)
+                if em is None:
+                    log.warning("emergence.npy not found — falling back to delimiter.")
+                    anchor_list = ["delimiter"]
+                else:
+                    n_nonzero = sum(
+                        1 for a in range(em["norms_raw"].shape[0])
+                        if em["norms_raw"][a].max() > 1e-8
+                    )
+                    anchors = top_k_anchors(em, concept, k=min(k_anch, n_nonzero))
+                    anchor_list = [str(idx) for idx, _, _ in anchors]
+            else:
+                anchor_list = [m.strip() for m in args.anchor_modes.split(",")]
+        else:
+            anchor_list = [args.anchor_mode]
+
+        multi = len(anchor_list) > 1
+
+        # ── Load model + pairs once for all anchors ───────────────────────────
+        device = get_default_device()
+        dtype = parse_dtype(args.dtype)
+        log.info("Loading model %s", args.model)
+        ts_obj, _ = load_transcoder_from_hub(
+            args.transcoder_set, dtype=dtype, lazy_encoder=True, lazy_decoder=True
         )
-        summaries.append(summary)
+        shared_model = AttributionModel.from_pretrained_and_transcoders(
+            args.model, ts_obj, dtype=dtype, device=device
+        )
+        shared_model.eval()
+        shared_pairs = _load_concept(concept, args.n, args.seed)
+        log.info("Loaded %d pairs", len(shared_pairs))
+
+        # ── Loop over anchors ─────────────────────────────────────────────────
+        for anchor_mode in anchor_list:
+            if multi:
+                log.info("--- anchor %s ---", anchor_mode)
+
+            # Derive out_dir
+            suffix = f"_pos{anchor_mode}" if anchor_mode != "delimiter" else ""
+            if args.out_dir and not multi:
+                out_dir = Path(args.out_dir)
+            else:
+                out_dir = Path(f"runs/concept_localization/{concept}/null{suffix}")
+            out_dir.mkdir(parents=True, exist_ok=True)
+
+            # real_deltas: only usable for single-anchor runs
+            real_deltas: Path | None = None
+            if not multi and args.concept != "all" and args.real_deltas:
+                real_deltas = Path(args.real_deltas)
+            elif not multi:
+                auto = Path(f"runs/concept_localization/{concept}/deltas.pt")
+                if auto.exists():
+                    log.info("Auto-detected real deltas at %s", auto)
+                    real_deltas = auto
+
+            summary = run_null_permutation(
+                concept=concept,
+                model_name=args.model,
+                transcoder_set=args.transcoder_set,
+                n_per_template=args.n,
+                k=args.k,
+                out_dir=out_dir,
+                dtype_str=args.dtype,
+                seed=args.seed,
+                real_deltas_path=real_deltas,
+                anchor_mode=anchor_mode,
+                context_keys=ctx_keys,
+                model=shared_model,
+                pairs=shared_pairs,
+            )
+            summaries.append(summary)
 
     if len(summaries) > 1:
         _print_summary_table(summaries)

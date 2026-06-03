@@ -156,8 +156,8 @@ def _plot_cross_layer_sim_core(
         ax.set_ylabel("Layer $i$", fontsize=9)
         ax.grid(False)
 
-        label = "all templates" if key == "all" else key
-        ax.set_title(f'{label}   anchor: "{anchor_tok}"', fontsize=9, pad=5)
+        label = "templates: all" if key == "all" else f"template: {key}"
+        ax.set_title(f'{label}   anchor: {anchor_tok}', fontsize=9, pad=5)
 
     fig.suptitle(f"Cross-layer cosine similarity — {concept}", fontsize=12, y=1.02)
     fig.savefig(out_path, bbox_inches="tight")
@@ -178,6 +178,32 @@ def plot_cross_layer_sim(concept: str) -> None:
     _plot_cross_layer_sim_core(
         deltas, n_layers, anchor_tok, concept, out_dir / "cross_layer_sim.pdf"
     )
+
+
+def plot_cross_layer_sim_per_anchor(concept: str) -> None:
+    """Plot cross-layer cosine similarity for every anchor_rank*_pos* directory."""
+    import re as _re
+    concept_dir = _RUNS / concept
+    anchor_dirs = sorted(concept_dir.glob("anchor_rank*_pos*"))
+    if not anchor_dirs:
+        print(f"  [skip] {concept}: no per-anchor directories")
+        return
+
+    for anchor_dir in anchor_dirs:
+        m = _re.match(r"anchor_rank(\d+)_pos(\d+)", anchor_dir.name)
+        if not m:
+            continue
+        rank, pos = int(m.group(1)), int(m.group(2))
+        res, deltas = _load(anchor_dir)
+        if res is None:
+            print(f"  [skip] {anchor_dir.name}: no data")
+            continue
+        cfg = res.get("config", {})
+        tok = cfg.get("anchor_token", cfg.get("anchor_mode", "?"))
+        anchor_tok = f"rank{rank} pos{pos} '{tok}'"
+        n_layers = len(res["sharpness"]["norm_by_layer"])
+        out_path = anchor_dir / "cross_layer_sim.png"
+        _plot_cross_layer_sim_core(deltas, n_layers, anchor_tok, concept, out_path)
 
 
 def plot_cross_layer_sim_data(
@@ -407,7 +433,7 @@ def main() -> None:
 
     for concept in concepts:
         print(f"— {concept}")
-        plot_cross_layer_sim(concept)
+        plot_cross_layer_sim_per_anchor(concept)
         plot_template_consistency(concept)
 
 
