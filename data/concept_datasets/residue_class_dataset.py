@@ -61,15 +61,22 @@ def generate_residue_pairs(
         if k_min > k_max:
             continue
 
-        k = rng.randint(k_min, k_max)
-        a_pos = M * k + R_POS
-        a_neg = M * k + r_neg
+        # Sample k_pos and k_neg independently so that a_pos and a_neg differ
+        # by O(M * |k_pos - k_neg|) rather than only r_neg - R_POS ∈ {1,...,5}.
+        # This makes the real pair delta comparable in scale to the within-class
+        # null delta, which also varies a by O(M * k) across examples.
+        k_pos = rng.randint(k_min, k_max)
+        k_neg = rng.randint(k_min, k_max)
+        while k_neg == k_pos:
+            k_neg = rng.randint(k_min, k_max)
+        a_pos = M * k_pos + R_POS
+        a_neg = M * k_neg + r_neg
 
         if not (lo <= a_pos <= hi and lo <= a_neg <= hi):
             continue
-        if (k, r_neg) in seen:
+        if (k_pos, r_neg) in seen:
             continue
-        seen.add((k, r_neg))
+        seen.add((k_pos, r_neg))
 
         for t in templates:
             if counts[t] >= n_per_template:

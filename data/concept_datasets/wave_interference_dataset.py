@@ -16,7 +16,7 @@ import random
 
 from experiments.concept_localization.concept_pair import ConceptPair
 
-WAVELENGTHS = [2, 4, 6]
+WAVELENGTHS = [10, 12, 14, 15, 16, 18, 20, 21, 24, 25]
 
 TEMPLATES = {
     "T0": (
@@ -54,15 +54,16 @@ def generate_wave_pairs(
     ):
         attempts += 1
         lam = rng.choice(WAVELENGTHS)
-        k_pos = rng.randint(1, 5)
+        k_pos = rng.randint(1, 9)
         d_pos = k_pos * lam
 
-        k_neg = rng.randint(0, 4)
+        k_neg = rng.randint(0, 8)
         d_neg = k_neg * lam + lam // 2
 
         if d_neg <= 0 or d_pos == d_neg:
             continue
-        if len(str(d_pos)) != len(str(d_neg)):
+        # both must be exactly 2 digits so tokenisation is identical
+        if len(str(d_pos)) != 2 or len(str(d_neg)) != 2:
             continue
 
         key = (lam, d_pos, d_neg)

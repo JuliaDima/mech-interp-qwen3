@@ -12,7 +12,6 @@ Isolation conditions:
   - column 1:   a_1 + b_1 <= 8   (absorbs carry-in, no propagation)
   - columns j > 1:  a_j + b_j < 10  (no carry elsewhere)
 
-Number of digits is sampled uniformly from {3, 4, 5} per pair.
 """
 
 from __future__ import annotations
@@ -57,118 +56,107 @@ def generate_carry_pairs(
     templates: list[str] | None = None,
     seed: int = 42,
 ) -> list[ConceptPair]:
-    """Generate contrastive carry pairs with carry always at the units column.
+    """Generate contrastive carry pairs covering all reachable ones-digit cells.
 
-    Each pair differs in exactly one digit of one operand.  Half the pairs vary
-    a's units digit; the other half vary b's.  Fixing carry_col=0 ensures the
-    contrastive signal is always anchored at the same token position, giving a
-    clean delta direction unconfounded by carry-column variation.
+    Enumerates all 99 reachable (ones_a, ones_b) combinations and generates
+    n_per_cell = max(1, round(n_per_template / 99)) pairs per cell per template,
+    keeping the total volume close to n_per_template.
+
+    For carry cells (ones_a + ones_b >= 10) the target cell is the pos anchor;
+    for no-carry cells it is the neg anchor. The partner digit is sampled
+    uniformly from the full range of valid options so delta magnitudes are
+    diverse. Balance is exactly 50/50 by construction. The only unreachable
+    cell is (0, 0).
     """
     if templates is None:
         templates = list(TEMPLATES)
 
     rng = random.Random(seed)
+    n_per_cell = max(1, round(n_per_template / 99))
     pairs: list[ConceptPair] = []
-    seen: set[tuple[int, int, int, int]] = set()
-    counts = {t: 0 for t in templates}
-    attempts = 0
+    seen: set[tuple[int, int, int, int, str]] = set()
 
-    while attempts < n_per_template * len(templates) * 300 and any(
-        v < n_per_template for v in counts.values()
-    ):
-        attempts += 1
+    for da in range(10):
+        for db in range(10):
+            if da == 0 and db == 0:
+                continue  # unreachable: no single-digit change can produce a carry
 
-        n_digits = 3
-        lo = 10 ** (n_digits - 1)
-        hi = 10**n_digits - 1
+            is_carry = (da + db >= 10)
 
-        carry_col = 0  # always units digit
-        vary_a = rng.random() < 0.5  # which operand's units digit varies
-
-        # Draw both operands digit-by-digit (index 0 = least significant)
-        a_digs = [rng.randint(0, 9) for _ in range(n_digits)]
-        b_digs = [rng.randint(0, 9) for _ in range(n_digits)]
-        a_digs[n_digits - 1] = rng.randint(1, 9)  # no leading zero
-        b_digs[n_digits - 1] = rng.randint(1, 9)
-
-        # Check isolation conditions for all columns except carry_col
-        valid = True
-        for j in range(n_digits):
-            if j == carry_col:
-                continue
-            col_sum = a_digs[j] + b_digs[j]
-            if j == carry_col + 1:
-                if col_sum > 8:  # must absorb the carry-in without propagating
-                    valid = False
-                    break
+            # Valid partner digits for each variation direction
+            if is_carry:
+                vary_a_partners = list(range(0, 10 - db))               # d' + db < 10
+                vary_b_partners = list(range(0, 10 - da))               # da + d' < 10
             else:
-                if col_sum >= 10:  # no carry at this column
-                    valid = False
-                    break
-        if not valid:
-            continue
+                vary_a_partners = list(range(max(0, 10 - db), 10)) if db > 0 else []
+                vary_b_partners = list(range(max(0, 10 - da), 10)) if da > 0 else []
 
-        # Determine carry and no-carry digit values for the varying operand
-        fixed_dig = b_digs[carry_col] if vary_a else a_digs[carry_col]
-        carry_opts = [d for d in range(10) if d + fixed_dig >= 10]
-        no_carry_opts = [d for d in range(10) if d + fixed_dig < 10]
-        if not carry_opts or not no_carry_opts:
-            continue
-
-        vary_carry = rng.choice(carry_opts)
-        vary_no_carry = rng.choice(no_carry_opts)
-
-        # Build pos/neg digit arrays
-        a_pos_digs = a_digs[:]
-        a_neg_digs = a_digs[:]
-        b_pos_digs = b_digs[:]
-        b_neg_digs = b_digs[:]
-        if vary_a:
-            a_pos_digs[carry_col] = vary_carry
-            a_neg_digs[carry_col] = vary_no_carry
-        else:
-            b_pos_digs[carry_col] = vary_carry
-            b_neg_digs[carry_col] = vary_no_carry
-
-        a_pos = _from_digits(a_pos_digs)
-        a_neg = _from_digits(a_neg_digs)
-        b_pos = _from_digits(b_pos_digs)
-        b_neg = _from_digits(b_neg_digs)
-
-        if not (
-            lo <= a_pos <= hi and lo <= b_pos <= hi and lo <= a_neg <= hi and lo <= b_neg <= hi
-        ):
-            continue
-
-        key = (a_pos, b_pos, a_neg, b_neg)
-        if key in seen:
-            continue
-        seen.add(key)
-
-        for t in templates:
-            if counts[t] >= n_per_template:
-                continue
-            fmt_pos, fmt_neg = TEMPLATES[t]
-            pairs.append(
-                ConceptPair(
-                    prompt_pos=fmt_pos.format(a=a_pos, b=b_pos),
-                    prompt_neg=fmt_neg.format(a=a_neg, b=b_neg),
-                    label_pos="carry",
-                    label_neg="no_carry",
-                    predict_pos=str(a_pos + b_pos),
-                    predict_neg=str(a_neg + b_neg),
-                    template=t,
-                    meta={
-                        "a_pos": a_pos,
-                        "b_pos": b_pos,
-                        "a_neg": a_neg,
-                        "b_neg": b_neg,
-                        "carry_col": carry_col,
-                        "n_digits": n_digits,
-                        "vary_a": vary_a,
-                    },
-                )
+            valid_dirs = (
+                (['a'] if vary_a_partners else []) +
+                (['b'] if vary_b_partners else [])
             )
-            counts[t] += 1
+            if not valid_dirs:
+                continue
+
+            for t in templates:
+                generated = 0
+                attempts = 0
+                while generated < n_per_cell and attempts < n_per_cell * 200:
+                    attempts += 1
+
+                    # Random higher digits; isolation: tens digits must sum to <= 8
+                    ha = rng.randint(1, 9)
+                    ma = rng.randint(0, 8)
+                    hb = rng.randint(1, 9)
+                    mb = rng.randint(0, 8 - ma)
+
+                    vary_dir = rng.choice(valid_dirs)
+                    if vary_dir == 'a':
+                        partner = rng.choice(vary_a_partners)
+                        a_anchor  = ha * 100 + ma * 10 + da
+                        b_anchor  = hb * 100 + mb * 10 + db
+                        a_partner = ha * 100 + ma * 10 + partner
+                        b_partner = b_anchor
+                    else:
+                        partner = rng.choice(vary_b_partners)
+                        a_anchor  = ha * 100 + ma * 10 + da
+                        b_anchor  = hb * 100 + mb * 10 + db
+                        a_partner = a_anchor
+                        b_partner = hb * 100 + mb * 10 + partner
+
+                    if is_carry:
+                        a_pos, b_pos = a_anchor, b_anchor
+                        a_neg, b_neg = a_partner, b_partner
+                    else:
+                        a_neg, b_neg = a_anchor, b_anchor
+                        a_pos, b_pos = a_partner, b_partner
+
+                    key = (a_pos, b_pos, a_neg, b_neg, t)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+
+                    fmt_pos, fmt_neg = TEMPLATES[t]
+                    pairs.append(
+                        ConceptPair(
+                            prompt_pos=fmt_pos.format(a=a_pos, b=b_pos),
+                            prompt_neg=fmt_neg.format(a=a_neg, b=b_neg),
+                            label_pos="carry",
+                            label_neg="no_carry",
+                            predict_pos=str(a_pos + b_pos),
+                            predict_neg=str(a_neg + b_neg),
+                            template=t,
+                            meta={
+                                "a_pos": a_pos,
+                                "b_pos": b_pos,
+                                "a_neg": a_neg,
+                                "b_neg": b_neg,
+                                "carry_col": 0,
+                                "n_digits": 3,
+                                "vary_a": vary_dir == 'a',
+                            },
+                        )
+                    )
+                    generated += 1
 
     return pairs

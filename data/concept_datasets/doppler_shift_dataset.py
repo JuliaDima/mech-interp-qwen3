@@ -19,38 +19,38 @@ import random
 from experiments.concept_localization.concept_pair import ConceptPair
 
 _SOURCES = [
-    "train",
-    "bus",
-    "ship",
-    "car",
-    "truck",
-    "jet",
-    "drone",
-    "horn",
-    "siren",
-    "locomotive",
-    "helicopter",
-    "motorcycle",
-    "speedboat",
-    "ambulance",
-    "aircraft",
-    "speaker",
-    "whistle",
-    "bell",
+    "train", "bus", "ship", "car", "truck", "jet", "drone", "horn",
+    "siren", "locomotive", "helicopter", "motorcycle", "speedboat",
+    "ambulance", "aircraft", "speaker", "whistle", "bell",
+    "rocket", "alarm", "engine", "propeller", "foghorn", "cannon",
+    "thunder", "chainsaw", "jackhammer", "lawnmower", "blender",
+    "typewriter", "piano", "trumpet", "tuba", "saxophone", "flute",
+    "cymbal", "drum", "tractor", "scooter", "skateboard", "bicycle",
+    "submarine", "torpedo", "warplane", "bomber", "glider", "blimp",
+    "hovercraft", "snowmobile", "ATV", "tank", "catapult", "launcher",
+    "firework", "comet", "meteor", "shuttle", "satellite", "probe",
+    "ferry", "tugboat", "canoe", "kayak", "yacht", "tanker",
+    "bulldozer", "excavator", "crane", "forklift", "roller", "grader",
+    "sander", "router", "drill", "lathe", "compressor", "generator",
+    "turbine", "reactor", "motor", "piston", "fan", "pump",
+    "whistle", "foghorn", "buzzer", "klaxon", "gong", "chime",
+    "megaphone", "radio", "sonar", "radar", "beacon", "siren",
+    "zeppelin", "helo", "gunship", "interceptor", "racer", "dragster",
+    "streetcar", "monorail", "tram", "trolley", "metro", "subway",
 ]
 
 TEMPLATES = {
     "T0": (
-        "Yes or No: {src} nears, observed frequency exceeds emitted: ",
-        "Yes or No: {src} departs, observed frequency exceeds emitted: ",
+        "Yes or No: {src} nearing, observed frequency exceeds emitted: ",
+        "Yes or No: {src} leaving, observed frequency exceeds emitted: ",
     ),
     "T1": (
-        "Yes or No: {src} is incoming, measured pitch above emitted pitch: ",
-        "Yes or No: {src} is outgoing, measured pitch above emitted pitch: ",
+        "Yes or No: {src} incoming, measured pitch above emitted pitch: ",
+        "Yes or No: {src} outgoing, measured pitch above emitted pitch: ",
     ),
     "T2": (
-        "Yes or No: {src} inbound, pitch measured higher than emitted: ",
-        "Yes or No: {src} outbound, pitch measured higher than emitted: ",
+        "Yes or No: {src} oncoming, pitch measured higher than emitted: ",
+        "Yes or No: {src} receding, pitch measured higher than emitted: ",
     ),
 }
 

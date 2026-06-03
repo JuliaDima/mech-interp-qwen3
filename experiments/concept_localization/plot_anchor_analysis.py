@@ -511,14 +511,14 @@ def plot_concept_anchor_sensitivity(concept: str) -> None:
             sec_name = _anchor_display_name(sec_idx, tok_labels, tmpl_str)
             ax.plot(LAYERS, traj2, color="#BBBBBB", lw=2.0, alpha=0.90, zorder=3,
                     marker="o", markersize=4.5, markerfacecolor="#BBBBBB", markeredgewidth=0,
-                    label=f"pos {sec_idx} ({sec_name})")
+                    label=f"Rank 2 · pos {sec_idx} ({sec_name})")
 
         # Primary anchor — concept colour with dots
         pri_idx, traj1, tok1 = top2[0]
         pri_name = _anchor_display_name(pri_idx, tok_labels, tmpl_str)
         ax.plot(LAYERS, traj1, color=col, lw=2.6, zorder=5,
                 marker="o", markersize=5.0, markerfacecolor=col, markeredgewidth=0,
-                label=f"pos {pri_idx} ({pri_name})")
+                label=f"Rank 1 · pos {pri_idx} ({pri_name})")
 
         # act_norms_raw[pos, l] = ||δ_l|| / E[||h_l||] (already act-normalised in make_gif.py).
         # Just rescale to [0, 1] by dividing by its own max.

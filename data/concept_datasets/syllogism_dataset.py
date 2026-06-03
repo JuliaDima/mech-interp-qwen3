@@ -18,12 +18,12 @@ import random
 
 from experiments.concept_localization.concept_pair import ConceptPair
 
-# 50 distinct ordered triples from {B,C,D,F,G,H,J,K,L,M}.
+# 120 distinct ordered triples from {B,C,D,F,G,H,J,K,L,M,N,P}.
 # Fixed shuffle seed so the list is stable across runs.
-_POOL = list("BCDFGHJKLM")
+_POOL = list("BCDFGHJKLMNP")
 _all_triples = list(itertools.permutations(_POOL, 3))
 random.Random(0).shuffle(_all_triples)
-_LETTER_TRIPLES: list[tuple[str, str, str]] = _all_triples[:50]
+_LETTER_TRIPLES: list[tuple[str, str, str]] = _all_triples[:120]
 
 TEMPLATES = {
     "T0": (
@@ -42,7 +42,7 @@ TEMPLATES = {
 
 
 def generate_syllogism_pairs(
-    n_per_template: int = 50,
+    n_per_template: int = 100,
     templates: list[str] | None = None,
     seed: int = 42,
 ) -> list[ConceptPair]:

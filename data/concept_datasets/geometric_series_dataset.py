@@ -16,7 +16,8 @@ from math import gcd as _gcd
 
 from experiments.concept_localization.concept_pair import ConceptPair
 
-DENOMINATORS = [2, 3, 4, 5, 6, 7, 8]
+# Large denominators so that both p_pos and p_neg are two-digit (10-99)
+DENOMINATORS = [11, 13, 14, 17, 19, 21, 22, 23, 26, 29, 31, 34, 37, 38, 41, 43]
 
 TEMPLATES = {
     "T0": ("Yes or No: geometric series ratio {r} converges: ", "Yes or No: geometric series ratio {r} converges: "),
@@ -55,12 +56,16 @@ def generate_geometric_pairs(
         attempts += 1
         q = rng.choice(DENOMINATORS)
 
-        p_pos_choices = [p for p in range(1, q) if _gcd(p, q) == 1]
-        p_neg_choices = [p for p in range(q + 1, q * 2) if _gcd(p, q) == 1 and p <= 9]
-        if not p_pos_choices or not p_neg_choices:
+        # restrict to two-digit numerators for both pos and neg
+        p_pos_choices = [p for p in range(10, q) if _gcd(p, q) == 1]
+        if not p_pos_choices:
             continue
-
         p_pos = rng.choice(p_pos_choices)
+
+        p_neg_choices = [p for p in range(q + 1, q * 2)
+                         if _gcd(p, q) == 1 and 10 <= p <= 99]
+        if not p_neg_choices:
+            continue
         p_neg = rng.choice(p_neg_choices)
         r_pos = f"{p_pos}/{q}"
         r_neg = f"{p_neg}/{q}"
