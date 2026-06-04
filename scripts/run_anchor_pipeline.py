@@ -1,27 +1,30 @@
-"""Full per-anchor pipeline: run_concept → null permutation → transcoder sweep.
+"""Full per-anchor pipeline: run_concept → null → sweep → cluster analysis → (PySR).
 
-Runs three stages sequentially for one (concept, anchor_position) pair.
-Intended to be submitted as a single GPU SLURM job after
-select_and_submit_anchors.py has determined the anchor rank and position.
+Stages
+------
+Stage 1  run_concept        — delta extraction, causal analysis, cross_layer_sim, feature projection.
+Stage 2  null permutation   — within-class permutation test, reusing deltas.pt.
+Stage 3  sweep              — Jaccard×|score| transcoder feature ranking at peak layers.
+Stage 4  cluster analysis   — cosine clustering + PCA/Fourier plots per cluster.
+Stage 5  PySR (--pysr)      — symbolic regression per cluster + top-k E_dec features (carry=grid, others=generic).
 
-Stage 1  run_concept   — delta extraction, causal analysis, feature projection.
-Stage 2  null          — within-class permutation test, reusing deltas.pt.
-Stage 3  sweep         — Jaccard×|score| transcoder feature ranking at peak layers.
+The cross-anchor peak-feature plot (plot_sweep_peak_features.py) is submitted once
+by the coordinator after all anchor jobs finish, since it aggregates every anchor.
 
 Output directory layout
 -----------------------
 runs/concept_localization/{concept}/anchor_rank{R}_pos{P}/
-    results.json
-    deltas.pt
-    feature_projections_scatter.png
-    causal_scores.png / causal_overlay.png
-    null/
-        null_permutation.json
-        null_permutation.png
+    results.json, deltas.pt, cross_layer_sim.png
+    causal_scores.png, causal_overlay.png
+    null/null_permutation.{json,png}
     sweep/
-        sweep_ranked.json
-        sweep_activations.npz
-        sweep_examples.pkl
+        sweep_ranked.json, sweep_activations.npz, sweep_examples.pkl
+        top_features_peak_layers.png
+        cluster_analysis_T0/
+            cluster_features.json
+            cluster_NN_{pca,top3}.png
+            cosine_similarity.png
+            pysr_*/  (if --pysr)
 
 Usage
 -----
@@ -29,7 +32,7 @@ Usage
         --concept carry --anchor_pos 7 --anchor_rank 1
 
     python scripts/run_anchor_pipeline.py \\
-        --concept gcd --anchor_pos 12 --anchor_rank 2 --n 150 --null_k 30
+        --concept carry --anchor_pos 7 --anchor_rank 1 --pysr
 """
 
 from __future__ import annotations
@@ -80,6 +83,18 @@ def main() -> None:
                         help="Max pairs for causal patching analysis")
     parser.add_argument("--null_k", type=int, default=20,
                         help="Number of null permutations")
+    parser.add_argument("--cluster_top_k", type=int, default=100,
+                        help="Top-k features fed into cluster analysis")
+    parser.add_argument("--n_clusters", type=int, default=6,
+                        help="Number of feature clusters")
+    parser.add_argument("--pysr", action="store_true",
+                        help="Run PySR per cluster + top-k E_dec features (carry=grid, others=generic; slow)")
+    parser.add_argument("--pysr_niterations", type=int, default=40,
+                        help="PySR iterations per feature")
+    parser.add_argument("--edec_top_k", type=int, default=15,
+                        help="Top-k E_dec-aligned features for the extra PySR pass")
+    parser.add_argument("--r2_threshold", type=float, default=0.5,
+                        help="Only plot PySR fits whose R² exceeds this")
     args = parser.parse_args()
 
     out_dir = (
@@ -142,10 +157,57 @@ def main() -> None:
         "--out_dir", str(sweep_dir),
     ])
 
-    log.info(
-        "All stages complete. Results in %s",
-        out_dir,
-    )
+    # ── Stage 4: cluster analysis ─────────────────────────────────────────
+    log.info("=== Stage 4: cluster analysis ===")
+    _run([
+        sys.executable,
+        str(_REPO_ROOT / "scripts" / "sweeps" / "analyze_sweep_clusters.py"),
+        "--sweep_dir", str(sweep_dir),
+        "--top_k", str(args.cluster_top_k),
+        "--n_clusters", str(args.n_clusters),
+    ])
+
+    # NOTE: the cross-anchor peak-feature plot (plot_sweep_peak_features.py)
+    # globs every anchor_rank*_pos* dir at once, so it is submitted once by the
+    # coordinator (select_and_submit_anchors.py) after all anchor jobs finish,
+    # rather than redundantly per anchor here.
+
+    # ── Stage 5: PySR per cluster + top-k E_dec features (optional) ──────
+    if args.pysr:
+        log.info("=== Stage 5: PySR ===")
+        cluster_json = sweep_dir / "cluster_analysis_T0" / "cluster_features.json"
+        if not cluster_json.exists():
+            log.warning("cluster_features.json not found at %s — skipping PySR", cluster_json)
+        else:
+            try:
+                _run([
+                    sys.executable,
+                    str(_REPO_ROOT / "scripts" / "sweeps" / "fit_pysr_sweep.py"),
+                    "--sweep_dir", str(sweep_dir),
+                    "--cluster_features_json", str(cluster_json),
+                    "--out_dir", str(cluster_json.parent),
+                    "--niterations", str(args.pysr_niterations),
+                    "--r2_threshold", str(args.r2_threshold),
+                ])
+            except subprocess.CalledProcessError as e:
+                log.warning("PySR (cluster) stage failed (non-fatal): %s", e)
+
+        # ── Stage 5b: PySR on top-k E_dec-aligned features ───────────────
+        log.info("=== Stage 5b: PySR on top-%d E_dec features ===", args.edec_top_k)
+        try:
+            _run([
+                sys.executable,
+                str(_REPO_ROOT / "scripts" / "sweeps" / "pysr_top_edec_features.py"),
+                "--anchor_dir", str(out_dir),
+                "--concept", args.concept,
+                "--top_k", str(args.edec_top_k),
+                "--niterations", str(args.pysr_niterations),
+                "--r2_threshold", str(args.r2_threshold),
+            ])
+        except subprocess.CalledProcessError as e:
+            log.warning("PySR (E_dec) stage failed (non-fatal): %s", e)
+
+    log.info("All stages complete. Results in %s", out_dir)
 
 
 if __name__ == "__main__":
