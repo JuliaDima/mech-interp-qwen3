@@ -70,6 +70,13 @@ def main() -> None:
                         help="Top-k features per layer for sweep")
     parser.add_argument("--causal_pairs", type=int, default=50)
     parser.add_argument("--null_k", type=int, default=20)
+    parser.add_argument("--cluster_top_k", type=int, default=100,
+                        help="Top-k features fed into cluster analysis")
+    parser.add_argument("--n_clusters", type=int, default=6,
+                        help="Number of feature clusters")
+    parser.add_argument("--pysr", action="store_true",
+                        help="Run PySR per cluster + top-k E_dec features (carry=grid, others=generic; slow)")
+    parser.add_argument("--pysr_niterations", type=int, default=40)
     parser.add_argument("--dry_run", action="store_true",
                         help="Print sbatch commands without submitting")
     args = parser.parse_args()
@@ -113,13 +120,38 @@ def main() -> None:
             "--sweep_top_k", str(args.sweep_top_k),
             "--causal_pairs", str(args.causal_pairs),
             "--null_k", str(args.null_k),
+            "--cluster_top_k", str(args.cluster_top_k),
+            "--n_clusters", str(args.n_clusters),
+            "--pysr_niterations", str(args.pysr_niterations),
         ]
+        if args.pysr:
+            cmd.append("--pysr")
         jid = _submit(cmd, args.dry_run)
         submitted.append((rank, anchor_idx, label, jid))
         log.info(
             "  Submitted rank=%d pos=%d '%s' → job %s",
             rank, anchor_idx, label, jid,
         )
+
+    # ── Final cross-anchor peak-feature plot ────────────────────────────────
+    #   plot_sweep_peak_features.py globs every anchor_rank*_pos* dir at once,
+    #   so it must run a single time after all anchor pipelines complete (not
+    #   per-anchor). Depend on every anchor job via afterany so it runs even if
+    #   some anchors fail.
+    if submitted:
+        dep = ":".join(jid for *_, jid in submitted)
+        peak_cmd = [
+            "sbatch", "--parsable",
+            f"--job-name=peakfeat_{args.concept}",
+            "--time=00:20:00",
+            f"--dependency=afterany:{dep}",
+            _SBATCH_RUN,
+            sys.executable,
+            str(_REPO_ROOT / "scripts" / "sweeps" / "plot_sweep_peak_features.py"),
+            "--concept", args.concept,
+        ]
+        peak_jid = _submit(peak_cmd, args.dry_run)
+        log.info("  Submitted peak-feature plot → job %s (after all anchors)", peak_jid)
 
     print(f"\n{'Concept':<30} {'Rank':<6} {'Pos':<6} {'Token':<20} {'JobID'}")
     print("-" * 75)

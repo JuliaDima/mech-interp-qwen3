@@ -22,6 +22,7 @@ import argparse
 import importlib
 import json
 import logging
+import random
 import sys
 from pathlib import Path
 
@@ -210,12 +211,16 @@ def main() -> None:
         help="Anchor mode — uses dataset's first ANCHOR_MODE if not set, else 'delimiter'",
     )
     parser.add_argument("--n", type=int, default=100, help="Pairs per template to load")
+    parser.add_argument("--template", default=None,
+                        help="Restrict to one template (e.g. T0). Default: all templates.")
     parser.add_argument("--max_pairs", type=int, default=200)
     parser.add_argument("--top_k", type=int, default=200, help="Top features to select per layer")
     parser.add_argument(
         "--top_per_layer", type=int, default=5, help="Top features to display per layer"
     )
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--analyze", action="store_true",
+                        help="Run cluster analysis after sweep (no GPU needed)")
     parser.add_argument(
         "--out_dir", default=None, help="Output dir (default: runs/concept_localization/<concept>)"
     )
@@ -246,7 +251,12 @@ def main() -> None:
 
     log.info("Loading dataset for %s (%d pairs/template)", args.concept, args.n)
     pairs = _load_concept(args.concept, args.n, args.seed)
-    log.info("Loaded %d pairs", len(pairs))
+    random.Random(args.seed).shuffle(pairs)
+    if args.template:
+        pairs = [p for p in pairs if p.template == args.template]
+        log.info("Filtered to template %s: %d pairs", args.template, len(pairs))
+    else:
+        log.info("Loaded %d pairs", len(pairs))
 
     ranked, acts_1d, pos_mask, prompts = sweep_all_features(
         model,
@@ -298,6 +308,12 @@ def main() -> None:
         pickle.dump(sweep_examples, f)
     log.info("Saved example metadata → %s", examples_path)
     log.info("Done. Outputs in %s", out_dir)
+
+    if args.analyze:
+        from analyze_sweep_clusters import run_analysis
+        log.info("Running cluster analysis (T0, k=6)…")
+        run_analysis(out_dir, template=args.template or "T0",
+                     top_k=min(args.top_k, 100), n_clusters=6)
 
 
 if __name__ == "__main__":

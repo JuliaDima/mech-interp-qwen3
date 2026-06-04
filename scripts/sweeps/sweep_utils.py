@@ -88,7 +88,12 @@ def score_and_rank(
     jac_nc = np.where(union_nc > 0, inter_nc / union_nc, 0.0)
     jaccard = np.where(scores >= 0, jac_c, jac_nc)
     combined = jaccard * np.abs(scores)
-    top_idx = np.argsort(combined)[::-1][:top_k]
+    # restrict to features that activate on at least one example
+    any_active = active.any(axis=0)
+    eligible = np.where(any_active)[0]
+    if len(eligible) == 0:
+        return []
+    top_idx = eligible[np.argsort(combined[eligible])[::-1][:top_k]]
     return [(int(f), float(scores[f]), float(jaccard[f])) for f in top_idx]
 
 
