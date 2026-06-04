@@ -36,6 +36,7 @@ import argparse
 import importlib
 import json
 import logging
+import random
 import sys
 from pathlib import Path
 
@@ -47,7 +48,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from experiments.concept_localization.analyze import (
     compute_sharpness,
-    project_onto_features,
+    project_onto_E_dec_model,
 )
 from experiments.concept_localization.causal_analysis import run_causal_analysis
 from experiments.concept_localization.extract_deltas_generic import (
@@ -268,6 +269,7 @@ def _run_single(args, base_subdir: str | None = None) -> None:
     # ── 1. Dataset (loaded once) ──────────────────────────────────────────────
     log.info("Generating %d pairs/template for concept '%s'", args.n, args.concept)
     pairs = _load_concept(args.concept, args.n, args.seed)
+    random.Random(args.seed).shuffle(pairs)
     if args.template:
         pairs = [p for p in pairs if p.template == args.template]
         log.info("Filtered to template '%s': %d pairs", args.template, len(pairs))
@@ -400,8 +402,8 @@ def _run_single(args, base_subdir: str | None = None) -> None:
         # ── 6. Feature projection ─────────────────────────────────────────────
         projections: dict = {}
         if not args.skip_features:
-            log.info("Projecting delta onto transcoder features…")
-            projections = project_onto_features(model, ld, top_k=args.top_k)
+            log.info("Projecting delta onto transcoder decoder directions (E_dec)…")
+            projections = project_onto_E_dec_model(model, ld.delta, top_k=args.top_k)
 
         mean_act_norms = {l: v for l, v in ld.mean_act_norm.items()} if ld.mean_act_norm else {}
         delta_norms_raw = {l: ld.delta[l].norm().item() for l in layers if l in ld.delta}
@@ -444,7 +446,9 @@ def _run_single(args, base_subdir: str | None = None) -> None:
             "mean_act_norm": {str(l): round(v, 4) for l, v in mean_act_norms.items()},
             "top_features_by_layer": {
                 str(layer): [
-                    {"feature_id": m.feature_id, "projection": round(m.projection, 4)}
+                    {"feature_id": m.feature_id,
+                     "projection": round(m.projection, 4),
+                     "cos_sim": round(m.cos_sim, 4)}
                     for m in matches
                 ]
                 for layer, matches in projections.items()

@@ -5,7 +5,7 @@ Pipeline
 1. Generate controlled carry-contrast pairs (units digit of second operand varies, the rest is identical).
 2. Extract residual-stream deltas at every layer across all pairs and templates.
 3. Compute sharpness metrics (norm trajectory, inter-layer cosine sim, peak layer).
-4. Project delta onto transcoder W_enc to find top-k carry features per layer.
+4. Project delta onto transcoder decoder directions (E_dec) to find top-k features per layer.
 5. Check template consistency: do T0/T1/T2 agree on the direction?
 6. Save results + four diagnostic plots.
 
@@ -34,7 +34,7 @@ from data.concept_datasets.carry_dataset import generate_carry_pairs
 from experiments.concept_localization.analyze import (
     compute_sharpness,
     compute_template_consistency,
-    project_onto_features,
+    project_onto_E_dec_model,
 )
 from experiments.concept_localization.extract_deltas_generic import extract_layer_deltas_generic
 from experiments.concept_localization.visualize import (
@@ -86,7 +86,7 @@ def main() -> None:
     parser.add_argument(
         "--skip_feature_projection",
         action="store_true",
-        help="Skip transcoder projection (faster; no W_enc load)",
+        help="Skip transcoder projection (faster; no E_dec load)",
     )
     args = parser.parse_args()
 
@@ -157,8 +157,10 @@ def main() -> None:
     # ------------------------------------------------------------------ #
     projections: dict = {}
     if not args.skip_feature_projection:
-        log.info("Projecting delta onto transcoder features…")
-        projections = project_onto_features(model, layer_results["all"], top_k=args.top_k)
+        log.info("Projecting delta onto transcoder decoder directions (E_dec)…")
+        projections = project_onto_E_dec_model(
+            model, layer_results["all"].delta, top_k=args.top_k
+        )
 
     # ------------------------------------------------------------------ #
     # 6. Save
