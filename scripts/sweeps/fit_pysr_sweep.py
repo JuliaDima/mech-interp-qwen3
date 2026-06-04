@@ -398,7 +398,9 @@ def _simplify_eq(sympy_expr, tol: float = 1e-2):
 
 
 def _plot_carry(grid: np.ndarray, model, key: str, out_path: Path,
-                r2_threshold: float = 0.0) -> float:
+                r2_threshold: float = 0.0,
+                n_pos: int = 0,
+                n_neg: int = 0) -> float:
     """Plot the actual / fit / residual grids. Returns R²; skips saving when
     R² < r2_threshold (the fit does not explain enough structure to plot)."""
     ps.apply()
@@ -458,7 +460,7 @@ def _plot_carry(grid: np.ndarray, model, key: str, out_path: Path,
         norm=plt.Normalize(vmin=0, vmax=1),
     )
     sm.set_array([])
-    fig.subplots_adjust(left=0.07, right=0.85, top=0.67, bottom=0.13, wspace=0.08)
+    fig.subplots_adjust(left=0.07, right=0.85, top=0.58, bottom=0.13, wspace=0.08)
     cax = fig.add_axes([0.875, 0.13, 0.010, 0.54])
     cbar = fig.colorbar(sm, cax=cax)
     cbar.set_label("normalised activation", labelpad=6)
@@ -467,7 +469,17 @@ def _plot_carry(grid: np.ndarray, model, key: str, out_path: Path,
     cbar.ax.tick_params(length=0)
 
     _draw_formula_header(fig, key, latex_eq, str(model.get_best()["equation"]), r2,
-                         args="(a,\\,b)", y=0.88)
+                         args="(a,\\,b)", y=0.965)
+
+    fig.text(
+        0.5,
+        0.90,
+        f"PySR fit points: {n_pos} positive / {n_neg} negative",
+        ha="center",
+        va="top",
+        fontsize=11,
+        color=ps.GRAY,
+    )
 
     plt.savefig(out_path.with_suffix(".pdf"), bbox_inches="tight")
     plt.close()
@@ -510,9 +522,11 @@ def _modular_residue(X: np.ndarray, var_names: list[str]):
     return np.mod(a, M), M
 
 
-def _plot_generic(X: np.ndarray, y: np.ndarray, model, key: str,
+def _plot_generic(x_plot: np.ndarray, y: np.ndarray, model, key: str,
                   var_names: list[str], out_path: Path,
-                  r2_threshold: float = 0.0) -> float:
+                  r2_threshold: float = 0.0,
+                  n_pos: int = 0,
+                  n_neg: int = 0) -> float:
     """Scatter + residual plot for generic-meta fits. Returns R²; skips saving
     when R² < r2_threshold. Modular concepts (gcd, residue) get a circular
     activation-by-residue panel instead of the linear pair-order one."""
@@ -529,68 +543,73 @@ def _plot_generic(X: np.ndarray, y: np.ndarray, model, key: str,
 
     idx = np.arange(len(y))
     is_pos = (idx % 2 == 0)
-    mod_info = _modular_residue(X, var_names)
-
     fig = plt.figure(figsize=(15, 4))
+
+    # Plot against the true arithmetic variable (usually 'a')
+    x_vals = X[:, 0]
+
+    sort_idx = np.argsort(x_vals)
+
+    x_plot = x_vals[sort_idx]
+    y_sorted = y[sort_idx]
+    y_pred_sorted = y_pred[sort_idx]
+    resid_sorted = np.abs(y_sorted - y_pred_sorted)
+
+    ax0 = fig.add_subplot(1, 3, 1)
+    ax0.plot(
+        x_plot,
+        y_sorted,
+        "-o",
+        ms=3,
+        lw=1.2,
+        alpha=0.9,
+        color=ps.NAVY,
+    )
+    ax0.set_xlabel("a")
+    ax0.set_ylabel("activation (normalised)")
+    ax0.set_title("Actual activations")
+
     ax1 = fig.add_subplot(1, 3, 2)
+    ax1.plot(
+        x_plot,
+        y_pred_sorted,
+        "-o",
+        ms=3,
+        lw=1.2,
+        alpha=0.9,
+        color=ps.TEAL,
+    )
+    ax1.set_xlabel("a")
+    ax1.set_ylabel("predicted activation")
+    ax1.set_title("PySR fit")
+
     ax2 = fig.add_subplot(1, 3, 3)
-
-    # Panel 0: circular for modular concepts, else linear pair-order view.
-    if mod_info is not None:
-        residue, M = mod_info
-        ax0 = fig.add_subplot(1, 3, 1, projection="polar")
-        spokes = np.arange(M)
-        theta_r = 2 * np.pi * spokes / M
-        # Per-residue means (collapses 400 piled points into one value per spoke)
-        mean_act = np.array([y[residue == r].mean() if (residue == r).any() else np.nan
-                             for r in spokes])
-        mean_pred = np.array([y_pred[residue == r].mean() if (residue == r).any() else np.nan
-                              for r in spokes])
-        # Faint individual activations for context (radial jitter so they're visible)
-        rng = np.random.default_rng(0)
-        ax0.scatter(2 * np.pi * residue / M, y + (rng.random(len(y)) - 0.5) * 0.02,
-                    s=6, alpha=0.12, color=ps.GRAY)
-        # Closed loops: actual mean and PySR-fit mean as circles
-        tc = np.append(theta_r, theta_r[0])
-        ax0.plot(tc, np.append(mean_act, mean_act[0]), "-o", color=ps.NAVY,
-                 lw=1.6, ms=5, label="actual (mean)")
-        ax0.plot(tc, np.append(mean_pred, mean_pred[0]), "--s", color=ps.TEAL,
-                 lw=1.6, ms=4, label="PySR fit (mean)")
-        ax0.set_xticks(theta_r)
-        ax0.set_xticklabels([str(i) for i in spokes], fontsize=8)
-        ax0.set_theta_zero_location("N")
-        ax0.set_theta_direction(-1)
-        ax0.set_rlabel_position(90)
-        ax0.set_title(f"Activation by residue  (a mod {M})", pad=14)
-        ax0.legend(fontsize=7, loc="lower right", bbox_to_anchor=(1.18, -0.05))
-    else:
-        ax0 = fig.add_subplot(1, 3, 1)
-        ax0.scatter(idx[is_pos], y[is_pos], s=12, alpha=0.6, color=ps.NAVY, label="pos (actual)")
-        ax0.scatter(idx[~is_pos], y[~is_pos], s=12, alpha=0.6, color=ps.RED, label="neg (actual)")
-        ax0.scatter(idx, y_pred, s=6, alpha=0.5, color=ps.TEAL, marker="x", label="PySR fit")
-        ax0.set_xlabel("example index (pair order)")
-        ax0.set_ylabel("activation (normalised)")
-        ax0.set_title("Activation by example")
-        ax0.legend(fontsize=7, loc="upper right")
-
-    ax = ax1
-    ax.scatter(y, y_pred, s=8, alpha=0.4, color=ps.NAVY)
-    lim = [min(y.min(), y_pred.min()) - 0.05, max(y.max(), y_pred.max()) + 0.05]
-    ax.plot(lim, lim, color=ps.RED, lw=1.0, ls="--", alpha=0.7)
-    ax.set_xlabel("actual activation (normalised)")
-    ax.set_ylabel("predicted")
-    ax.set_title("Actual vs predicted")
-
-    resid = y - y_pred
-    ax2.hist(resid, bins=30, color=ps.TEAL, alpha=0.75, edgecolor="white")
-    ax2.axvline(0, color=ps.RED, lw=1.0, ls="--")
-    ax2.set_xlabel("residual")
-    ax2.set_ylabel("count")
-    ax2.set_title(f"Residuals  (n={len(y)})")
+    ax2.plot(
+        x_plot,
+        resid_sorted,
+        "-o",
+        ms=3,
+        lw=1.2,
+        alpha=0.9,
+        color=ps.RED,
+    )
+    ax2.set_xlabel("a")
+    ax2.set_ylabel("|error|")
+    ax2.set_title("Residuals")
 
     latex_eq = _model_latex(model)
-    fig.subplots_adjust(left=0.06, right=0.97, top=0.72, bottom=0.15, wspace=0.28)
-    _draw_formula_header(fig, key, latex_eq, best_eq, r2, args="", y=0.90)
+    fig.subplots_adjust(left=0.06, right=0.97, top=0.60, bottom=0.15, wspace=0.28)
+    _draw_formula_header(fig, key, latex_eq, best_eq, r2, args="", y=0.965)
+
+    fig.text(
+        0.5,
+        0.90,
+        f"PySR fit points: {n_pos} positive / {n_neg} negative",
+        ha="center",
+        va="top",
+        fontsize=11,
+        color=ps.GRAY,
+    )
 
     plt.savefig(out_path.with_suffix(".pdf"), bbox_inches="tight")
     plt.close()
@@ -633,19 +652,75 @@ def fit_feature(
     model = _fit_pysr(X, y, names, niterations=niterations, seed=seed, **kw)
     best_eq = str(model.get_best()["equation"])
     print(f"    best: {best_eq}")
-    model.equations_.to_csv(prefix.with_suffix(".csv"), index=False)
+
+    # Count pos/neg points separately
+    n_pos = int((len(y) + 1) // 2)
+    n_neg = int(len(y) // 2)
 
     if mode == "carry":
-        r2 = _plot_carry(grid, model, key, prefix.with_suffix(".png"), r2_threshold)
+        r2 = _plot_carry(
+            grid,
+            model,
+            key,
+            prefix.with_suffix(".png"),
+            r2_threshold,
+            n_pos=n_pos,
+            n_neg=n_neg,
+        )
     else:
-        r2 = _plot_generic(X, y, model, key, names, prefix.with_suffix(".png"), r2_threshold)
+        # Build semantic arithmetic x-axis values from dataset metadata.
+        x_plot = np.array([
+            ex.meta["a_pos"] if i % 2 == 0 else ex.meta["a_neg"]
+            for i, ex in enumerate(examples)
+        ], dtype=float)
 
-    record = {"feature": key, "mode": mode, "variables": names, "n_points": int(len(y)),
-              "best_equation": best_eq, "r2": _r2_or_none(r2),
-              "plotted": bool(not np.isnan(r2) and r2 >= r2_threshold)}
+        r2 = _plot_generic(
+            x_plot,
+            y,
+            model,
+            key,
+            names,
+            prefix.with_suffix(".png"),
+            r2_threshold,
+            n_pos=n_pos,
+            n_neg=n_neg,
+        )
 
-    with prefix.with_suffix(".json").open("w") as f:
-        json.dump(record, f, indent=2)
+    # Convert PySR equations table into JSON-safe plain Python objects.
+    equations_table = []
+    for row in model.equations_.to_dict(orient="records"):
+        clean_row = {}
+        for k, v in row.items():
+            try:
+                import numpy as _np
+                import sympy as _sp
+
+                if isinstance(v, (_np.floating, float)):
+                    clean_row[k] = float(v)
+                elif isinstance(v, (_np.integer, int)):
+                    clean_row[k] = int(v)
+                elif isinstance(v, (_sp.Basic,)):
+                    clean_row[k] = str(v)
+                else:
+                    clean_row[k] = str(v) if not isinstance(v, (str, bool, type(None))) else v
+            except Exception:
+                clean_row[k] = str(v)
+
+        equations_table.append(clean_row)
+
+    record = {
+        "feature": key,
+        "mode": mode,
+        "variables": names,
+        "n_points": int(len(y)),
+        "n_pos": n_pos,
+        "n_neg": n_neg,
+        "best_equation": str(best_eq),
+        "r2": _r2_or_none(r2),
+        "plotted": bool(not np.isnan(r2) and r2 >= r2_threshold),
+        "equations_table": equations_table,
+    }
+
     return record
 
 

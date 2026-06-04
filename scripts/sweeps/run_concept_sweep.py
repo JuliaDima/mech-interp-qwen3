@@ -129,6 +129,24 @@ def _build_inputs(model, pairs, anchor_mode, anchor_factory, max_pairs):
     return inputs, np.array(pos_mask, dtype=bool), prompts
 
 
+def _acts_to_grid(acts: np.ndarray, pairs) -> np.ndarray:
+    """Mean activation per (ones(a), ones(b)) cell for paired carry examples."""
+    sums = np.zeros((10, 10), dtype=np.float64)
+    counts = np.zeros((10, 10), dtype=np.int64)
+    for pair_i, pair in enumerate(pairs):
+        for is_pos, act_idx in ((True, 2 * pair_i), (False, 2 * pair_i + 1)):
+            if act_idx >= len(acts):
+                continue
+            a = pair.meta["a_pos"] if is_pos else pair.meta["a_neg"]
+            b = pair.meta["b_pos"] if is_pos else pair.meta["b_neg"]
+            sums[a % 10, b % 10] += acts[act_idx]
+            counts[a % 10, b % 10] += 1
+    grid = np.full((10, 10), np.nan, dtype=np.float32)
+    mask = counts > 0
+    grid[mask] = (sums[mask] / counts[mask]).astype(np.float32)
+    return grid
+
+
 @torch.no_grad()
 def sweep_all_features(
     model,
@@ -138,6 +156,7 @@ def sweep_all_features(
     anchor_factory=None,
     top_k: int = 200,
     max_pairs: int = 200,
+    save_all_features_dir: Path | None = None,
 ) -> tuple[
     list[tuple[int, int, float, float]], dict[tuple[int, int], np.ndarray], np.ndarray, list[str]
 ]:
@@ -175,17 +194,48 @@ def sweep_all_features(
             log.warning("No transcoder at layer %d — skipping", layer)
             continue
 
-        top_feats = score_and_rank(acts_np, pos_mask, top_k=top_k)
+        neg_mask = ~pos_mask
+        scores = acts_np[pos_mask].mean(axis=0) - acts_np[neg_mask].mean(axis=0)
+        active = acts_np > 0
+        any_active = active.any(axis=0)
+        eligible = np.where(any_active)[0]
+
+        cm = pos_mask[:, None]
+        ncm = neg_mask[:, None]
+        inter_c = (active & cm).sum(axis=0).astype(np.float32)
+        union_c = (active | cm).sum(axis=0).astype(np.float32)
+        jac_c = np.where(union_c > 0, inter_c / union_c, 0.0)
+        inter_nc = (active & ncm).sum(axis=0).astype(np.float32)
+        union_nc = (active | ncm).sum(axis=0).astype(np.float32)
+        jac_nc = np.where(union_nc > 0, inter_nc / union_nc, 0.0)
+        jaccards = np.where(scores >= 0, jac_c, jac_nc)
+        combined = jaccards * np.abs(scores)
+
+        top_idx = eligible[np.argsort(combined[eligible])[::-1][:top_k]]
+        top_feats = [(int(f), float(scores[f]), float(jaccards[f])) for f in top_idx]
         for feat_id, score, jaccard in top_feats:
             ranked.append((layer, feat_id, score, jaccard))
             acts_1d[(layer, feat_id)] = acts_np[:, feat_id]
 
-        if top_feats:
+        if save_all_features_dir is not None:
+            save_all_features_dir.mkdir(parents=True, exist_ok=True)
+            grids = np.stack([_acts_to_grid(acts_np[:, feat_id], pairs[: len(pos_mask) // 2]) for feat_id in eligible])
+            np.savez_compressed(
+                save_all_features_dir / f"layer_{layer:02d}_all_feature_grids.npz",
+                feat_ids=eligible.astype(np.int32),
+                grids=grids.astype(np.float32),
+                scores=scores[eligible].astype(np.float32),
+                jaccards=jaccards[eligible].astype(np.float32),
+                combined=combined[eligible].astype(np.float32),
+            )
+
+        if len(top_feats):
             top_score = max(top_feats, key=lambda x: abs(x[1]))[1]
             log.info(
-                "Layer %2d  d_tc=%d  top_k=%d  top |score|=%.4f",
+                "Layer %2d  d_tc=%d  active=%d  top_k=%d  top |score|=%.4f",
                 layer,
                 acts_np.shape[1],
+                len(eligible),
                 len(top_feats),
                 abs(top_score),
             )
@@ -211,10 +261,12 @@ def main() -> None:
         help="Anchor mode — uses dataset's first ANCHOR_MODE if not set, else 'delimiter'",
     )
     parser.add_argument("--n", type=int, default=100, help="Pairs per template to load")
-    parser.add_argument("--template", default=None,
-                        help="Restrict to one template (e.g. T0). Default: all templates.")
+    parser.add_argument("--template", default="T0",
+                        help="Single template to sweep. Per-anchor sweeps must not mix templates.")
     parser.add_argument("--max_pairs", type=int, default=200)
     parser.add_argument("--top_k", type=int, default=200, help="Top features to select per layer")
+    parser.add_argument("--save_all_features", action="store_true",
+                        help="Save every non-zero feature's 10x10 carry grid per layer")
     parser.add_argument(
         "--top_per_layer", type=int, default=5, help="Top features to display per layer"
     )
@@ -252,11 +304,15 @@ def main() -> None:
     log.info("Loading dataset for %s (%d pairs/template)", args.concept, args.n)
     pairs = _load_concept(args.concept, args.n, args.seed)
     random.Random(args.seed).shuffle(pairs)
-    if args.template:
-        pairs = [p for p in pairs if p.template == args.template]
-        log.info("Filtered to template %s: %d pairs", args.template, len(pairs))
-    else:
-        log.info("Loaded %d pairs", len(pairs))
+    template = args.template
+    if template is None:
+        raise ValueError("run_concept_sweep must use a single template; use --template T0/T1/T2")
+    pairs = [p for p in pairs if p.template == template]
+    log.info(
+        "Filtered to template %s: %d pairs. Multi-template data is only for run_concept/causal plots.",
+        template,
+        len(pairs),
+    )
 
     ranked, acts_1d, pos_mask, prompts = sweep_all_features(
         model,
@@ -266,6 +322,7 @@ def main() -> None:
         anchor_factory=anchor_factory,
         top_k=args.top_k,
         max_pairs=args.max_pairs,
+        save_all_features_dir=(out_dir / "all_feature_grids") if args.save_all_features else None,
     )
 
     ranked_path = out_dir / "sweep_ranked.json"
@@ -288,6 +345,8 @@ def main() -> None:
         **{f"L{layer}_F{feat_id}": acts for (layer, feat_id), acts in acts_1d.items()},
     )
     log.info("Saved %d feature activations → %s", len(acts_1d), activations_path)
+    if args.save_all_features:
+        log.info("Saved all non-zero feature grids → %s", out_dir / "all_feature_grids")
 
     # Save example metadata for alignment with theoretical analysis
     import pickle

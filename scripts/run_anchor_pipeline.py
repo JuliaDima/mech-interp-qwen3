@@ -135,6 +135,7 @@ def main() -> None:
         "--k", str(args.null_k),
         "--real_deltas", str(deltas_path),
         "--out_dir", str(null_dir),
+        "--template", "T0",
     ])
 
     # ── Stage 3: transcoder sweep at peak ±2 layers ───────────────────────
@@ -147,7 +148,7 @@ def main() -> None:
 
     sweep_dir = out_dir / "sweep"
     sweep_dir.mkdir(parents=True, exist_ok=True)
-    _run([
+    sweep_cmd = [
         sys.executable,
         str(_REPO_ROOT / "scripts" / "sweeps" / "run_concept_sweep.py"),
         "--concept", args.concept,
@@ -155,7 +156,11 @@ def main() -> None:
         "--anchor", str(args.anchor_pos),
         "--top_k", str(args.sweep_top_k),
         "--out_dir", str(sweep_dir),
-    ])
+    ]
+    # Per-anchor sweeps must use one template because anchor positions are
+    # template-specific. Multi-template data is only for run_concept/causal plots.
+    sweep_cmd += ["--template", "T0"]
+    _run(sweep_cmd)
 
     # ── Stage 4: cluster analysis ─────────────────────────────────────────
     log.info("=== Stage 4: cluster analysis ===")
