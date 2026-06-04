@@ -7,7 +7,7 @@ For each concept, computes what fraction of top-k features are "well-localized":
 A feature is well-localized if ≥threshold% of examples match the expected pattern.
 
 Usage:
-    python scripts/compute_localization_metric.py --top_k 200 --consistency_threshold 50
+    python scripts/sweeps/compute_localization_metric.py --top_k 200 --consistency_threshold 50
 """
 
 from __future__ import annotations
@@ -19,20 +19,65 @@ from pathlib import Path
 
 import numpy as np
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
+_BASE = _REPO_ROOT / "runs" / "concept_localization"
 
 import matplotlib.pyplot as plt
 
 import experiments.plot_style as ps
 from scripts.sweeps.run_concept_sweep import CONCEPTS
 
+def _localization_for_sweep(
+    sweep_dir: Path, top_k: int, consistency_threshold: float
+) -> dict | None:
+    """Compute localization for a single anchor sweep dir. Returns None on failure."""
+    ranked_path = sweep_dir / "sweep_ranked.json"
+    activations_path = sweep_dir / "sweep_activations.npz"
+    if not ranked_path.exists() or not activations_path.exists():
+        return None
+    try:
+        with open(ranked_path) as f:
+            ranked = json.load(f)
+        acts_file = np.load(activations_path)
+        pos_mask = acts_file["pos_mask"]
+
+        concept_localized_count = 0
+        anti_localized_count = 0
+        for feat_info in ranked[:top_k]:
+            key = f"L{feat_info['layer']}_F{feat_info['feat_id']}"
+            if key not in acts_file:
+                continue
+            acts = acts_file[key]
+            acts_pos = acts[pos_mask]
+            acts_neg = acts[~pos_mask]
+            threshold = (acts_pos.mean() + acts_neg.mean()) / 2.0
+
+            pct_pos_high = 100.0 * (acts_pos > threshold).mean()
+            pct_neg_low = 100.0 * (acts_neg <= threshold).mean()
+            if pct_pos_high >= consistency_threshold and pct_neg_low >= consistency_threshold:
+                concept_localized_count += 1
+
+            pct_neg_high = 100.0 * (acts_neg > threshold).mean()
+            pct_pos_low = 100.0 * (acts_pos <= threshold).mean()
+            if pct_neg_high >= consistency_threshold and pct_pos_low >= consistency_threshold:
+                anti_localized_count += 1
+
+        n_features = min(top_k, len(ranked))
+        return {
+            "concept_localized": 100.0 * concept_localized_count / max(n_features, 1),
+            "anti_localized": 100.0 * anti_localized_count / max(n_features, 1),
+            "n_features": n_features,
+        }
+    except Exception:
+        return None
+
 
 def compute_concept_localization(
     concept: str, top_k: int = 200, consistency_threshold: float = 50.0
 ) -> dict:
-    """Compute localization metrics for a concept.
+    """Compute localization metrics for a concept, averaged across all anchor sweeps.
 
     Returns:
         {
@@ -43,93 +88,38 @@ def compute_concept_localization(
             "error": str or None
         }
     """
-    sweep_dir = Path(f"runs/concept_localization/{concept}")
-    ranked_path = sweep_dir / "sweep_ranked.json"
-    activations_path = sweep_dir / "sweep_activations.npz"
+    concept_dir = _BASE / concept
+    sweep_dirs = sorted(concept_dir.glob("anchor_rank*/sweep"))
 
-    if not ranked_path.exists():
+    if not sweep_dirs:
         return {
             "concept": concept,
             "n_features": 0,
             "concept_localized": None,
             "anti_localized": None,
-            "error": f"Sweep results not found in {sweep_dir}",
+            "error": f"Sweep results not found in {concept_dir}",
         }
 
-    # Load ranked features
-    with open(ranked_path) as f:
-        ranked = json.load(f)
+    anchor_results = [
+        r for sd in sweep_dirs if (r := _localization_for_sweep(sd, top_k, consistency_threshold)) is not None
+    ]
 
-    # Check if activations are saved
-    if not activations_path.exists():
+    if not anchor_results:
         return {
             "concept": concept,
             "n_features": 0,
             "concept_localized": None,
             "anti_localized": None,
-            "error": f"Activations not saved in {sweep_dir} (run sweep with updated script)",
+            "error": f"No valid sweep data found in {concept_dir}",
         }
 
-    try:
-        # Load pre-computed activations
-        acts_file = np.load(activations_path)
-        pos_mask = acts_file["pos_mask"]
-
-        # Compute metrics for top-k features
-        concept_localized_count = 0
-        anti_localized_count = 0
-
-        for feat_info in ranked[:top_k]:
-            layer = feat_info["layer"]
-            feat_id = feat_info["feat_id"]
-            key = f"L{layer}_F{feat_id}"
-
-            if key not in acts_file:
-                continue
-
-            acts = acts_file[key]
-
-            # Split by pos/neg
-            acts_pos = acts[pos_mask]
-            acts_neg = acts[~pos_mask]
-
-            # Compute threshold: midpoint between class means
-            mean_pos = acts_pos.mean()
-            mean_neg = acts_neg.mean()
-            threshold = (mean_pos + mean_neg) / 2.0
-
-            # Concept-localized: high on pos, low on neg
-            pct_pos_high = 100.0 * (acts_pos > threshold).mean()
-            pct_neg_low = 100.0 * (acts_neg <= threshold).mean()
-            if pct_pos_high >= consistency_threshold and pct_neg_low >= consistency_threshold:
-                concept_localized_count += 1
-
-            # Anti-localized: high on neg, low on pos
-            pct_neg_high = 100.0 * (acts_neg > threshold).mean()
-            pct_pos_low = 100.0 * (acts_pos <= threshold).mean()
-            if pct_neg_high >= consistency_threshold and pct_pos_low >= consistency_threshold:
-                anti_localized_count += 1
-
-        n_features = min(top_k, len(ranked))
-        concept_pct = 100.0 * concept_localized_count / max(n_features, 1)
-        anti_pct = 100.0 * anti_localized_count / max(n_features, 1)
-
-        return {
-            "concept": concept,
-            "n_features": n_features,
-            "concept_localized": concept_pct,
-            "anti_localized": anti_pct,
-            "error": None,
-        }
-
-    except Exception as e:
-        return {
-            "concept": concept,
-            "n_features": 0,
-            "concept_localized": None,
-            "anti_localized": None,
-            "error": str(e)[:100],
-        }
+    return {
+        "concept": concept,
+        "n_features": int(np.mean([r["n_features"] for r in anchor_results])),
+        "concept_localized": float(np.mean([r["concept_localized"] for r in anchor_results])),
+        "anti_localized": float(np.mean([r["anti_localized"] for r in anchor_results])),
+        "error": None,
+    }
 
 
 def main():
