@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, NamedTuple
 
 import torch
@@ -296,6 +297,8 @@ class Graph:
             "activation_values": self.activation_values,
             "scan": self.scan,
         }
+        # Ensure parent directories exist
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
         torch.save(d, path)
 
     @staticmethod
