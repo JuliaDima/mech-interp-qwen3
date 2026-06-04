@@ -27,8 +27,8 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 sys.path.insert(0, str(_REPO_ROOT / "src"))
 
+from experiments.concept_localization.analyze import project_onto_E_dec
 from experiments.plot_style import apply
-from mechinterp_qwen3.transcoder.single_layer_transcoder import load_relu_transcoder
 
 _TRANSCODER_SET = "mwhanna/qwen3-4b-transcoders"
 
@@ -53,28 +53,14 @@ def main() -> None:
     cache = Path.home() / ".cache" / "mechinterp_qwen3" / args.transcoder_set
 
     raw = torch.load(str(run_dir / "deltas.pt"), map_location="cpu")
-    all_deltas: dict[int, torch.Tensor] = raw["all"]
+    projections = project_onto_E_dec(raw["all"], cache, top_k=args.top_k)
 
-    # ── Compute top-k features per layer using E_dec projections ──────────────
     all_layers, all_fids, all_cos = [], [], []
-    for layer in sorted(all_deltas.keys()):
-        tc_path = cache / f"layer_{layer}.safetensors"
-        if not tc_path.exists():
-            continue
-        tc = load_relu_transcoder(str(tc_path), layer=layer, lazy_encoder=True, lazy_decoder=False)
-        W_dec = tc.W_dec.detach().float()
-        delta = all_deltas[layer].float()
-        delta_norm = delta.norm()
-        if delta_norm < 1e-8:
-            continue
-        dec_norms = W_dec.norm(dim=1).clamp(min=1e-8)
-        cos_sim = (W_dec @ delta) / (dec_norms * delta_norm)
-        k = min(args.top_k, cos_sim.numel())
-        _, topk_ids = cos_sim.abs().topk(k)
-        for i in range(k):
+    for layer, matches in projections.items():
+        for m in matches:
             all_layers.append(layer)
-            all_fids.append(int(topk_ids[i].item()))
-            all_cos.append(float(cos_sim[topk_ids[i]].item()))
+            all_fids.append(m.feature_id)
+            all_cos.append(m.cos_sim)
 
     all_layers = np.array(all_layers)
     all_fids = np.array(all_fids)

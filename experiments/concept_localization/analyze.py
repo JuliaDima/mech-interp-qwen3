@@ -4,8 +4,8 @@ Two analyses:
   1. Sharpness — norm trajectory, inter-layer cosine similarity, peak layer,
      sharpness index (fraction of total norm concentrated near the peak).
   2. Feature projection — project the aggregate delta onto each layer's
-     transcoder encoder directions (W_enc rows) to identify which features
-     constitute the concept direction.
+     transcoder decoder directions (E_dec = normalised W_dec rows) to identify
+     which features write the concept direction into the residual stream.
   3. Template consistency — cross-template delta cosine similarity at each
      layer, validating that the carry direction is template-invariant.
 """
@@ -43,8 +43,8 @@ class SharpnessResult:
 @dataclass
 class FeatureMatch:
     feature_id: int
-    projection: float  # ‖δ_l‖ · cos_sim(δ_l, W_enc_f)
-    cos_sim: float  # cos_sim(δ_l, W_enc_f) — pure directional alignment in [-1, 1]
+    projection: float  # ‖δ_l‖ · cos_sim(δ_l, E_dec_f)
+    cos_sim: float  # cos_sim(δ_l, E_dec_f) — pure directional alignment in [-1, 1]
     layer: int
 
 
@@ -110,40 +110,34 @@ def compute_template_consistency(
     return consistency
 
 
-def project_onto_features(
+def project_onto_E_dec_model(
     model,
-    ld: LayerDeltas,
+    deltas: dict[int, torch.Tensor],
     top_k: int = 15,
 ) -> dict[int, list[FeatureMatch]]:
-    """For each layer, find top-k transcoder features most aligned with the delta.
+    """E_dec projection using the already-loaded model's transcoders.
 
-    Uses the encoder input directions (W_enc rows) since those capture which
-    features "respond to" the concept direction in the residual stream.
+    Mirrors project_onto_E_dec but reads W_dec from model.transcoders[layer], so
+    callers that already hold a loaded model avoid re-reading transcoders from disk.
     """
     result: dict[int, list[FeatureMatch]] = {}
-
-    for layer in sorted(ld.delta.keys()):
+    for layer in sorted(deltas.keys()):
         try:
-            transcoder = model.transcoders[layer]
+            tc = model.transcoders[layer]
         except (IndexError, KeyError):
             continue
-        if not hasattr(transcoder, "W_enc"):
+        if not hasattr(tc, "W_dec"):
             continue
-
-        # Load W_enc once (may trigger lazy load from disk)
-        W_enc = transcoder.W_enc.detach()  # (n_features, d_model)
-        delta = ld.delta[layer].to(device=W_enc.device, dtype=W_enc.dtype)
-
+        W_dec = tc.W_dec.detach()  # (n_features, d_model)
+        delta = deltas[layer].to(device=W_dec.device, dtype=W_dec.dtype)
         delta_norm = delta.norm()
         if delta_norm < 1e-8:
             continue
-
-        enc_norms = W_enc.norm(dim=1).clamp(min=1e-8)  # (n_features,)
-        projections = (W_enc @ delta) / enc_norms  # ‖δ_l‖ · cos_sim
-        cos_sims = projections / delta_norm  # pure cos_sim in [-1, 1]
-
-        k = min(top_k, projections.numel())
-        topk_vals, topk_ids = projections.abs().topk(k)
+        dec_norms = W_dec.norm(dim=1).clamp(min=1e-8)
+        cos_sims = (W_dec @ delta) / (dec_norms * delta_norm)
+        projections = cos_sims * delta_norm
+        k = min(top_k, cos_sims.numel())
+        _, topk_ids = cos_sims.abs().topk(k)
         result[layer] = [
             FeatureMatch(
                 feature_id=int(topk_ids[i].item()),
@@ -153,12 +147,59 @@ def project_onto_features(
             )
             for i in range(k)
         ]
+    return result
 
+
+def project_onto_E_dec(
+    deltas: dict[int, torch.Tensor],
+    transcoder_cache: "Path",
+    top_k: int = 15,
+) -> dict[int, list[FeatureMatch]]:
+    """For each layer, find top-k transcoder features whose decoder direction aligns with delta.
+
+    Uses normalised decoder rows (E_dec = W_dec / ||W_dec||) — these capture which
+    features *write* in the concept direction to the residual stream.
+    Loads transcoders directly from disk; does not require a loaded model.
+    """
+    from pathlib import Path as _Path
+
+    from mechinterp_qwen3.transcoder.single_layer_transcoder import load_relu_transcoder
+
+    cache = _Path(transcoder_cache)
+    result: dict[int, list[FeatureMatch]] = {}
+
+    for layer in sorted(deltas.keys()):
+        tc_path = cache / f"layer_{layer}.safetensors"
+        if not tc_path.exists():
+            continue
+        tc = load_relu_transcoder(str(tc_path), layer=layer, lazy_encoder=True, lazy_decoder=False)
+        W_dec = tc.W_dec.detach().float()   # (n_features, d_model)
+        delta = deltas[layer].float()
+
+        delta_norm = delta.norm()
+        if delta_norm < 1e-8:
+            continue
+
+        dec_norms = W_dec.norm(dim=1).clamp(min=1e-8)
+        cos_sims = (W_dec @ delta) / (dec_norms * delta_norm)   # [-1, 1]
+        projections = cos_sims * delta_norm                      # ‖δ_l‖ · cos_sim
+
+        k = min(top_k, cos_sims.numel())
+        _, topk_ids = cos_sims.abs().topk(k)
+        result[layer] = [
+            FeatureMatch(
+                feature_id=int(topk_ids[i].item()),
+                projection=float(projections[topk_ids[i]].item()),
+                cos_sim=float(cos_sims[topk_ids[i]].item()),
+                layer=layer,
+            )
+            for i in range(k)
+        ]
         log.info(
-            "Layer %2d  top feature: id=%d  projection=%.3f",
+            "Layer %2d  top E_dec feature: id=%d  cos_sim=%.3f",
             layer,
             result[layer][0].feature_id,
-            result[layer][0].projection,
+            result[layer][0].cos_sim,
         )
 
     return result
