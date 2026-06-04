@@ -266,6 +266,7 @@ def run_null_permutation(
     real_deltas_path: Path | None = None,
     anchor_mode: str = "delimiter",
     context_keys: list[str] | None = None,
+    template: str = "T0",
     model=None,
     pairs=None,
 ) -> dict:
@@ -280,7 +281,14 @@ def run_null_permutation(
     if pairs is None:
         log.info("Loading pairs for concept '%s'  (n_per_template=%d)", concept, n_per_template)
         pairs = _load_concept(concept, n_per_template, seed)
-    log.info("Total pairs: %d", len(pairs))
+    if template is None:
+        raise ValueError("Null permutation must use a single template; use --template T0/T1/T2")
+    pairs = [p for p in pairs if p.template == template]
+    log.info(
+        "Filtered to template %s: %d pairs. Multi-template data is only for run_concept/causal plots.",
+        template,
+        len(pairs),
+    )
 
     if model is None:
         log.info("Loading model %s", model_name)
@@ -451,6 +459,8 @@ def main() -> None:
     parser.add_argument("--model",           default=_MODEL)
     parser.add_argument("--transcoder_set",  default=_TRANSCODER_SET)
     parser.add_argument("--n",    type=int,  default=100, help="Pairs per template")
+    parser.add_argument("--template", default="T0",
+                        help="Single template for per-anchor null permutation")
     parser.add_argument("--k",    type=int,  default=20,  help="Number of null permutations")
     parser.add_argument("--seed", type=int,  default=42)
     parser.add_argument("--dtype",           default="bfloat16")
@@ -538,7 +548,7 @@ def main() -> None:
         )
         shared_model.eval()
         shared_pairs = _load_concept(concept, args.n, args.seed)
-        log.info("Loaded %d pairs", len(shared_pairs))
+        log.info("Loaded %d pairs before template filtering", len(shared_pairs))
 
         # ── Loop over anchors ─────────────────────────────────────────────────
         for anchor_mode in anchor_list:
@@ -575,6 +585,7 @@ def main() -> None:
                 real_deltas_path=real_deltas,
                 anchor_mode=anchor_mode,
                 context_keys=ctx_keys,
+                template=args.template,
                 model=shared_model,
                 pairs=shared_pairs,
             )

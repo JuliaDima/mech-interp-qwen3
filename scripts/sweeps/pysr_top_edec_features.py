@@ -55,22 +55,28 @@ _MODEL = "Qwen/Qwen3-4B"
 _TRANSCODER_SET = "mwhanna/qwen3-4b-transcoders"
 
 
-def _resolve_top_edec(anchor_dir: Path, model, top_k: int) -> list[tuple[int, int]]:
+def _resolve_top_edec(anchor_dir: Path, model, top_k: int, active_features: dict[int, set[int]] | None = None) -> list[tuple[int, int]]:
     """Global top-k (layer, feat_id) by |cos_sim| from the E_dec projection.
 
-    Reads a cached edec_features.npz if present; otherwise computes it from the
-    loaded model's transcoders (no disk-cache path, no extra model run) and
-    persists it for reuse.
+    Reads a cached edec_features.npz if present and active_features is None;
+    otherwise computes it from the loaded model's transcoders, filtering for
+    features in active_features if provided, and persists it for reuse.
     """
     npz_path = anchor_dir / "edec_features.npz"
-    if npz_path.exists():
+    if active_features is None and npz_path.exists():
         d = np.load(npz_path)
         return list(zip(d["layers"].tolist(), d["feat_ids"].tolist()))
 
     raw = torch.load(str(anchor_dir / "deltas.pt"), map_location="cpu")
-    per_layer = project_onto_E_dec_model(model, raw["all"], top_k=top_k)
-    flat = [(abs(m.cos_sim), m.layer, m.feature_id, m.cos_sim)
-            for ms in per_layer.values() for m in ms]
+    # Request top-k = 1000 per layer from project_onto_E_dec_model to have enough candidates after filtering
+    per_layer = project_onto_E_dec_model(model, raw["all"], top_k=1000)
+    flat = []
+    for ms in per_layer.values():
+        for m in ms:
+            if active_features is not None:
+                if m.feature_id not in active_features.get(m.layer, set()):
+                    continue
+            flat.append((abs(m.cos_sim), m.layer, m.feature_id, m.cos_sim))
     flat.sort(reverse=True)
     top = flat[:top_k]
     np.savez(
@@ -177,23 +183,38 @@ def main() -> None:
                                                              dtype=dtype, device=device)
     model.eval()
 
-    # Projection uses the loaded model's transcoders (cached to npz for reuse)
-    features = _resolve_top_edec(anchor_dir, model, args.top_k)
-    layers = sorted({l for l, _ in features})
-    print(f"Top-{args.top_k} E_dec features: {[f'L{l}_F{f}' for l, f in features]}")
-    print(f"Concept: {args.concept}  anchor mode: {anchor_mode}  layers: {layers}")
-
     pairs = _load_concept(args.concept, args.n_pairs, args.seed)
     inputs, examples = _build_inputs_and_examples(model, pairs, anchor_mode, args.n_pairs)
     if not inputs:
         print(f"  [skip] no valid pairs for {args.concept} at anchor {anchor_mode}")
         return
-    H = collect_layer_residuals(model, inputs, layers)
+
+    # Find active features across all layers with transcoders first on a small subset of inputs to save time
+    all_layers = list(range(len(model.transcoders)))
+    print(f"Scanning active features across layers (using 40 examples): {all_layers}")
+    H_scan = collect_layer_residuals(model, inputs[:40], all_layers)
+    
+    active_features = {}
+    for layer in all_layers:
+        acts = apply_transcoder_all(model, layer, H_scan[layer])
+        active_ids = np.where(acts.max(axis=0) > 0)[0].tolist()
+        active_features[layer] = set(active_ids)
+        print(f"  Layer {layer}: {len(active_ids)} active features / {acts.shape[1]}")
+
+    # Projection uses the loaded model's transcoders and filters for active features
+    features = _resolve_top_edec(anchor_dir, model, args.top_k, active_features)
+    layers = sorted({l for l, _ in features})
+    print(f"Top-{args.top_k} active E_dec features: {[f'L{l}_F{f}' for l, f in features]}")
+    print(f"Concept: {args.concept}  anchor mode: {anchor_mode}  layers: {layers}")
+
+    # Now capture residuals for all inputs, but only at the layers containing the resolved top-k features
+    print(f"Capturing residuals for all examples at layers: {layers}")
+    H_all = collect_layer_residuals(model, inputs, layers)
 
     acts_1d: dict[str, np.ndarray] = {}
     with torch.no_grad():
         for layer in layers:
-            acts = apply_transcoder_all(model, layer, H[layer])
+            acts = apply_transcoder_all(model, layer, H_all[layer])
             for l, fid in features:
                 if l == layer:
                     acts_1d[f"L{l}_F{fid}"] = acts[:, fid].astype(np.float32)
