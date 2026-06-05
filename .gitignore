@@ -44,3 +44,7 @@ experiments/addition/filter_operand_plots.py
 experiments/concept_localization/concept_variables.py
 concept_all.txt
 outputs
+scripts/sweeps/closest_features.py
+scripts/sweeps/find_closest_all_feature_grid.py
+scripts/sweeps/fourier_feature_analysis.py
+scripts/sweeps/plot_closest_all_feature_grids.py

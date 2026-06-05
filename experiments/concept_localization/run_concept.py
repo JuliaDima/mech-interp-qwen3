@@ -59,12 +59,6 @@ from experiments.concept_localization.plot_anchor_analysis import (
     load_emergence,
     top_k_anchors,
 )
-from experiments.concept_localization.plot_localisation import plot_cross_layer_sim_data
-from experiments.concept_localization.visualize import (
-    plot_causal_overlay,
-    plot_causal_scores,
-    plot_feature_projections,
-)
 from mechinterp_qwen3.attribution_model import AttributionModel
 from mechinterp_qwen3.utils.hf_utils import load_transcoder_from_hub
 from mechinterp_qwen3.utils.model_utils import get_default_device, parse_dtype
@@ -349,6 +343,10 @@ def _run_single(args, base_subdir: str | None = None) -> None:
             out_dir = Path(args.out_dir)
         elif base_subdir:
             out_dir = Path(f"runs/concept_localization/{base_subdir}/{args.concept}{suffix}")
+        elif args.template:
+            out_dir = Path(
+                f"runs/concept_localization/{args.concept}/{args.concept}_{args.template}{suffix}"
+            )
         else:
             out_dir = Path(f"runs/concept_localization/{args.concept}{suffix}")
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -489,32 +487,10 @@ def _run_single(args, base_subdir: str | None = None) -> None:
         )
         log.info("Saved delta tensors → %s", deltas_path)
 
-        # ── 8. Plots ──────────────────────────────────────────────────────────
-        if projections:
-            plot_feature_projections(
-                projections,
-                out_dir / "feature_projections_scatter.png",
-                top_k=args.top_k,
-                concept=args.concept,
-            )
-            log.info("Saved feature projection plots")
-
-        if causal is not None:
-            plot_causal_scores(
-                causal,
-                delta_norms_raw,
-                out_dir / "causal_scores.png",
-                concept=args.concept,
-                mean_act_norms=mean_act_norms or None,
-            )
-            plot_causal_overlay(
-                causal,
-                delta_norms_raw,
-                out_dir / "causal_overlay.png",
-                concept=args.concept,
-                mean_act_norms=mean_act_norms or None,
-            )
-            log.info("Saved causal plots")
+        # Individual non-null diagnostic plots are intentionally not saved here.
+        # run_anchor_pipeline.py writes the combined anchor_layer_summary_<template>.png
+        # after the null stage, so feature projection, layer-cosine, delta trajectory,
+        # and causal overlay live together on aligned layer axes.
 
         log.info("Done for anchor '%s'. Outputs in %s", anchor_mode, out_dir)
 

@@ -55,38 +55,23 @@ _MODEL = "Qwen/Qwen3-4B"
 _TRANSCODER_SET = "mwhanna/qwen3-4b-transcoders"
 
 
-def _resolve_top_edec(anchor_dir: Path, model, top_k: int, active_features: dict[int, set[int]] | None = None) -> list[tuple[int, int]]:
+def _resolve_top_edec(anchor_dir: Path, model, top_k: int, active_features: dict[int, set[int]]) -> tuple[list[tuple[int, int]], list[float]]:
     """Global top-k (layer, feat_id) by |cos_sim| from the E_dec projection.
 
-    Reads a cached edec_features.npz if present and active_features is None;
-    otherwise computes it from the loaded model's transcoders, filtering for
-    features in active_features if provided, and persists it for reuse.
+    Restricted to features that fired on at least one scan example (active_features),
+    then ranked purely by |cos_sim| with the concept delta.
     """
-    npz_path = anchor_dir / "edec_features.npz"
-    if active_features is None and npz_path.exists():
-        d = np.load(npz_path)
-        return list(zip(d["layers"].tolist(), d["feat_ids"].tolist()))
-
     raw = torch.load(str(anchor_dir / "deltas.pt"), map_location="cpu")
-    # Request top-k = 1000 per layer from project_onto_E_dec_model to have enough candidates after filtering
     per_layer = project_onto_E_dec_model(model, raw["all"], top_k=1000)
     flat = []
     for ms in per_layer.values():
         for m in ms:
-            if active_features is not None:
-                if m.feature_id not in active_features.get(m.layer, set()):
-                    continue
+            if m.feature_id not in active_features.get(m.layer, set()):
+                continue
             flat.append((abs(m.cos_sim), m.layer, m.feature_id, m.cos_sim))
     flat.sort(reverse=True)
     top = flat[:top_k]
-    np.savez(
-        npz_path,
-        layers=np.array([l for _, l, _, _ in top], dtype=np.int32),
-        feat_ids=np.array([f for _, _, f, _ in top], dtype=np.int64),
-        cos_sims=np.array([c for _, _, _, c in top], dtype=np.float32),
-    )
-    print(f"Saved top-{top_k} E_dec features → {npz_path}")
-    return [(l, f) for _, l, f, _ in top]
+    return [(l, f) for _, l, f, _ in top], [c for _, _, _, c in top]
 
 
 def _build_inputs_and_examples(model, pairs, anchor_mode, max_pairs):
@@ -140,8 +125,11 @@ def _plot_topk_grid(features, cos_sims, npz, examples, out_path, ncols=5):
         ax = axes[idx // ncols][idx % ncols]
         ax.imshow(grid.T, origin="lower", aspect="equal", cmap=cmap, vmin=0, vmax=1)
         ax.set_title(rf"$L^{{{l}}}_{{{fid}}}$  cs={cs:+.2f}", fontsize=8)
-        ax.set_xticks(range(0, 10, 3)); ax.set_yticks(range(0, 10, 3))
-        ax.tick_params(length=0, labelsize=6)
+        ax.set_xticks(range(10))
+        ax.set_yticks(range(10))
+        ax.set_xlabel("a", fontsize=7, labelpad=1)
+        ax.set_ylabel("b", fontsize=7, labelpad=1)
+        ax.tick_params(length=0, labelsize=5.5)
         for sp in ax.spines.values():
             sp.set_color(ps.GRAY)
     for idx in range(n, nrows * ncols):
@@ -163,7 +151,7 @@ def main() -> None:
     ap.add_argument("--top_k", type=int, default=15)
     ap.add_argument("--n_pairs", type=int, default=200)
     ap.add_argument("--niterations", type=int, default=40)
-    ap.add_argument("--r2_threshold", type=float, default=0.5)
+    ap.add_argument("--r2_threshold", type=float, default=0.0)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--dtype", default="bfloat16")
     args = ap.parse_args()
@@ -189,11 +177,11 @@ def main() -> None:
         print(f"  [skip] no valid pairs for {args.concept} at anchor {anchor_mode}")
         return
 
-    # Find active features across all layers with transcoders first on a small subset of inputs to save time
+    # Find features that fire on any of the scan examples, then rank by cos_sim with the concept delta.
     all_layers = list(range(len(model.transcoders)))
     print(f"Scanning active features across layers (using 40 examples): {all_layers}")
     H_scan = collect_layer_residuals(model, inputs[:40], all_layers)
-    
+
     active_features = {}
     for layer in all_layers:
         acts = apply_transcoder_all(model, layer, H_scan[layer])
@@ -201,8 +189,7 @@ def main() -> None:
         active_features[layer] = set(active_ids)
         print(f"  Layer {layer}: {len(active_ids)} active features / {acts.shape[1]}")
 
-    # Projection uses the loaded model's transcoders and filters for active features
-    features = _resolve_top_edec(anchor_dir, model, args.top_k, active_features)
+    features, cos_sims = _resolve_top_edec(anchor_dir, model, args.top_k, active_features)
     layers = sorted({l for l, _ in features})
     print(f"Top-{args.top_k} active E_dec features: {[f'L{l}_F{f}' for l, f in features]}")
     print(f"Concept: {args.concept}  anchor mode: {anchor_mode}  layers: {layers}")
@@ -234,20 +221,19 @@ def main() -> None:
 
     # Overview grid of all top-k actual activations (carry mode; ungated by R²)
     if mode == "carry":
-        cos_sims = np.load(anchor_dir / "edec_features.npz")["cos_sims"].tolist()
         _plot_topk_grid(features, cos_sims, npz, examples,
-                        out_dir / "edec_topk_grid.pdf")
+                        edec_dir / "edec_topk_grid.pdf")
 
     results = []
     for l, fid in features:
-        r = fit_feature(f"L{l}_F{fid}", npz, examples, mode, out_dir,
+        r = fit_feature(f"L{l}_F{fid}", npz, examples, mode, edec_dir,
                         niterations=args.niterations, r2_threshold=args.r2_threshold)
         if r:
             results.append(r)
 
-    with (out_dir / "pysr_edec_summary.json").open("w") as f:
+    with (edec_dir / "pysr_edec_summary.json").open("w") as f:
         json.dump(results, f, indent=2)
-    print(f"PySR E_dec summary → {out_dir / 'pysr_edec_summary.json'}")
+    print(f"PySR E_dec summary → {edec_dir / 'pysr_edec_summary.json'}")
 
 
 if __name__ == "__main__":

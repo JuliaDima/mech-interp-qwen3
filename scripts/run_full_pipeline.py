@@ -15,8 +15,8 @@ Phase B  (model, per anchor in top-k)
     7. peak-feature plot → sweep/top_features_peak_layers.png
     8. PySR (optional)   → sweep/cluster_analysis_T0/pysr_*.{csv,json,png}
 
-Phase C  (no model)
-    9. plot_localisation → cross_layer_sim.pdf, template_consistency.pdf
+Phase C
+    Per-anchor layer summaries are produced during Phase B.
 
 Usage
 -----
@@ -78,6 +78,8 @@ def main() -> None:
                         help="Concept name (must be registered in run_concept.py)")
     parser.add_argument("--k", type=int, default=6,
                         help="Number of top anchors to process")
+    parser.add_argument("--template", default="T0",
+                        help="Single template for per-anchor analyses")
 
     # make_gif options
     parser.add_argument("--skip_gif", action="store_true",
@@ -129,6 +131,7 @@ def main() -> None:
             "--transcoder_set", args.transcoder_set,
             "--dtype", args.dtype,
             "--seed", str(args.seed),
+            "--template", args.template,
         ])
 
     log.info("=== Phase A-2: emergence_per_anchor ===")
@@ -167,6 +170,7 @@ def main() -> None:
             "--concept", args.concept,
             "--anchor_pos", str(anchor_pos),
             "--anchor_rank", str(rank),
+            "--template", args.template,
             "--n", str(args.n),
             "--top_k", str(args.top_k),
             "--sweep_top_k", str(args.sweep_top_k),
@@ -183,12 +187,9 @@ def main() -> None:
 
     # ── Phase C: cross-concept plots ──────────────────────────────────────────
 
-    log.info("=== Phase C: plot_localisation ===")
-    _run_nofail([
-        sys.executable, "-m",
-        "experiments.concept_localization.plot_localisation",
-        "--concept", args.concept,
-    ], "plot_localisation")
+    # Per-anchor layer diagnostics are saved by run_anchor_pipeline.py as a single
+    # combined anchor_layer_summary_<template>.png.  Do not regenerate individual
+    # cross_layer_sim.png files here.
 
     log.info("Full pipeline complete for concept '%s'. Outputs in %s", args.concept, concept_dir)
 

@@ -82,6 +82,24 @@ def _concept_phases(concept: str, template: str = "T0") -> list[int]:
     return [int(x) for x in db.get(concept, {}).get(template, [])]
 
 
+
+
+def _concept_run_dir(concept: str, template: str = "T0") -> Path:
+    """Directory containing per-anchor runs for a concept/template."""
+    base = _RUNS / concept
+    if "/" in concept or base.name.endswith(f"_{template}"):
+        return base
+    templated = base / f"{concept}_{template}"
+    return templated if templated.exists() else base
+
+
+def _concept_root_dir(concept: str) -> Path:
+    """Top-level concept directory for aggregate/mixed-template comparison plots."""
+    if "/" in concept:
+        return _RUNS / concept.split("/", 1)[0]
+    return _RUNS / concept
+
+
 def _load(concept_dir: Path):
     results_path = concept_dir / "results.json"
     deltas_path = concept_dir / "deltas.pt"
@@ -165,8 +183,8 @@ def _plot_cross_layer_sim_core(
     print(f"  Saved {out_path}")
 
 
-def plot_cross_layer_sim(concept: str) -> None:
-    out_dir = _RUNS / concept
+def plot_cross_layer_sim(concept: str, template: str = "T0") -> None:
+    out_dir = _concept_run_dir(concept, template)
     res, deltas = _load(out_dir)
     if res is None:
         print(f"  [skip] {concept}: no data")
@@ -180,10 +198,10 @@ def plot_cross_layer_sim(concept: str) -> None:
     )
 
 
-def plot_cross_layer_sim_per_anchor(concept: str) -> None:
+def plot_cross_layer_sim_per_anchor(concept: str, template: str = "T0") -> None:
     """Plot cross-layer cosine similarity for every anchor_rank*_pos* directory."""
     import re as _re
-    concept_dir = _RUNS / concept
+    concept_dir = _concept_run_dir(concept, template)
     anchor_dirs = sorted(concept_dir.glob("anchor_rank*_pos*"))
     if not anchor_dirs:
         print(f"  [skip] {concept}: no per-anchor directories")
@@ -222,7 +240,7 @@ def plot_cross_layer_sim_data(
 
 
 def plot_template_consistency(concept: str) -> None:
-    out_dir = _RUNS / concept
+    out_dir = _concept_root_dir(concept)
     res, deltas = _load(out_dir)
     if res is None:
         print(f"  [skip] {concept}: no data")
@@ -399,7 +417,9 @@ def plot_cross_layer_sim_grid(concepts: list[str], ncols: int = 6) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    ap.add_argument("--concept", default="carry", help="Concept name, 'all', or 'symbolic'")
+    ap.add_argument("--concept", default="carry", help="Concept name/path, 'all', or 'symbolic'")
+    ap.add_argument("--template", default="T0",
+                    help="Template-specific run dir to use for per-anchor plots")
     ap.add_argument("--runs_dir", default=None, help="Override runs directory")
     ap.add_argument(
         "--heatmaps",
@@ -433,7 +453,7 @@ def main() -> None:
 
     for concept in concepts:
         print(f"— {concept}")
-        plot_cross_layer_sim_per_anchor(concept)
+        plot_cross_layer_sim_per_anchor(concept, template=args.template)
         plot_template_consistency(concept)
 
 

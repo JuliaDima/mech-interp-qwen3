@@ -7,7 +7,9 @@ from transformers import AutoTokenizer
 
 
 def add_graph_metadata(graph_metadata, path):
-    assert os.path.exists(os.path.dirname(path)), f"Could not find {os.path.dirname(path)}"
+    parent = os.path.dirname(path)
+    if parent:
+        assert os.path.exists(parent), f"Could not find {parent}"
     if os.path.isdir(path):
         path = os.path.join(path, "graph-metadata.json")
 
