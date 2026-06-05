@@ -1,195 +1,456 @@
 \chapter{Concept Localisation via Contrastive Residual-Stream Analysis}
 \label{sec:concept_localisation}
 
+This chapter describes the contrastive localisation pipeline used to identify where
+arithmetic and symbolic concepts are represented inside Qwen3. The aim is not only
+to find a layer at which a concept is linearly separable, but also to connect that
+separation to sparse transcoder features and to causal effects on the model's
+answer. The method therefore combines four views of the same object: residual-stream
+deltas, feature-decoder alignment, activation patterns over structured datasets,
+and intervention scores.
+
 \section{Contrastive Pair Construction}
 \label{sec:concept_pairs}
 
-% TODO: Explain contrastive prompts, and contrastive datasets, and why using constrastive pairs would help us find abstract concepts related to mathematical algos.
-% TODO: Explain the datasets (carry, gcd, residue class), and write a table, and maybe plot the datasets (and some modular plots on the gcd/residue class datasets, to see
-% how data is distributed). Explain templates too (and what they mean, T0- mathy, T1- wordy, T2-question like).
-...
-The templates differ in whitespace and surface phrasing. Repeating the extraction across all
-three provides a check on whether the extracted direction reflects the model's carry
-representation or a pattern tied to one specific tokenisation.
+Each concept is represented by a set of matched prompt pairs
+\((x_i^+, x_i^-)\). The positive prompt contains the target property and the
+negative prompt differs in the smallest controlled way that removes it. Matching is
+important: if the two prompts differed in many incidental details, the mean residual
+stream difference would mostly recover those nuisance changes rather than the
+concept. The contrastive design attempts to hold syntax, length, operand scale, and
+answer format fixed while changing the mathematical property of interest.
+
+For the carry dataset, a positive example is an addition problem whose units digits
+cross a carry boundary, while the negative example is chosen so that no carry is
+required. For example, a pair may contrast
+\[
+\texttt{calc: 631+349=} \qquad \text{with} \qquad
+\texttt{calc: 638+556=},
+\]
+where the exact operands are sampled from the dataset generator. For greatest common
+divisor and residue-class datasets, the positive and negative examples are instead
+grouped by modular or divisor-related labels. These datasets are useful because the
+concept is not tied to a single token string: it is a relation between numbers.
+
+The experiments use several surface templates. Template \texttt{T0} is the compact
+arithmetic form, such as \texttt{calc: a+b=}. Other templates use more verbal or
+question-like phrasing. Since anchor positions are not necessarily aligned across
+templates, per-anchor analyses are run within a single template. Cross-template
+plots are used only for comparisons at semantically matched anchors, such as the
+position corresponding to an operand digit. This avoids mixing residual-stream
+vectors from positions that do not play the same computational role.
+
+\begin{table}[t]
+\centering
+\begin{tabular}{lll}
+\toprule
+Concept & Positive contrast & Controlled negative contrast \\
+\midrule
+Carry & units digits require a carry & matched addition without carry \\
+Residue class & target congruence relation holds & different residue class \\
+GCD & target divisor relation holds & different gcd/divisor offset \\
+\bottomrule
+\end{tabular}
+\caption{Examples of the contrastive structure used in the localisation pipeline.
+The actual datasets contain many sampled pairs per template; the table records the
+property that changes within a pair.}
+\label{tab:concept_pairs}
+\end{table}
 
 \section{Layer-Wise Concept Deltas}
 \label{sec:concept_delta}
 
-Explain what deltas means, and how it is mathematically constructed in this project. 
-...
-like
-Let $\mathcal{D}_+$ and $\mathcal{D}_-$ denote the sets of positive and negative prompts
-respectively. For each layer $l \in \{0, \ldots, L-1\}$, the concept direction is defined
-as the mean difference of residual-stream vectors at the anchor position,
+Let \(h_{l,t}(x) \in \mathbb{R}^d\) denote the residual-stream vector at layer
+\(l\) and token position \(t\) for prompt \(x\). Each pair has an anchor position
+\(t^*\), chosen to be the token position at which the relevant information is
+available. In the carry experiments these anchors correspond to operand and answer
+positions such as \texttt{rank5\_pos9}; in modular datasets they correspond to the
+positions at which the relevant number or answer token is represented.
+
+For each layer, the concept delta is the mean positive residual stream minus the
+mean negative residual stream at the anchor:
 \begin{equation}
-\delta_l \;=\; \mathbb{E}_{x \in \mathcal{D}_+}\!\left[ h_{l,t^*}(x) \right]
--\; \mathbb{E}_{x \in \mathcal{D}_-}\!\left[ h_{l,t^*}(x) \right],
-\label{eq:carry_delta}
+\delta_l
+=
+\frac{1}{N}\sum_{i=1}^{N} h_{l,t^*}(x_i^+)
+-
+\frac{1}{N}\sum_{i=1}^{N} h_{l,t^*}(x_i^-).
+\label{eq:concept_delta}
 \end{equation}
-where $h_{l,t}(x) \in \mathbb{R}^d$ is the residual-stream vector at layer $l$ and position $t$
-for prompt $x$. Under the linear representation hypothesis~\citep{park2023linear}, $\delta_l$ approximates the axis along which
-concept is encoded at depth $l$, provided the concept is linearly separable and the matched-pair
-averaging suppresses nuisance variation. 
+Equivalently, if \(\Delta h_{i,l}=h_{l,t^*}(x_i^+)-h_{l,t^*}(x_i^-)\), then
+\(\delta_l=N^{-1}\sum_i \Delta h_{i,l}\). This form makes clear that the delta is
+not a single-example patch vector. It is an average direction over a distribution of
+matched contrasts.
 
-% TODO: Explain the anchors, and what they mean. Also, explain the null hypothesis and how it helps us distinguish between a genuine concept direction and a spurious difference, 
-% and thus which anchors might provide something for the concept (high separation) vs the algorithm itself (low separation).
-% Explain causal scores and overlay. 
-% Explain how deltas analysis can be used to identify phase transitions, and how it can be used to identify the effective steering window, and what spiky layers
-% mean, and how they can help isolate features that might encode concept-specific (or even algorithmic-specific)information. And how important is that
-% as an initial proxy for mechanistic localisation, and how it can be used to guide further analysis and interventions.
+Under the linear representation hypothesis~\citep{park2023linear}, \(\delta_l\)
+approximates an axis along which the concept is encoded at depth \(l\), provided
+that the contrast is well controlled and the concept is approximately linearly
+separable. The delta should therefore be interpreted as a first-order summary of a
+representation, not as proof that the model uses a single one-dimensional variable.
+Several metrics are computed from \(\delta_l\) to test whether this summary is
+geometrically stable, feature-aligned, and causally relevant.
 
-\section{Sharpness and Concept Localisation}
-\label{sec:sharpness}
+\section{Delta Metrics and Anchor Selection}
+\label{sec:delta_metrics}
 
-% TODO: Explain the norm trajectory, and how it can be used to identify phase transitions, and how the sharpness index is defined, and what it means. 
-% Explain what metrics we used to select top-k anchors, adn what that means. 
-% Also, explain the inter-layer alignment and what it means.
-% Explain the delta projection onto feature W_dec vectors, and what it means.
-% also explain the the inter-layer cosine alignment, and layers cosine heatmaps, and what they mean. Also run analysis on how heatmaps at specific anchors relate to
-% norm trajectories and phases at those anchors. 
+The most direct statistic is the norm trajectory
+\begin{equation}
+D_l = \lVert \delta_l \rVert_2.
+\label{eq:delta_norm}
+\end{equation}
+A peak in \(D_l\) means that positive and negative examples are most separated at
+that layer for the chosen anchor. In practice, norm trajectories are used as an
+initial localisation signal: early peaks often reflect lexical or template-specific
+processing, while mid-to-late peaks are more likely to reflect an abstract variable
+used by the computation.
+
+Because different anchors can have different absolute scales, a normalised trajectory
+is also plotted:
+\begin{equation}
+\tilde{D}_l = \frac{D_l}{\max_j D_j + \varepsilon}.
+\label{eq:delta_norm_normalised}
+\end{equation}
+The raw and normalised curves answer different questions. The raw curve shows the
+actual geometric scale of separation. The normalised curve shows where an anchor's
+own separation is concentrated, independent of its magnitude relative to other
+anchors.
+
+A sharpness score summarises how concentrated the delta norm is across layers. In
+these experiments it is computed as a peak-to-average statistic,
+\begin{equation}
+\operatorname{sharp}(t^*)
+=
+\frac{\max_l D_l}{\frac{1}{L}\sum_{l=0}^{L-1} D_l + \varepsilon}.
+\label{eq:sharpness}
+\end{equation}
+High sharpness indicates that the concept appears in a narrow processing window.
+Low sharpness indicates either diffuse representation or weak separation. Anchors
+are selected by combining peak norm, sharpness, and downstream causal scores. This
+prevents the analysis from selecting an anchor merely because it has a large but
+uninformative residual-stream scale.
+
+The inter-layer cosine similarity matrix measures whether the delta direction is
+stable across layers:
+\begin{equation}
+C_{l,m}
+=
+\frac{\delta_l \cdot \delta_m}
+       {\lVert\delta_l\rVert_2\,\lVert\delta_m\rVert_2 + \varepsilon}.
+\label{eq:layer_cosine}
+\end{equation}
+Block structure in this heatmap indicates a processing phase in which the same
+concept direction persists. Rapid sign changes or isolated high-norm layers suggest
+that the model may be transforming the representation rather than maintaining a
+single stable code.
 
 \section{Feature-Space Interpretation}
 \label{sec:feature_projection}
 
-% Replace the explanation bellow to correspond to current delta projections onto trasncoder features (using W_dec instead), and what it means.
+Residual-stream deltas are dense vectors in \(\mathbb{R}^d\). To connect them to
+interpretable components, the pipeline projects each delta onto transcoder decoder
+features. For layer \(l\), let \(W_l^{\mathrm{dec}} \in \mathbb{R}^{d \times F_l}\)
+be the transcoder decoder matrix, and let \(w_{l,f}^{\mathrm{dec}}\) be its
+\(f\)-th column. This vector is the residual-stream effect contributed when feature
+\(f\) is active.
 
-In the dictionary-learning framework applied to transformer internals, a \textit{feature} is a
-learned direction $\phi_f \in \mathbb{R}^d$ hypothesised to correspond to a single interpretable
-concept or computation, where $d$ is the residual-stream width of the transformer.
-Because transformers represent more independent concepts than they have
-dimensions, they are believed to superpose many approximately orthogonal feature directions within
-the residual stream, with each activation being a sparse signed combination of active
-features~\citep{lindsey2025biology}. A transcoder operationalises this for MLP sub-layers as
-follows: an encoder $W_l^{\mathrm{enc}} \in \mathbb{R}^{F_l \times d}$ maps the pre-MLP residual-stream
-vector to a sparse bottleneck of feature activations, and a decoder $W_l^{\mathrm{dec}} \in
-\mathbb{R}^{d \times F_l}$ reconstructs the MLP output as a sum of active feature effects.
-Each encoder row $(W_l^{\mathrm{enc}})_f$ is therefore a \textit{detection direction} in $\mathbb{R}^d$.
-
-The delta vectors $\delta_l$ are dense in $\mathbb{R}^d$ and do not directly identify which
-model components encode carry at each layer. The transcoder architecture provides a more interpretable way to
-decompose them sparsely. Each transcoder at layer $l$ learns an encoder weight matrix
-$W_l^{\mathrm{enc}} \in \mathbb{R}^{F_l \times d}$, where $F_l$ is the number of learned
-features and $d$ the residual-stream dimension. The $f$-th row $(W_l^{\mathrm{enc}})_f$ is
-the direction to which feature $f$ responds most strongly.
-
-The cosine alignment between the carry delta and each encoder direction,
+The decoder cosine score is
 \begin{equation}
-c_{l,f} \;=\;
-\frac{(W_l^{\mathrm{enc}})_f \cdot \delta_l}
-     {\lVert (W_l^{\mathrm{enc}})_f \rVert \cdot \lVert \delta_l \rVert},
-\label{eq:feature_cos}
+\operatorname{cos}_{l,f}^{\mathrm{dec}}
+=
+\frac{w_{l,f}^{\mathrm{dec}} \cdot \delta_l}
+       {\lVert w_{l,f}^{\mathrm{dec}}\rVert_2\,\lVert\delta_l\rVert_2+
+       \varepsilon}.
+\label{eq:decoder_cosine}
 \end{equation}
-identifies the transcoder features most aligned with the concept delta at that layer. Features
-with $\lvert c_{l,f} \rvert$ close to one are the monosemantic components whose activation
-pattern best accounts for the carry versus no-carry difference. This projection connects the
-dense, direction-based view of representation engineering to the sparse, feature-based view of
-dictionary learning. The same concept direction can thus be understood both as a point in
-residual-stream space and as a weighted combination of interpretable transcoder features,
-bridging two perspectives that the broader interpretability programme has pursued in parallel.
+A high positive value means that when the feature writes to the residual stream, it
+writes in approximately the same direction as the contrastive concept delta. A high
+negative value means that the feature writes in the opposite direction. This is not
+the same as saying that the feature's activation grid visually resembles the concept:
+a sparse feature can have high decoder alignment if its effect vector points along
+\(\delta_l\), even if it is active on only a few examples. For this reason, feature
+interpretation uses both decoder alignment and activation statistics.
+
+For a selected feature, the activation grid is formed by averaging feature activations
+over arithmetic variables. In the carry case the grid is
+\begin{equation}
+A_f(a,b)
+=
+\mathbb{E}\left[z_{l,f}(x) \mid a(x) \bmod 10=a,\; b(x) \bmod 10=b\right],
+\label{eq:activation_grid}
+\end{equation}
+where \(z_{l,f}(x)\) is the transcoder feature activation. The resulting
+\(10\times10\) matrix can reveal whether a decoder-aligned feature is active on a
+carry boundary, an iso-sum band, a parity pattern, or a more local arithmetic
+condition. For intrinsic feature selection, the pipeline also records the fraction
+of dataset examples on which a feature is active. Requiring nontrivial activity, for
+example at least ten percent of examples, filters out features whose high cosine is
+dominated by one or two isolated cells.
+
+Two overlap metrics are useful when comparing activation grids. The centred cosine
+between two grids \(A\) and \(B\) is
+\begin{equation}
+\operatorname{gridcos}(A,B)
+=
+\frac{\langle A-\bar{A}, B-\bar{B}\rangle}
+       {\lVert A-\bar{A}\rVert_2\,\lVert B-\bar{B}\rVert_2+\varepsilon},
+\label{eq:grid_cosine}
+\end{equation}
+which ignores the mean activation level and measures pattern similarity. A Jaccard
+score is computed after thresholding each grid to its active cells:
+\begin{equation}
+J(A,B)=\frac{|\operatorname{supp}(A)\cap\operatorname{supp}(B)|}
+{|\operatorname{supp}(A)\cup\operatorname{supp}(B)|}.
+\label{eq:jaccard_grid}
+\end{equation}
+Cosine is sensitive to graded shape; Jaccard is sensitive to support overlap. The
+pipeline uses both because a smooth Fourier-like feature and a sharp detector can
+have similar support but different amplitudes, or similar amplitudes but different
+support.
+
+\section{Fourier Patterns in Arithmetic Feature Grids}
+\label{sec:fourier_patterns}
+
+Many arithmetic feature visualisations are functions on a digit torus,
+\[
+a,b \in \{0,\ldots,9\}, \qquad f(a,b) \in \mathbb{R}.
+\]
+Fourier analysis gives a compact way to describe these grids. The natural basis is
+\begin{equation}
+\exp\!\left(\frac{2\pi i}{10}(ua+vb)\right),
+\qquad u,v\in\{0,\ldots,9\}.
+\label{eq:fourier_basis}
+\end{equation}
+Every grid can be written as
+\begin{equation}
+f(a,b)
+=
+\sum_{u=0}^{9}\sum_{v=0}^{9}
+C_{u,v}\exp\!\left(\frac{2\pi i}{10}(ua+vb)\right).
+\label{eq:fourier_decomp}
+\end{equation}
+For real-valued grids it is usually clearer to report cosine modes,
+\begin{equation}
+A\cos\!\left(\frac{2\pi}{10}(ua+vb)+\phi\right),
+\label{eq:fourier_cosine}
+\end{equation}
+where \(A=2|C_{u,v}|\) and \(\phi=\arg C_{u,v}\) for a non-DC conjugate pair.
+
+The frequency indices have direct arithmetic interpretations:
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Frequency pattern & Interpretation \\
+\midrule
+\((k,k)\) & depends on \(a+b\) \\
+\((-k,k)\) & depends on \(b-a\) \\
+\((k,0)\) & depends only on \(a\) \\
+\((0,k)\) & depends only on \(b\) \\
+\((5,5)\) & parity, \((-1)^{a+b}\) \\
+\bottomrule
+\end{tabular}
+\end{center}
+For example,
+\[
+\cos\!\left(\frac{2\pi(a+b)}{10}\right)
+\]
+is an iso-sum feature, while
+\[
+\cos\!\left(\frac{2\pi(b-a)}{10}\right)
+\]
+is an iso-difference feature. Parity is a single mode because
+\[
+(-1)^{a+b}
+=
+\cos\!\left(\frac{2\pi(5a+5b)}{10}\right).
+\]
+
+Not all arithmetic features are smooth. A carry-margin detector such as
+\[
+\mathbf{1}[a+b=10]
+\]
+is localised on a narrow diagonal boundary. It can still be represented in the
+Fourier basis, but it requires many coefficients. This distinction is useful:
+smooth sinusoidal grids indicate low-frequency arithmetic variables, while sharp
+boundaries indicate logical or threshold-like detectors assembled from several
+Fourier components.
+
+In the plots, the top \(K\) Fourier approximation is
+\begin{equation}
+\hat{f}(a,b)
+=
+\mu + \sum_{j=1}^{K}
+A_j\cos\!\left(\frac{2\pi}{10}(u_j a + v_j b)+\phi_j\right).
+\label{eq:topk_fourier}
+\end{equation}
+The explained Fourier energy is
+\begin{equation}
+E_K
+=
+\frac{\sum_{j=1}^{K}|C_j|^2}{\sum_j |C_j|^2}.
+\label{eq:fourier_energy}
+\end{equation}
+A high \(E_1\) means that the feature is close to a pure Fourier mode. A feature
+requiring many modes is more localised and should be read as a detector rather than
+as a single smooth arithmetic coordinate.
+
+\section{Symbolic Fits to Feature Activations}
+\label{sec:pysr_feature_fits}
+
+For selected carry features, symbolic regression is used as a second description of
+the activation grid. The input variables are engineered arithmetic quantities such
+as \(a\), \(b\), \(a+b\), \(|a-b|\), \(ab\), \(\operatorname{mod}(a+b,10)\), and
+carry-margin terms such as \(|a+b-10|\). The target is the normalised feature
+activation \(A_f(a,b)\). A fitted expression is accepted only as an interpretive
+summary of the grid, not as a claim that the model explicitly computes that formula.
+
+The symbolic fit is evaluated with
+\begin{equation}
+R^2 = 1 - \frac{\sum_{a,b}\left(A_f(a,b)-\hat{A}_f(a,b)\right)^2}
+{\sum_{a,b}\left(A_f(a,b)-\bar{A}_f\right)^2}.
+\label{eq:pysr_r2}
+\end{equation}
+Low-complexity expressions are preferred. If a feature is a simple carry boundary,
+a short expression involving \(|a+b-10|\) is more informative than a high-complexity
+formula with similar \(R^2\). The Fourier approximation and symbolic fit are therefore
+complementary: Fourier describes periodic structure, while symbolic regression gives
+a compact arithmetic predicate when one exists.
 
 \section{Template Robustness}
 \label{sec:template_consistency}
 
-% Explain template robustness, and how it can be used to check whether the extracted direction is a genuine property of the model's internal computation rather than an artefact of any particular surface form.
-% Also, run an analysis on per-template metrics and results, to understand how template structure drives different outcomes in terms of 
-% deltas (are phases the same but deltas different? yes/no and why), magnitudes, causal scores, heatmaps (more diffuse or more localized). correlate template types to prior analysis like norm trajectories and phase transitions and heatmaps.
+Template robustness tests whether a direction is tied to the model's computation or
+to the surface form of a prompt. For each template \(T\), deltas are computed
+separately:
+\begin{equation}
+\delta_l^{(T)}
+=
+\mathbb{E}_{x\in\mathcal{D}^{(T)}_+}[h_{l,t_T^*}(x)]
+-
+\mathbb{E}_{x\in\mathcal{D}^{(T)}_-}[h_{l,t_T^*}(x)].
+\label{eq:template_delta}
+\end{equation}
+The anchor \(t_T^*\) is template-specific. This is essential: token positions that
+share the same integer index across templates need not have the same semantic role.
+Consequently, single-anchor sweeps and causal plots are run within one template,
+usually \texttt{T0}. Cross-template comparisons are saved separately and compare
+semantically corresponding anchors, not raw token indices.
 
-...
-
-Per-template deltas $\delta_l^{(T)}$ are computed separately for each template
-$T \in \{T0, T1, T2\}$, and their pairwise cosine similarities are measured at each layer.
-This provides a direct check on whether the extracted direction is a stable property of the
-model's carry representation. Consistently high cross-template alignment at the layers where
-$\lVert \delta_l \rVert$ peaks would confirm that the same direction emerges regardless of
-surface form. Divergence at early layers would indicate that template-specific variation
-persists until mid-network processing assimilates the input into a common representational
-format, providing additional evidence about the depth at which template-invariant concept
-encoding begins. 
+The cross-template alignment at a layer is
+\begin{equation}
+\operatorname{align}_l(T,T')
+=
+\frac{\delta_l^{(T)}\cdot\delta_l^{(T')}}
+{\lVert\delta_l^{(T)}\rVert_2\,\lVert\delta_l^{(T')}\rVert_2+\varepsilon}.
+\label{eq:template_alignment}
+\end{equation}
+High alignment near the peak layers suggests that the same concept direction emerges
+under different phrasings. Low alignment, especially early in the network, indicates
+that template-specific tokenisation and syntax still dominate the representation.
 
 \section{Causal Validation and Null Hypothesis Testing}
 \label{sec:causal_validation}
 
-%  Explain these in detail here
-The delta vectors and sharpness metrics of the preceding sections characterise the
-\textit{representational} structure of each concept, quantifying where a separable direction
-exists in residual-stream space. They do not, however, establish that the extracted
-representation is causally upstream of the model's output. A direction may be strongly
-present at a given layer without being mechanistically connected to the prediction. Two
-complementary interventions test this causal claim directly, and are applied to every concept
-in the suite.
+The preceding metrics are representational. They show that a contrastive direction
+exists, but not that it is used to produce the answer. The pipeline therefore adds
+causal and null-hypothesis checks.
 
 \subsection{Activation Patching}
 \label{sec:act_patching}
 
-Activation patching~\citep{meng2022locating} isolates the causal contribution of a
-specific layer by replacing a single intermediate representation and measuring the
-resulting change in output. For each contrastive pair $(x^+, x^-)$ and each layer $l$,
-the positive prompt's residual-stream vector at the anchor position $t^*$ is transplanted
-into the negative prompt's forward pass. The score is the induced change in the
-logit margin at the final prediction position,
+Activation patching tests causal sufficiency. For each pair \((x_i^+,x_i^-)\) and
+layer \(l\), the positive residual vector at the anchor is inserted into the negative
+forward pass:
+\[
+h_{l,t^*}(x_i^-) \leftarrow h_{l,t^*}(x_i^+).
+\]
+Let \(m(x)=\ell_{\mathrm{pos}}(x)-\ell_{\mathrm{neg}}(x)\) be the answer logit
+margin at the final prediction position. The patching score is
 \begin{equation}
 S_l^{\mathrm{patch}}
-\;=\;
-\Bigl[
-  f_{\mathrm{pos}}\!\left(\tilde{x}^-_{[l]}\right) - f_{\mathrm{neg}}\!\left(\tilde{x}^-_{[l]}\right)
-\Bigr]
--
-\Bigl[
-  f_{\mathrm{pos}}\!\left(x^-\right) - f_{\mathrm{neg}}\!\left(x^-\right)
-\Bigr],
-\label{eq:act_patching}
+=
+\frac{1}{N}\sum_{i=1}^{N}
+\left[m\!\left(\tilde{x}_{i,[l]}^-\right)-m(x_i^-)\right],
+\label{eq:patch_score}
 \end{equation}
-where $\tilde{x}^-_{[l]}$ denotes the negative prompt with $h_{l,t^*}(x^-)$ replaced
-by $h_{l,t^*}(x^+)$, and $f_{\mathrm{pos}}$, $f_{\mathrm{neg}}$ are the logits for
-the positive and negative answer tokens at the last position. A large positive $S_l^{\mathrm{patch}}$
-indicates that the layer-$l$ concept representation, when inserted into the negative
-context, is sufficient to shift the model's output toward the positive answer. The metric
-therefore directly quantifies the \textit{causal sufficiency} of the layer-$l$ encoding
-for driving the correct response.
+where \(\tilde{x}_{i,[l]}^-\) is the negative prompt with the layer-\(l\) anchor
+activation patched from the positive prompt. A large positive score means that the
+positive representation at that layer is sufficient to push the negative prompt
+toward the positive answer.
 
-\subsection{Gradient Dot Delta}
+\subsection{Gradient-Dot-Delta}
 \label{sec:grad_dot_delta}
 
-Activation patching requires a full forward pass for each patched layer, making it
-the more expensive of the two methods. A cheaper first-order approximation is obtained
-by differentiating the output margin with respect to the residual stream at the negative
-prompt's operating point. For each pair and each layer $l$, a single forward pass on
-$x^-$ is followed by a single backward pass to compute the gradient of the margin
-with respect to $h_{l,t^*}(x^-)$. The score is the inner product of this gradient with
-the precomputed concept delta,
+Gradient-dot-delta is a first-order approximation to patching. For each negative
+prompt, the gradient of the margin with respect to the anchor residual stream is
+computed, and then dotted with the mean concept delta:
 \begin{equation}
 S_l^{\mathrm{grad}}
-\;=\;
-\nabla_{h_{l,t^*}} m\!\left(x^-\right) \cdot \delta_l,
-\label{eq:grad_dot_delta}
+=
+\frac{1}{N}\sum_{i=1}^{N}
+\nabla_{h_{l,t^*}}m(x_i^- )\cdot\delta_l.
+\label{eq:grad_delta_score}
 \end{equation}
-where $m(x) = f_{\mathrm{pos}}(x) - f_{\mathrm{neg}}(x)$ is the logit margin evaluated
-at prompt $x$, and the gradient is computed at the negative prompt's residual stream.
-
-The relationship between $S_l^{\mathrm{grad}}$ and $S_l^{\mathrm{patch}}$ is made
-precise by a first-order Taylor expansion of the patched margin around the unpatched
-activation,
+A Taylor expansion gives
 \begin{equation}
-m\!\left(\tilde{x}^-_{[l]}\right)
-\;\approx\;
-m\!\left(x^-\right)
-+ \nabla_{h_{l,t^*}} m\!\left(x^-\right)
-  \cdot \bigl(h_{l,t^*}(x^+) - h_{l,t^*}(x^-)\bigr).
-\label{eq:taylor_patch}
+m(\tilde{x}_{i,[l]}^-)
+\approx
+m(x_i^-)
++
+\nabla_{h_{l,t^*}}m(x_i^-)
+\cdot
+\left(h_{l,t^*}(x_i^+) - h_{l,t^*}(x_i^-)\right).
+\label{eq:patch_taylor}
 \end{equation}
-Taking the expectation over pairs and using $\delta_l = \mathbb{E}[h_{l,t^*}(x^+)] - \mathbb{E}[h_{l,t^*}(x^-)]$ gives
-$\mathbb{E}[S_l^{\mathrm{patch}}] \approx S_l^{\mathrm{grad}}$ to first order, provided the gradient
-varies little across the pair distribution. The gradient-dot-delta score is therefore the
-linearised, single-pass analogue of activation patching; agreement between the two methods
-at any given layer constitutes evidence that the output function is approximately
-linear in the relevant neighbourhood of residual-stream space. Systematic divergence
-indicates nonlinearity or higher-order interactions that the gradient cannot capture.
-Both methods are anchored at the same position $t^*$ used for delta extraction throughout
-this chapter.
+Averaging over pairs connects the patching score to the gradient-dot-delta score.
+Agreement between the two curves suggests that the output is locally close to linear
+in the relevant residual-stream direction. Disagreement suggests higher-order effects
+or that the mean delta is not a faithful summary of the pairwise intervention.
 
-%  Add Null hypothesis explanation
+The causal overlay plot places \(S_l^{\mathrm{patch}}\), \(S_l^{\mathrm{grad}}\),
+and the delta-norm trajectory on the same layer axis. The useful case is not merely
+a high delta norm, but a high delta norm that occurs near a positive causal score.
+This alignment indicates that the representation is both separable and used by the
+model's answer computation.
+
+\subsection{Null Permutation Test}
+\label{sec:null_permutation}
+
+A contrastive pipeline can produce apparent directions even when labels are
+unrelated to the concept. The null test estimates this background level by permuting
+positive and negative labels within the same template and recomputing the delta
+metrics. Let \(\delta_l^{\pi}\) be the delta obtained under permutation \(\pi\). The
+null distribution for a statistic \(q_l\), such as \(\lVert\delta_l\rVert\) or a
+causal score, is
+\begin{equation}
+\left\{q_l(\delta^{\pi}) : \pi=1,\ldots,P\right\}.
+\label{eq:null_distribution}
+\end{equation}
+The observed statistic is compared with the null mean and quantiles. A layer whose
+observed score is well outside the null range is less likely to reflect generic
+prompt variability. The null is computed per template so that template-specific
+position structure is not mixed into the baseline.
+
+\section{Interpreting the Full Per-Anchor Summary}
+\label{sec:anchor_summary}
+
+For each selected anchor, the pipeline saves a vertically aligned summary over
+layers. The panels share the same layer axis so that changes can be read together:
+feature-decoder projection, raw and normalised delta norm, inter-layer cosine
+similarity, null comparison, and causal overlay. This layout is designed to answer a
+single practical question: at which layers is there a concept direction that is
+large, stable, feature-aligned, above the null baseline, and causally relevant?
+
+The interpretation is deliberately conservative. A high decoder cosine without
+feature activation structure is only a direction match. A clean activation grid
+without causal effect is only a representation. A causal score without template
+robustness may be a surface-form artefact. The strongest evidence comes when these
+signals agree at the same anchor and nearby layers.
 
 \section{Results}
+\label{sec:concept_results}
 
-
-% TODO LATER...
+The empirical results for each concept are reported using the metrics defined above.
+The main comparisons are between anchors, layers, and templates, with feature-level
+plots used to interpret the most aligned directions. The remaining analysis focuses
+on whether the arithmetic concepts produce localised, reusable feature structure or
+whether they remain distributed across many weakly aligned components.

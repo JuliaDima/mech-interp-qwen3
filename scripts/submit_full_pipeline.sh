@@ -32,6 +32,7 @@
 #   NULL_K=50              null permutation count             (default: 50)
 #   CLUSTER_TOP_K=100      top-k features for cluster analysis(default: 100)
 #   N_CLUSTERS=6           number of feature clusters         (default: 6)
+#   TEMPLATE=T0            template for per-anchor analyses   (default: T0)
 #   PYSR=0                 set to 1 to run PySR (carry=grid, others=generic; slow)
 #   PYSR_NITER=40          PySR iterations per feature        (default: 40)
 
@@ -70,6 +71,7 @@ N_PAIRS="${N_PAIRS:-100}"
 NULL_K="${NULL_K:-50}"
 CLUSTER_TOP_K="${CLUSTER_TOP_K:-100}"
 N_CLUSTERS="${N_CLUSTERS:-6}"
+TEMPLATE="${TEMPLATE:-T0}"
 PYSR="${PYSR:-0}"
 PYSR_NITER="${PYSR_NITER:-40}"
 
@@ -110,7 +112,7 @@ echo "========================================================"
 echo "Submitting full pipeline for ${#CONCEPTS[@]} concept(s)"
 echo "  GIF_N=${GIF_N}  ANCHOR_K=${ANCHOR_K}  ANCHOR_TIME=${ANCHOR_TIME}"
 echo "  N_PAIRS=${N_PAIRS}  NULL_K=${NULL_K}"
-echo "  CLUSTER_TOP_K=${CLUSTER_TOP_K}  N_CLUSTERS=${N_CLUSTERS}"
+echo "  CLUSTER_TOP_K=${CLUSTER_TOP_K}  N_CLUSTERS=${N_CLUSTERS}  TEMPLATE=${TEMPLATE}"
 echo "  PYSR=${PYSR}  PYSR_NITER=${PYSR_NITER}"
 $DRY_RUN && echo "  *** DRY RUN — no jobs submitted ***"
 echo "========================================================"
@@ -143,6 +145,7 @@ for CONCEPT in "${CONCEPTS[@]}"; do
             python scripts/select_and_submit_anchors.py \
                 --concept "$CONCEPT" \
                 --k "$ANCHOR_K" \
+                --template "$TEMPLATE" \
                 --anchor_time "$ANCHOR_TIME" \
                 --n "$N_PAIRS" \
                 --null_k "$NULL_K" \

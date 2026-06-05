@@ -62,6 +62,8 @@ def main() -> None:
                         help="Number of top anchors to select")
     parser.add_argument("--anchor_time", default="01:00:00",
                         help="SLURM --time for each anchor pipeline job")
+    parser.add_argument("--template", default="T0",
+                        help="Single template for per-anchor jobs")
     parser.add_argument("--n", type=int, default=100,
                         help="Pairs per template for run_concept and null")
     parser.add_argument("--top_k", type=int, default=15,
@@ -77,6 +79,8 @@ def main() -> None:
     parser.add_argument("--pysr", action="store_true",
                         help="Run PySR per cluster + top-k E_dec features (carry=grid, others=generic; slow)")
     parser.add_argument("--pysr_niterations", type=int, default=40)
+    parser.add_argument("--edec_top_k", type=int, default=15,
+                        help="Top-k E_dec-aligned features for extra PySR pass")
     parser.add_argument("--dry_run", action="store_true",
                         help="Print sbatch commands without submitting")
     args = parser.parse_args()
@@ -115,6 +119,7 @@ def main() -> None:
             "--concept", args.concept,
             "--anchor_pos", str(anchor_idx),
             "--anchor_rank", str(rank),
+            "--template", args.template,
             "--n", str(args.n),
             "--top_k", str(args.top_k),
             "--sweep_top_k", str(args.sweep_top_k),
@@ -123,6 +128,7 @@ def main() -> None:
             "--cluster_top_k", str(args.cluster_top_k),
             "--n_clusters", str(args.n_clusters),
             "--pysr_niterations", str(args.pysr_niterations),
+            "--edec_top_k", str(args.edec_top_k),
         ]
         if args.pysr:
             cmd.append("--pysr")
@@ -148,7 +154,7 @@ def main() -> None:
             _SBATCH_RUN,
             sys.executable,
             str(_REPO_ROOT / "scripts" / "sweeps" / "plot_sweep_peak_features.py"),
-            "--concept", args.concept,
+            "--concept", f"{args.concept}/{args.concept}_{args.template}",
         ]
         peak_jid = _submit(peak_cmd, args.dry_run)
         log.info("  Submitted peak-feature plot → job %s (after all anchors)", peak_jid)

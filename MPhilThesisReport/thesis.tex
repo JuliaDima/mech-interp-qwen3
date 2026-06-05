@@ -1,4 +1,4 @@
-\documentclass[withindex]{cam-thesis}
+\documentclass[withindex,oneside,openany]{cam-thesis}
 \usepackage[T1]{fontenc}
 \usepackage{lmodern}
 \usepackage[numbers]{natbib} % Citations using numbers
@@ -10,7 +10,15 @@
 \usepackage{longtable}
 \usepackage{tikz}
 
+
 \usetikzlibrary{arrows.meta, decorations.pathreplacing}
+
+% Use symmetric, slightly tighter margins for screen/PDF reading.  The class
+% defaults are two-sided print margins (30mm inner, 20mm outer), which alternate
+% left/right whitespace on consecutive pages.
+\makeatletter
+\cam@calcpaperdims{18mm}{18mm}{18mm}{18mm}
+\makeatother
 
 %% The title of the thesis:
 \title{Title}
@@ -50,7 +58,7 @@
 \input{Pages/11Introduction} \label{sec:introduction}
 \input{Pages/12RelatedWork} \label{sec:RelatedWork}
 \input{Pages/13_Reproducibility}
-% \input{Pages/KnowledgeEditing} TODO: remove this
+% \input{Pages/KnowledgeEditing}
 \input{Pages/ConceptLocalisation}
 
 %% Bibliography:

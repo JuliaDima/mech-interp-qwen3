@@ -14,8 +14,7 @@ by the coordinator after all anchor jobs finish, since it aggregates every ancho
 Output directory layout
 -----------------------
 runs/concept_localization/{concept}/anchor_rank{R}_pos{P}/
-    results.json, deltas.pt, cross_layer_sim.png
-    causal_scores.png, causal_overlay.png
+    results.json, deltas.pt, anchor_layer_summary_T0.png
     null/null_permutation.{json,png}
     sweep/
         sweep_ranked.json, sweep_activations.npz, sweep_examples.pkl
@@ -73,6 +72,8 @@ def main() -> None:
                         help="0-indexed token position used as anchor")
     parser.add_argument("--anchor_rank", type=int, required=True,
                         help="Rank of this anchor (1 = best) from emergence.npy")
+    parser.add_argument("--template", default="T0",
+                        help="Single template for all per-anchor analyses")
     parser.add_argument("--n", type=int, default=100,
                         help="Pairs per template for run_concept and null")
     parser.add_argument("--top_k", type=int, default=15,
@@ -102,6 +103,7 @@ def main() -> None:
         / "runs"
         / "concept_localization"
         / args.concept
+        / f"{args.concept}_{args.template}"
         / f"anchor_rank{args.anchor_rank}_pos{args.anchor_pos}"
     )
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -116,6 +118,7 @@ def main() -> None:
         sys.executable, "-m", "experiments.concept_localization.run_concept",
         "--concept", args.concept,
         "--anchor_modes", str(args.anchor_pos),
+        "--template", args.template,
         "--n", str(args.n),
         "--causal",
         "--causal_pairs", str(args.causal_pairs),
@@ -135,7 +138,16 @@ def main() -> None:
         "--k", str(args.null_k),
         "--real_deltas", str(deltas_path),
         "--out_dir", str(null_dir),
-        "--template", "T0",
+        "--template", args.template,
+    ])
+
+    # ── Stage 2b: combined per-anchor layer summary ───────────────────────
+    log.info("=== Stage 2b: combined layer summary plot ===")
+    _run([
+        sys.executable, "-m", "experiments.concept_localization.plot_anchor_layer_summary",
+        "--anchor_dir", str(out_dir),
+        "--template", args.template,
+        "--out", str(out_dir / f"anchor_layer_summary_{args.template}.png"),
     ])
 
     # ── Stage 3: transcoder sweep at peak ±2 layers ───────────────────────
@@ -158,8 +170,8 @@ def main() -> None:
         "--out_dir", str(sweep_dir),
     ]
     # Per-anchor sweeps must use one template because anchor positions are
-    # template-specific. Multi-template data is only for run_concept/causal plots.
-    sweep_cmd += ["--template", "T0"]
+    # template-specific. Multi-template comparison plots live at the concept root.
+    sweep_cmd += ["--template", args.template]
     _run(sweep_cmd)
 
     # ── Stage 4: cluster analysis ─────────────────────────────────────────
@@ -170,6 +182,7 @@ def main() -> None:
         "--sweep_dir", str(sweep_dir),
         "--top_k", str(args.cluster_top_k),
         "--n_clusters", str(args.n_clusters),
+        "--template", args.template,
     ])
 
     # NOTE: the cross-anchor peak-feature plot (plot_sweep_peak_features.py)
@@ -180,7 +193,7 @@ def main() -> None:
     # ── Stage 5: PySR per cluster + top-k E_dec features (optional) ──────
     if args.pysr:
         log.info("=== Stage 5: PySR ===")
-        cluster_json = sweep_dir / "cluster_analysis_T0" / "cluster_features.json"
+        cluster_json = sweep_dir / f"cluster_analysis_{args.template}" / "cluster_features.json"
         if not cluster_json.exists():
             log.warning("cluster_features.json not found at %s — skipping PySR", cluster_json)
         else:
@@ -208,6 +221,7 @@ def main() -> None:
                 "--top_k", str(args.edec_top_k),
                 "--niterations", str(args.pysr_niterations),
                 "--r2_threshold", str(args.r2_threshold),
+                "--template", args.template,
             ])
         except subprocess.CalledProcessError as e:
             log.warning("PySR (E_dec) stage failed (non-fatal): %s", e)
