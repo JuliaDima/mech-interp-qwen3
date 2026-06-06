@@ -393,7 +393,15 @@ def _run_single(args, base_subdir: str | None = None) -> None:
                 max_pairs if max_pairs is not None else "all",
             )
             causal = run_causal_analysis(
-                model, pairs, ld.delta, layers, device, dtype, max_pairs=max_pairs,
+                model,
+                pairs,
+                ld.delta,
+                layers,
+                device,
+                dtype,
+                max_pairs=max_pairs,
+                anchor_mode=anchor_mode,
+                anchor_factory=anchor_factory,
             )
             log.info("Causal analysis done (n_pairs=%d)", causal["all"].n_pairs)
 

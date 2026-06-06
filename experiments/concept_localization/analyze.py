@@ -20,9 +20,9 @@ import torch
 import torch.nn.functional as F
 from tqdm import tqdm
 
-from experiments.concept_localization.extract_deltas import LayerDeltas
 from experiments.concept_localization.extract_deltas_generic import (
     AnchorFactory,
+    LayerDeltas,
     _resolve_anchor,
 )
 from mechinterp_qwen3.utils.token_utils import tokenize_qwen_input
