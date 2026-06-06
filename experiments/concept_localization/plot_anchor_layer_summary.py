@@ -211,9 +211,9 @@ def plot_anchor_layer_summary(anchor_dir: Path, template: str = "T0", out_path: 
     fig, axes = plt.subplots(
         5,
         1,
-        figsize=(15, 16),
+        figsize=(6, 22),
         sharex=False,
-        gridspec_kw={"hspace": 0.28},
+        gridspec_kw={"hspace": 0.38},
     )
 
     _plot_feature_projection(axes[0], results, layers, int(results.get("config", {}).get("top_k", 15)))
