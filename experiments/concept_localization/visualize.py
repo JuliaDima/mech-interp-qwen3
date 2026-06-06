@@ -11,7 +11,7 @@ import torch.nn.functional as F
 
 import experiments.plot_style as ps
 from experiments.concept_localization.analyze import FeatureMatch
-from experiments.concept_localization.extract_deltas import LayerDeltas
+from experiments.concept_localization.extract_deltas_generic import LayerDeltas
 
 _TEMPLATE_COLORS = [ps.NAVY, ps.TEAL, ps.MAUVE]
 

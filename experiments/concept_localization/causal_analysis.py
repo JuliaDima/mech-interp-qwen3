@@ -16,8 +16,7 @@ Two complementary methods:
    forward + one backward per pair) and interpretable as a linear causal
    weight.
 
-Both methods are anchored at the same position used during delta extraction
-(last token position where pos and neg prompts differ).
+Both methods are anchored from the same anchor_mode used during delta extraction.
 
 Usage:
 python -m experiments.concept_localization.run_concept --concept <name> --causal --causal_pairs <n>
@@ -32,10 +31,22 @@ from dataclasses import dataclass, field
 import torch
 from tqdm import tqdm
 
-from experiments.concept_localization.extract_deltas import _find_anchor
+from experiments.concept_localization.extract_deltas_generic import AnchorFactory, _resolve_anchor
 from mechinterp_qwen3.utils.token_utils import tokenize_qwen_input
 
 log = logging.getLogger(__name__)
+
+
+def _resolve_pair_anchor(
+    pair,
+    ids_pos: list[int],
+    tokenizer,
+    anchor_mode: str,
+    anchor_factory: AnchorFactory | None,
+) -> int:
+    """Resolve the raw-token anchor position used by delta extraction."""
+    return _resolve_anchor(ids_pos, tokenizer, anchor_mode, anchor_factory, pair)
+
 
 # Surface forms (after stripping the Ġ / ▁ BPE space prefix) that mark the
 # structural delimiter closing the concept expression: punctuation tokens and
@@ -103,21 +114,18 @@ def run_activation_patching(
     layers: list[int],
     device: torch.device,
     dtype: torch.dtype,
+    anchor_mode: str = "delimiter",
+    anchor_factory: AnchorFactory | None = None,
 ) -> dict[int, list[float]]:
-    """Activation patching across layers at the expression-end delimiter.
-
-    Patches at position p = last structural delimiter (e.g. '=' in 'a+b='),
-    where both prompts share the same surface token but carry different hidden
-    states.  This avoids the digit-identity confound that arises when patching
-    at the anchor t*, where the two prompts have different tokens.
+    """Activation patching across layers at the selected delta-extraction anchor.
 
     For each pair and each layer L:
-      - find p = expression-end (same token in both prompts, strictly after t*)
+      - resolve p from anchor_mode exactly as delta extraction does
       - cache pos residuals at p for all layers in one forward pass
-      - run neg once for baseline margin logit^+ − logit^−
+      - run neg once for baseline margin logit^+ - logit^-
       - for each L: re-run neg with h[L, p] swapped to the pos value
 
-    Returns dict[layer -> list of per-pair Δmargin].
+    Returns dict[layer -> list of per-pair delta-margin scores].
     """
     model.eval()
     scores: dict[int, list[float]] = {l: [] for l in layers}
@@ -132,21 +140,14 @@ def run_activation_patching(
                 skipped += 1
                 continue
 
-            anchor = _find_anchor(ids_pos, ids_neg)
-            if anchor is None:
+            try:
+                anchor = _resolve_pair_anchor(pair, ids_pos, model.tokenizer, anchor_mode, anchor_factory)
+            except ValueError:
                 skipped += 1
                 continue
 
-            # Find patch position: expression-end delimiter after the anchor,
-            # where both prompts have the same surface token.
-            tokens_pos = model.tokenizer.convert_ids_to_tokens(ids_pos)
-            patch_pos = _find_expression_end(tokens_pos)
-            if patch_pos is None or patch_pos <= anchor:
-                patch_pos = anchor + 1
+            patch_pos = anchor
             if patch_pos >= len(ids_pos):
-                skipped += 1
-                continue
-            if ids_pos[patch_pos] != ids_neg[patch_pos]:
                 skipped += 1
                 continue
 
@@ -218,6 +219,8 @@ def run_gradient_dot_delta(
     layers: list[int],
     device: torch.device,
     dtype: torch.dtype,
+    anchor_mode: str = "delimiter",
+    anchor_factory: AnchorFactory | None = None,
 ) -> dict[int, list[float]]:
     """Gradient-dot-delta across layers.
 
@@ -241,8 +244,13 @@ def run_gradient_dot_delta(
         ids_pos = model.tokenizer(pair.prompt_pos, add_special_tokens=False).input_ids
         ids_neg = model.tokenizer(pair.prompt_neg, add_special_tokens=False).input_ids
 
-        anchor = _find_anchor(ids_pos, ids_neg)
-        if anchor is None:
+        if len(ids_pos) != len(ids_neg):
+            skipped += 1
+            continue
+
+        try:
+            anchor = _resolve_pair_anchor(pair, ids_pos, model.tokenizer, anchor_mode, anchor_factory)
+        except ValueError:
             skipped += 1
             continue
 
@@ -603,6 +611,8 @@ def run_causal_analysis(
     device: torch.device,
     dtype: torch.dtype,
     max_pairs: int | None = None,
+    anchor_mode: str = "delimiter",
+    anchor_factory: AnchorFactory | None = None,
 ) -> dict[str, CausalScores]:
     """Run both causal analyses per template and return dict[key -> CausalScores].
 
@@ -619,8 +629,25 @@ def run_causal_analysis(
     tmpl_grad: dict[str, dict[int, list[float]]] = {}
     for t, grp in groups.items():
         log.info("Causal analysis — template %s (%d pairs)", t, len(grp))
-        tmpl_patching[t] = run_activation_patching(model, grp, layers, device, dtype)
-        tmpl_grad[t] = run_gradient_dot_delta(model, grp, layer_deltas, layers, device, dtype)
+        tmpl_patching[t] = run_activation_patching(
+            model,
+            grp,
+            layers,
+            device,
+            dtype,
+            anchor_mode=anchor_mode,
+            anchor_factory=anchor_factory,
+        )
+        tmpl_grad[t] = run_gradient_dot_delta(
+            model,
+            grp,
+            layer_deltas,
+            layers,
+            device,
+            dtype,
+            anchor_mode=anchor_mode,
+            anchor_factory=anchor_factory,
+        )
 
     def _make_scores(patch_raw, grad_raw) -> CausalScores:
         p_mean, p_std = aggregate(patch_raw, layers)

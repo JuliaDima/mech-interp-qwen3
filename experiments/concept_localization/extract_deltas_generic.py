@@ -1,8 +1,7 @@
-"""Extract per-layer residual-stream deltas for generic ConceptPair datasets.
+"""Extract per-layer residual-stream deltas for ConceptPair datasets.
 
-Mirrors extract_deltas.py but uses ConceptPair (prompt_pos / prompt_neg)
-instead of CarryPair.  Template logic is dropped; all pairs are treated as
-a single group.
+Supports configurable anchor selection, aggregate and per-template deltas,
+activation-norm diagnostics, and optional cosine-weighted aggregation.
 """
 
 from __future__ import annotations
@@ -10,6 +9,7 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Callable
+from dataclasses import dataclass, field
 
 import torch
 from tqdm import tqdm
@@ -18,10 +18,19 @@ from tqdm import tqdm
 AnchorFactory = Callable[[object, object], dict[str, int]]
 
 from experiments.concept_localization.concept_pair import ConceptPair
-from experiments.concept_localization.extract_deltas import LayerDeltas
 from mechinterp_qwen3.utils.token_utils import tokenize_qwen_input
 
 log = logging.getLogger(__name__)
+
+
+@dataclass
+class LayerDeltas:
+    delta: dict[int, torch.Tensor] = field(default_factory=dict)  # layer -> (d_model,)
+    mean_act_norm: dict[int, float] = field(default_factory=dict)  # layer -> mean ||h||
+    mean_pair_cos: dict[int, float] = field(default_factory=dict)  # layer -> mean cos(delta_i, delta_bar)
+    n_pairs: int = 0
+    skipped: int = 0
+
 
 # Token strings that mark "end of expression / about to answer".
 # The model compresses the computed result onto these tokens (per biology-of-LLMs paper).
