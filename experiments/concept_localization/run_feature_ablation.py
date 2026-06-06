@@ -246,19 +246,136 @@ def diff_metrics(baseline: EvalMetrics, ablated: EvalMetrics) -> dict:
     return out
 
 
-def print_report(results: dict) -> None:
-    print("feature,split,n,baseline_acc,ablated_acc,delta_acc,baseline_p,ablated_p,delta_p")
-    for row in results["features"]:
+def _mean_std(values: list[float]) -> dict[str, float]:
+    if not values:
+        return {"mean": 0.0, "std": 0.0}
+    mean = sum(values) / len(values)
+    if len(values) == 1:
+        return {"mean": mean, "std": 0.0}
+    var = sum((v - mean) ** 2 for v in values) / (len(values) - 1)
+    return {"mean": mean, "std": var ** 0.5}
+
+
+def summarize_runs(metric_runs: list[dict]) -> dict:
+    summary: dict = {"repeats": len(metric_runs)}
+    for section in ("baseline", "ablated"):
+        summary[section] = {}
         for split in ("all", "pos", "neg"):
-            base = row["metrics"]["baseline"][split]
-            abl = row["metrics"]["ablated"][split]
-            chg = row["metrics"]["change"][split]
+            rows = [run[section][split] for run in metric_runs]
+            summary[section][split] = {
+                "n": int(round(sum(row["n"] for row in rows) / max(1, len(rows)))),
+                "accuracy": _mean_std([row["accuracy"] for row in rows]),
+                "mean_correct_prob": _mean_std([row["mean_correct_prob"] for row in rows]),
+            }
+    summary["change"] = {}
+    for split in ("all", "pos", "neg"):
+        rows = [run["change"][split] for run in metric_runs]
+        summary["change"][split] = {
+            "accuracy": _mean_std([row["accuracy"] for row in rows]),
+            "mean_correct_prob": _mean_std([row["mean_correct_prob"] for row in rows]),
+        }
+    return summary
+
+
+def print_report(results: dict) -> None:
+    print(
+        "feature,split,n,repeats,"
+        "baseline_acc_mean,baseline_acc_std,"
+        "ablated_acc_mean,ablated_acc_std,"
+        "delta_acc_mean,delta_acc_std,"
+        "baseline_p_mean,baseline_p_std,"
+        "ablated_p_mean,ablated_p_std,"
+        "delta_p_mean,delta_p_std"
+    )
+    for row in results["features"]:
+        summary = row["summary"]
+        for split in ("all", "pos", "neg"):
+            base = summary["baseline"][split]
+            abl = summary["ablated"][split]
+            chg = summary["change"][split]
             print(
-                f"{row['feature']},{split},{base['n']},"
-                f"{base['accuracy']:.4f},{abl['accuracy']:.4f},{chg['accuracy']:+.4f},"
-                f"{base['mean_correct_prob']:.6f},{abl['mean_correct_prob']:.6f},"
-                f"{chg['mean_correct_prob']:+.6f}"
+                f"{row['feature']},{split},{base['n']},{summary['repeats']},"
+                f"{base['accuracy']['mean']:.4f},{base['accuracy']['std']:.4f},"
+                f"{abl['accuracy']['mean']:.4f},{abl['accuracy']['std']:.4f},"
+                f"{chg['accuracy']['mean']:+.4f},{chg['accuracy']['std']:.4f},"
+                f"{base['mean_correct_prob']['mean']:.6f},{base['mean_correct_prob']['std']:.6f},"
+                f"{abl['mean_correct_prob']['mean']:.6f},{abl['mean_correct_prob']['std']:.6f},"
+                f"{chg['mean_correct_prob']['mean']:+.6f},{chg['mean_correct_prob']['std']:.6f}"
             )
+
+
+def plot_results(results: dict, out_dir: Path) -> list[Path]:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    import experiments.plot_style as ps
+
+    rows = sorted(
+        results["features"],
+        key=lambda row: row["summary"]["change"]["all"]["accuracy"]["mean"],
+    )
+    if not rows:
+        return []
+
+    ps.apply()
+    labels = [row["feature"] for row in rows]
+    y = list(range(len(rows)))
+    offsets = {"all": -0.24, "pos": 0.0, "neg": 0.24}
+    colors = {"all": ps.NAVY, "pos": ps.VIOLET, "neg": ps.TEAL}
+
+    fig_h = max(5.0, 0.36 * len(rows) + 1.8)
+    fig, axes = plt.subplots(1, 2, figsize=(12.8, fig_h), sharey=True)
+
+    for ax, metric, title, xlabel in [
+        (axes[0], "accuracy", "Accuracy change", "ablated - baseline accuracy"),
+        (axes[1], "mean_correct_prob", "Correct-probability change", "ablated - baseline mean p(correct)"),
+    ]:
+        ax.axvline(0.0, color=ps.GRAY, lw=1.0, ls="--", alpha=0.8)
+        for split in ("all", "pos", "neg"):
+            xs = [row["summary"]["change"][split][metric]["mean"] for row in rows]
+            xerr = [row["summary"]["change"][split][metric]["std"] for row in rows]
+            ys = [v + offsets[split] for v in y]
+            ax.errorbar(
+                xs,
+                ys,
+                xerr=xerr,
+                fmt="o",
+                ms=4.5,
+                capsize=2.5,
+                elinewidth=1.0,
+                color=colors[split],
+                label=split,
+                alpha=0.95,
+            )
+        ax.set_title(title, fontsize=11, pad=6)
+        ax.set_xlabel(xlabel, fontsize=9)
+        ax.grid(axis="x", color="#E0E0E0", lw=0.5)
+        ax.grid(axis="y", visible=False)
+        ax.tick_params(axis="x", labelsize=8)
+
+    axes[0].set_yticks(y)
+    axes[0].set_yticklabels(labels, fontsize=8)
+    axes[0].set_ylabel("ablated feature", fontsize=9)
+    axes[1].tick_params(axis="y", labelleft=False)
+    axes[1].legend(title="split", fontsize=8, title_fontsize=8, loc="best")
+
+    config = results.get("config", {})
+    fig.suptitle(
+        f"{config.get('concept', 'concept')} feature ablations "
+        f"(n={config.get('sample_per_class', '?')}/split, repeats={config.get('repeats', 1)})",
+        fontsize=12,
+        fontweight="bold",
+        y=0.995,
+    )
+    fig.tight_layout(rect=(0, 0, 1, 0.965))
+
+    paths = [out_dir / "feature_ablation_summary.png", out_dir / "feature_ablation_summary.pdf"]
+    for path in paths:
+        fig.savefig(path)
+    plt.close(fig)
+    return paths
 
 
 def main() -> None:
@@ -279,6 +396,7 @@ def main() -> None:
     parser.add_argument("--dtype", default="bfloat16")
     parser.add_argument("--n", type=int, default=100, help="Pairs per template to generate")
     parser.add_argument("--sample_per_class", type=int, default=50)
+    parser.add_argument("--repeats", type=int, default=1, help="Number of independent random 50/50 subsamples to evaluate")
     parser.add_argument("--batch_size", type=int, default=8, help="Evaluation batch size within equal-length prompts")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--template", default=None, help="Optional template filter, e.g. T0")
@@ -293,12 +411,16 @@ def main() -> None:
     features = [parse_feature_name(name) for name in load_feature_names(args)]
 
     log.info("Generating %d pairs/template for concept '%s'", args.n, args.concept)
-    pairs = _load_concept(args.concept, args.n, args.seed)
+    all_pairs = _load_concept(args.concept, args.n, args.seed)
     if args.template:
-        pairs = [p for p in pairs if p.template == args.template]
-        log.info("Filtered to template '%s': %d pairs", args.template, len(pairs))
-    pairs = select_pairs(pairs, args.sample_per_class, args.seed)
-    log.info("Sampled %d positive and %d negative examples", len(pairs), len(pairs))
+        all_pairs = [p for p in all_pairs if p.template == args.template]
+        log.info("Filtered to template '%s': %d pairs", args.template, len(all_pairs))
+    log.info(
+        "Using %d repeats of %d positive and %d negative examples",
+        args.repeats,
+        args.sample_per_class,
+        args.sample_per_class,
+    )
 
     device = get_default_device()
     dtype = parse_dtype(args.dtype)
@@ -321,19 +443,49 @@ def main() -> None:
                 f"for layer {feature.layer} with {n_features} features"
             )
 
-    baseline = evaluate(model, pairs, batch_size=args.batch_size)
-    rows = []
-    for feature in features:
-        ablated = evaluate(model, pairs, feature=feature, alpha=args.alpha, batch_size=args.batch_size)
-        rows.append(
-            {
-                "feature": feature.key,
-                "input_name": feature.name,
-                "layer": feature.layer,
-                "feature_id": feature.feature_id,
-                "metrics": diff_metrics(baseline, ablated),
-            }
+    repeats = max(1, args.repeats)
+    rows = [
+        {
+            "feature": feature.key,
+            "input_name": feature.name,
+            "layer": feature.layer,
+            "feature_id": feature.feature_id,
+            "runs": [],
+        }
+        for feature in features
+    ]
+
+    for repeat_idx in range(repeats):
+        sample_seed = args.seed + repeat_idx
+        pairs = select_pairs(all_pairs, args.sample_per_class, sample_seed)
+        log.info(
+            "Repeat %d/%d: sampled %d positive and %d negative examples with seed %d",
+            repeat_idx + 1,
+            repeats,
+            len(pairs),
+            len(pairs),
+            sample_seed,
         )
+        baseline = evaluate(model, pairs, batch_size=args.batch_size)
+        for feature, row in zip(features, rows, strict=False):
+            ablated = evaluate(
+                model,
+                pairs,
+                feature=feature,
+                alpha=args.alpha,
+                batch_size=args.batch_size,
+            )
+            row["runs"].append(
+                {
+                    "sample_seed": sample_seed,
+                    "metrics": diff_metrics(baseline, ablated),
+                }
+            )
+
+    for row in rows:
+        row["summary"] = summarize_runs([run["metrics"] for run in row["runs"]])
+        if repeats == 1:
+            row["metrics"] = row["runs"][0]["metrics"]
 
     out_dir = Path(args.out_dir or f"runs/concept_localization/{args.concept}/ablation")
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -345,6 +497,8 @@ def main() -> None:
             "dtype": args.dtype,
             "n_per_template": args.n,
             "sample_per_class": args.sample_per_class,
+            "repeats": repeats,
+            "sample_seeds": [args.seed + i for i in range(repeats)],
             "batch_size": args.batch_size,
             "seed": args.seed,
             "template": args.template,
@@ -363,6 +517,9 @@ def main() -> None:
     out_path = out_dir / "feature_ablation.json"
     out_path.write_text(json.dumps(results, indent=2))
     log.info("Saved results → %s", out_path)
+    plot_paths = plot_results(results, out_dir)
+    for plot_path in plot_paths:
+        log.info("Saved plot → %s", plot_path)
     print_report(results)
 
 

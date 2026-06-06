@@ -581,7 +581,6 @@ def plot_anchor_layer_grid(
         if not leftmost:
             for ax in col_axes:
                 ax.set_ylabel("")
-                ax.tick_params(axis="y", labelleft=False, labelright=False)
 
         if highlight:
             _apply_highlight(col_axes)
@@ -589,15 +588,11 @@ def plot_anchor_layer_grid(
         for row in range(N_ROWS):
             ax = axes[row, col]
             ax.set_xlim(min(layers) - 0.5, max(layers) + 0.5)
-            if row < N_ROWS - 1:
-                ax.tick_params(labelbottom=False)
-            else:
+            if row == N_ROWS - 1:
                 ax.set_xlabel("layer", fontsize=7)
-                ax.set_xticks(ticks)
-                ax.tick_params(axis="x", labelsize=6)
-            if row != 2:
-                ax.set_xticks(ticks)
-            ax.tick_params(axis="y", labelsize=6)
+            ax.set_xticks(ticks)
+            ax.tick_params(axis="x", labelsize=6, labelbottom=True)
+            ax.tick_params(axis="y", labelsize=6, labelleft=True, labelright=False)
             ax.grid(axis="x", color=ps.GRAY, alpha=0.18, lw=0.5)
 
     fig_h    = PANEL_H * N_ROWS

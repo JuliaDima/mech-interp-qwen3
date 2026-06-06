@@ -151,9 +151,7 @@ def generate_carry_pairs(
                                 "b_pos": b_pos,
                                 "a_neg": a_neg,
                                 "b_neg": b_neg,
-                                "carry_col": 0,
                                 "n_digits": 3,
-                                "vary_a": vary_dir == 'a',
                             },
                         )
                     )
