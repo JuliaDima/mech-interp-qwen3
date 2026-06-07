@@ -194,6 +194,20 @@ def extract_labels(
     return (idx_arr % 4).astype(int), "pair_idx mod 4"
 
 
+def label_analysis_mode(label_name: str, labels: np.ndarray) -> str:
+    """Classify labels into circular-offset vs simple/fallback PCA analysis."""
+    n_cls = len(np.unique(labels))
+    if label_name in {"offset", "remainder"} and n_cls >= 5:
+        return "circular"
+    return "simple"
+
+
+def mode_description(mode: str) -> str:
+    if mode == "circular":
+        return "offset/modular label: PCA + circular/Fourier diagnostics"
+    return "simple/fallback label: PCA/class-separation only"
+
+
 # ── Clustering ────────────────────────────────────────────────────────────────
 
 def cluster_features(D: np.ndarray, n_clusters: int, min_size: int = 2):
@@ -218,9 +232,10 @@ def plot_cluster_top3(
     ranked: list[dict],
     npz,
     pair_indices: list[int],
-    out_path: Path,
+    out_path: Path | None,
     concept: str,
     anchor_name: str,
+    pdf_pages=None,
 ) -> None:
     """Bar chart of top-3 features: sorted pos (blue) then neg (red) activations."""
     # rank within cluster by jaccard×|score|
@@ -275,7 +290,10 @@ def plot_cluster_top3(
         fontsize=10, y=1.02,
     )
     fig.tight_layout()
-    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    if pdf_pages is not None:
+        pdf_pages.savefig(fig, bbox_inches="tight")
+    if out_path is not None:
+        fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -288,10 +306,12 @@ def plot_cluster_pca(
     label_name: str,
     concept: str,
     anchor_name: str,
-    out_path: Path,
+    out_path: Path | None,
     n_pcs: int = 6,
+    analysis_mode: str = "simple",
+    pdf_pages=None,
 ) -> dict:
-    """PCA scatter + polar centroid ring + Fourier fits for both Deltas and Raw Activations. Returns summary dict."""
+    """PCA scatter plus optional circular/Fourier diagnostics. Returns summary dict."""
     # ── 1. DELTA PCA ──────────────────────────────────────────────────────────
     scaler = StandardScaler()
     D_std  = scaler.fit_transform(D_cluster)
@@ -324,7 +344,8 @@ def plot_cluster_pca(
     else:
         pearson_r = float('nan')
 
-    fourier_valid = n_cls > 3
+    circular_enabled = analysis_mode == "circular" and n_cls >= 5
+    fourier_valid = circular_enabled
     g = int(unique_labels.max()) + 1
     k_vals = unique_labels.astype(float)
     X_f = np.column_stack([np.cos(2*np.pi*k_vals/g), np.sin(2*np.pi*k_vals/g)])
@@ -386,7 +407,7 @@ def plot_cluster_pca(
         pearson_r_raw = float('nan')
 
     # Fourier fits for all 7 classes (including 0)
-    fourier_valid_raw = n_cls_raw > 3
+    fourier_valid_raw = analysis_mode == "circular" and n_cls_raw >= 5
     g_raw = int(unique_labels_raw.max()) + 1
     k_vals_raw = unique_labels_raw.astype(float)
     X_f_raw = np.column_stack([np.cos(2*np.pi*k_vals_raw/g_raw), np.sin(2*np.pi*k_vals_raw/g_raw)])
@@ -417,6 +438,20 @@ def plot_cluster_pca(
     ax4 = fig.add_subplot(2, 3, 5, projection="polar")
     ax5 = fig.add_subplot(2, 3, 6)
 
+    if analysis_mode != "circular":
+        for ax, title in [(ax1, "Delta circular diagnostics skipped"),
+                          (ax2, "Delta Fourier diagnostics skipped"),
+                          (ax4, "Raw circular diagnostics skipped"),
+                          (ax5, "Raw Fourier diagnostics skipped")]:
+            ax.set_axis_off()
+            ax.text(0.5, 0.5,
+                    "PCA retained\nlabel is non-offset or has <5 classes",
+                    ha="center", va="center", fontsize=9, color=ps.GRAY,
+                    transform=ax.transAxes)
+            ax.set_title(title, fontsize=9)
+
+    line_colors = [ps.NAVY, ps.TEAL, ps.MAUVE, ps.RED]
+
     # Panel 1: Delta Scatter
     for k, u in enumerate(unique_labels):
         mask = labels == u
@@ -438,37 +473,38 @@ def plot_cluster_pca(
     ], fontsize=6, loc="best", framealpha=0.85, edgecolor="#ddd")
 
     # Panel 2: Delta Polar Centroids
-    mean_r = float(radii.mean()) if radii.mean() > 0 else 1.0
-    for k, (angle, radius, lbl) in enumerate(zip(angles, radii, unique_labels)):
-        ax1.scatter(angle, radius, color=cmap(k), s=90, zorder=5)
-        ax1.annotate(str(lbl), xy=(angle, radius), xytext=(5, 3), textcoords="offset points",
-                     fontsize=8, color=cmap(k), fontweight="bold")
-    ax1.plot(np.append(angles, angles[0]), np.append(radii, radii[0]), color="#555", lw=1.0, ls="--", alpha=0.6)
-    ideal_th = np.linspace(0, 2*np.pi, n_cls, endpoint=False)
-    ax1.plot(np.append(ideal_th, ideal_th[0]), np.full(n_cls + 1, mean_r), color=ps.RED, lw=0.9, ls=":", alpha=0.55, label="ideal")
-    r_title = f"Pearson r={pearson_r:.2f}" if not math.isnan(pearson_r) else ""
-    ax1.set_title(f"Delta Polar centroids\nR_cv={radius_cv:.3f}  {r_title}", fontsize=9, pad=12)
-    ax1.set_rticks([])
-    ax1.legend(fontsize=7, loc="upper right")
+    if analysis_mode == "circular":
+        mean_r = float(radii.mean()) if radii.mean() > 0 else 1.0
+        for k, (angle, radius, lbl) in enumerate(zip(angles, radii, unique_labels)):
+            ax1.scatter(angle, radius, color=cmap(k), s=90, zorder=5)
+            ax1.annotate(str(lbl), xy=(angle, radius), xytext=(5, 3), textcoords="offset points",
+                         fontsize=8, color=cmap(k), fontweight="bold")
+        ax1.plot(np.append(angles, angles[0]), np.append(radii, radii[0]), color="#555", lw=1.0, ls="--", alpha=0.6)
+        ideal_th = np.linspace(0, 2*np.pi, n_cls, endpoint=False)
+        ax1.plot(np.append(ideal_th, ideal_th[0]), np.full(n_cls + 1, mean_r), color=ps.RED, lw=0.9, ls=":", alpha=0.55, label="ideal")
+        r_title = f"Pearson r={pearson_r:.2f}" if not math.isnan(pearson_r) else ""
+        ax1.set_title(f"Delta Polar centroids\nR_cv={radius_cv:.3f}  {r_title}", fontsize=9, pad=12)
+        ax1.set_rticks([])
+        ax1.legend(fontsize=7, loc="upper right")
 
     # Panel 3: Delta Fourier Fits
-    line_colors = [ps.NAVY, ps.TEAL, ps.MAUVE, ps.RED]
-    k_fine = np.linspace(float(unique_labels.min()), float(unique_labels.max()), 100)
-    for i in range(n_show):
-        ax2.plot(unique_labels, pc_means[i], "o", color=line_colors[i], ms=6, zorder=4)
-        ax2.plot(unique_labels, pc_means[i], color=line_colors[i], lw=1.0, alpha=0.4)
-        if fourier_valid:
-            c = pc_coefs[i]
-            fit_fine = c[0]*np.cos(2*np.pi*k_fine/g) + c[1]*np.sin(2*np.pi*k_fine/g)
-            ax2.plot(k_fine, fit_fine, color=line_colors[i], lw=1.5, ls="--", label=f"PC{i+1} R²={pc_r2[i]:.2f}")
-        else:
-            ax2.plot([], [], color=line_colors[i], lw=1.5, ls="--", label=f"PC{i+1}")
-    ax2.axhline(0, color=ps.GRAY, lw=0.7, ls="--", alpha=0.6)
-    ax2.set_xlabel(label_name, fontsize=9)
-    ax2.set_ylabel("mean PC score", fontsize=9)
-    ax2.set_title(f"Delta Fourier fits (g={g})", fontsize=9)
-    ax2.set_xticks(unique_labels)
-    ax2.legend(fontsize=7, ncol=2)
+    if analysis_mode == "circular":
+        k_fine = np.linspace(float(unique_labels.min()), float(unique_labels.max()), 100)
+        for i in range(n_show):
+            ax2.plot(unique_labels, pc_means[i], "o", color=line_colors[i], ms=6, zorder=4)
+            ax2.plot(unique_labels, pc_means[i], color=line_colors[i], lw=1.0, alpha=0.4)
+            if fourier_valid:
+                c = pc_coefs[i]
+                fit_fine = c[0]*np.cos(2*np.pi*k_fine/g) + c[1]*np.sin(2*np.pi*k_fine/g)
+                ax2.plot(k_fine, fit_fine, color=line_colors[i], lw=1.5, ls="--", label=f"PC{i+1} R²={pc_r2[i]:.2f}")
+            else:
+                ax2.plot([], [], color=line_colors[i], lw=1.5, ls="--", label=f"PC{i+1}")
+        ax2.axhline(0, color=ps.GRAY, lw=0.7, ls="--", alpha=0.6)
+        ax2.set_xlabel(label_name, fontsize=9)
+        ax2.set_ylabel("mean PC score", fontsize=9)
+        ax2.set_title(f"Delta Fourier fits (g={g})", fontsize=9)
+        ax2.set_xticks(unique_labels)
+        ax2.legend(fontsize=7, ncol=2)
 
     # Panel 4: Raw Scatter
     for k, u in enumerate(unique_labels_raw):
@@ -499,42 +535,44 @@ def plot_cluster_pca(
     ], fontsize=6, loc="best", framealpha=0.85, edgecolor="#ddd")
 
     # Panel 5: Raw Polar Centroids
-    mean_r_raw = float(radii_raw.mean()) if radii_raw.mean() > 0 else 1.0
-    for k, u in enumerate(unique_labels_raw):
-        # find angle/radius from cents_raw relative to centre_raw
-        diff = cents_raw[k] - centre_raw
-        r = np.linalg.norm(diff)
-        angle = np.arctan2(diff[1], diff[0])
-        marker = "X" if u == 0 else "o"
-        ax4.scatter(angle, r, color=cmap_raw(k), s=120 if u == 0 else 90, marker=marker, zorder=5)
-        ax4.annotate(str(int(u)), xy=(angle, r), xytext=(5, 3), textcoords="offset points",
-                     fontsize=8, color=cmap_raw(k), fontweight="bold")
-    if ring_mask.sum() > 2:
-        ax4.plot(np.append(angles_raw, angles_raw[0]), np.append(radii_raw, radii_raw[0]), color="#555", lw=1.0, ls="--", alpha=0.6)
-    ideal_th_raw = np.linspace(0, 2*np.pi, ring_mask.sum(), endpoint=False)
-    ax4.plot(np.append(ideal_th_raw, ideal_th_raw[0]), np.full(ring_mask.sum() + 1, mean_r_raw), color=ps.RED, lw=0.9, ls=":", alpha=0.55, label="ideal")
-    r_title_raw = f"Pearson r={pearson_r_raw:.2f}" if not math.isnan(pearson_r_raw) else ""
-    ax4.set_title(f"Raw Polar centroids (excl 0)\nR_cv={radius_cv_raw:.3f}  {r_title_raw}", fontsize=9, pad=12)
-    ax4.set_rticks([])
-    ax4.legend(fontsize=7, loc="upper right")
+    if analysis_mode == "circular":
+        mean_r_raw = float(radii_raw.mean()) if radii_raw.mean() > 0 else 1.0
+        for k, u in enumerate(unique_labels_raw):
+            # find angle/radius from cents_raw relative to centre_raw
+            diff = cents_raw[k] - centre_raw
+            r = np.linalg.norm(diff)
+            angle = np.arctan2(diff[1], diff[0])
+            marker = "X" if u == 0 else "o"
+            ax4.scatter(angle, r, color=cmap_raw(k), s=120 if u == 0 else 90, marker=marker, zorder=5)
+            ax4.annotate(str(int(u)), xy=(angle, r), xytext=(5, 3), textcoords="offset points",
+                         fontsize=8, color=cmap_raw(k), fontweight="bold")
+        if ring_mask.sum() > 2:
+            ax4.plot(np.append(angles_raw, angles_raw[0]), np.append(radii_raw, radii_raw[0]), color="#555", lw=1.0, ls="--", alpha=0.6)
+        ideal_th_raw = np.linspace(0, 2*np.pi, ring_mask.sum(), endpoint=False)
+        ax4.plot(np.append(ideal_th_raw, ideal_th_raw[0]), np.full(ring_mask.sum() + 1, mean_r_raw), color=ps.RED, lw=0.9, ls=":", alpha=0.55, label="ideal")
+        r_title_raw = f"Pearson r={pearson_r_raw:.2f}" if not math.isnan(pearson_r_raw) else ""
+        ax4.set_title(f"Raw Polar centroids (excl 0)\nR_cv={radius_cv_raw:.3f}  {r_title_raw}", fontsize=9, pad=12)
+        ax4.set_rticks([])
+        ax4.legend(fontsize=7, loc="upper right")
 
     # Panel 6: Raw Fourier Fits
-    k_fine_raw = np.linspace(float(unique_labels_raw.min()), float(unique_labels_raw.max()), 100)
-    for i in range(n_show):
-        ax5.plot(unique_labels_raw, pc_means_raw[i], "o", color=line_colors[i], ms=6, zorder=4)
-        ax5.plot(unique_labels_raw, pc_means_raw[i], color=line_colors[i], lw=1.0, alpha=0.4)
-        if fourier_valid_raw:
-            c = pc_coefs_raw[i]
-            fit_fine = c[0]*np.cos(2*np.pi*k_fine_raw/g_raw) + c[1]*np.sin(2*np.pi*k_fine_raw/g_raw)
-            ax5.plot(k_fine_raw, fit_fine, color=line_colors[i], lw=1.5, ls="--", label=f"PC{i+1} R²={pc_r2_raw[i]:.2f}")
-        else:
-            ax5.plot([], [], color=line_colors[i], lw=1.5, ls="--", label=f"PC{i+1}")
-    ax5.axhline(0, color=ps.GRAY, lw=0.7, ls="--", alpha=0.6)
-    ax5.set_xlabel(f"{label_name} (0=pos)", fontsize=9)
-    ax5.set_ylabel("mean PC score", fontsize=9)
-    ax5.set_title(f"Raw Fourier fits (g={g_raw})", fontsize=9)
-    ax5.set_xticks(unique_labels_raw)
-    ax5.legend(fontsize=7, ncol=2)
+    if analysis_mode == "circular":
+        k_fine_raw = np.linspace(float(unique_labels_raw.min()), float(unique_labels_raw.max()), 100)
+        for i in range(n_show):
+            ax5.plot(unique_labels_raw, pc_means_raw[i], "o", color=line_colors[i], ms=6, zorder=4)
+            ax5.plot(unique_labels_raw, pc_means_raw[i], color=line_colors[i], lw=1.0, alpha=0.4)
+            if fourier_valid_raw:
+                c = pc_coefs_raw[i]
+                fit_fine = c[0]*np.cos(2*np.pi*k_fine_raw/g_raw) + c[1]*np.sin(2*np.pi*k_fine_raw/g_raw)
+                ax5.plot(k_fine_raw, fit_fine, color=line_colors[i], lw=1.5, ls="--", label=f"PC{i+1} R²={pc_r2_raw[i]:.2f}")
+            else:
+                ax5.plot([], [], color=line_colors[i], lw=1.5, ls="--", label=f"PC{i+1}")
+        ax5.axhline(0, color=ps.GRAY, lw=0.7, ls="--", alpha=0.6)
+        ax5.set_xlabel(f"{label_name} (0=pos)", fontsize=9)
+        ax5.set_ylabel("mean PC score", fontsize=9)
+        ax5.set_title(f"Raw Fourier fits (g={g_raw})", fontsize=9)
+        ax5.set_xticks(unique_labels_raw)
+        ax5.legend(fontsize=7, ncol=2)
 
     r2_str = f"{max_r2:.3f}" if not math.isnan(max_r2) else "n/a"
     fig.suptitle(
@@ -544,7 +582,10 @@ def plot_cluster_pca(
         fontsize=10, y=1.02,
     )
     fig.tight_layout()
-    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    if pdf_pages is not None:
+        pdf_pages.savefig(fig, bbox_inches="tight")
+    if out_path is not None:
+        fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
     summary = {
@@ -555,6 +596,7 @@ def plot_cluster_pca(
         "var_pc12": round(float(sum(var[:2])), 4),
         "max_fourier_r2": round(max_r2, 4) if not math.isnan(max_r2) else float('nan'),
         "best_pc": int(np.argmax([r for r in pc_r2 if not math.isnan(r)] or [0])) + 1,
+        "analysis_mode": analysis_mode,
         "fourier_valid": fourier_valid,
         "pearson_r": round(pearson_r, 4) if not math.isnan(pearson_r) else float('nan'),
     }
@@ -680,6 +722,17 @@ def _pca_pair_panels(
     ax_scatter.legend(handles=legend_handles, fontsize=6, loc="best",
                       framealpha=0.85, edgecolor="#ddd")
 
+    if not fourier_valid:
+        for ax, title in [(ax_polar, f"{row_label} circular diagnostics skipped"),
+                          (ax_fourier, f"{row_label} Fourier diagnostics skipped")]:
+            ax.set_axis_off()
+            ax.text(0.5, 0.5,
+                    "PCA retained\nlabel is non-offset or has <5 classes",
+                    ha="center", va="center", fontsize=9, color=ps.GRAY,
+                    transform=ax.transAxes)
+            ax.set_title(title, fontsize=9)
+        return
+
     # ── polar ─────────────────────────────────────────────────────────────────
     mean_r = float(radii.mean()) if radii.mean() > 0 else 1.0
     # plot all centroids; ring centroids get the polar metrics treatment
@@ -738,7 +791,8 @@ def plot_pca_pair_extra(
     concept: str,
     anchor_name: str,
     cluster_id: int,
-    out_path: Path,
+    out_path: Path | None,
+    pdf_pages=None,
 ) -> None:
     """2-row × 3-col PCA plot (delta row + raw row) for an arbitrary (pci, pcj) pair."""
     n_pcs     = pca_state["Z"].shape[1]
@@ -772,7 +826,10 @@ def plot_pca_pair_extra(
         fontsize=10, y=1.02,
     )
     fig.tight_layout()
-    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    if pdf_pages is not None:
+        pdf_pages.savefig(fig, bbox_inches="tight")
+    if out_path is not None:
+        fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -809,6 +866,7 @@ def run_analysis(
     n_clusters: int = 6,
     n_pcs: int = 6,
     out_dir: Path | None = None,
+    legacy_cluster_files: bool = False,
 ) -> list[dict]:
     if out_dir is None:
         tag = template if template else "all"
@@ -836,6 +894,7 @@ def run_analysis(
     labels, label_name = extract_labels(examples, pair_indices)
     # trim to same length as D rows
     labels = labels[:D.shape[0]]
+    analysis_mode = label_analysis_mode(label_name, labels)
 
     n_clusters = min(n_clusters, D.shape[1])
     concept    = sweep_dir.parent.parent.name
@@ -843,7 +902,8 @@ def run_analysis(
 
     print(f"  {concept}/{anchor}  D={D.shape}  "
           f"peak_layers={sorted(peak_layers) if peak_layers else 'all'}  "
-          f"label='{label_name}'  n_cls={len(np.unique(labels))}")
+          f"label='{label_name}'  n_cls={len(np.unique(labels))}  "
+          f"mode={mode_description(analysis_mode)}")
 
     cos_sim, cluster_labels, groups = cluster_features(D, n_clusters)
 
@@ -855,6 +915,8 @@ def run_analysis(
     rank_map = {f"L{r['layer']}_F{r['feat_id']}": r["jaccard"] * abs(r["score"]) for r in ranked}
     cluster_features_json: dict[str, list[str]] = {}
 
+    from matplotlib.backends.backend_pdf import PdfPages
+
     summaries = []
     for group in groups:
         c_id   = int(cluster_labels[group[0]])
@@ -864,11 +926,14 @@ def run_analysis(
         top3_indices = sorted(group, key=lambda i: rank_map.get(feat_labels[i], 0.0), reverse=True)[:3]
         cluster_features_json[f"cluster_{c_id:02d}"] = [feat_labels[i] for i in top3_indices]
 
+        report_path = out_dir / f"cluster_{c_id:02d}_analysis.pdf"
+        pdf_pages = PdfPages(report_path)
+
         # top-3 bar chart
         plot_cluster_top3(
             c_id, group, feat_labels, ranked, npz, pair_indices,
-            out_dir / f"cluster_{c_id:02d}_top3.png",
-            concept, anchor,
+            out_dir / f"cluster_{c_id:02d}_top3.png" if legacy_cluster_files else None,
+            concept, anchor, pdf_pages=pdf_pages,
         )
 
         # PCA
@@ -891,27 +956,37 @@ def run_analysis(
         s, pca_state, pca_state_raw = plot_cluster_pca(
             c_id, D_c, P_c, N_c, labels, label_name,
             concept, anchor,
-            out_dir / f"cluster_{c_id:02d}_pca.png",
+            out_dir / f"cluster_{c_id:02d}_pca.png" if legacy_cluster_files else None,
             n_pcs=n_pcs,
+            analysis_mode=analysis_mode,
+            pdf_pages=pdf_pages,
         )
         if s is None:
+            pdf_pages.close()
             continue
         summaries.append(s)
 
         passes, checks = passes_thresholds(s)
-        if not passes:
-            metrics_path = out_dir / f"cluster_{c_id:02d}_pca_extra_metrics.json"
-            metrics_path.write_text(json.dumps(
-                {**s, "threshold_checks": checks, "thresholds": THRESHOLDS},
-                indent=2,
-            ))
-            print(f"      cluster {c_id}: extra PCA skipped (thresholds not met) → {metrics_path.name}")
-        else:
-            for pci, pcj in EXTRA_PC_PAIRS:
-                out_p = out_dir / f"cluster_{c_id:02d}_pca_pc{pci}_pc{pcj}.png"
-                plot_pca_pair_extra(pci, pcj, pca_state, pca_state_raw,
-                                    label_name, concept, anchor, c_id, out_p)
-            print(f"      cluster {c_id}: extra PCA plots saved for pairs {EXTRA_PC_PAIRS}")
+        metrics_path = out_dir / f"cluster_{c_id:02d}_metrics.json"
+        metrics_path.write_text(json.dumps(
+            {**s, "threshold_checks": checks, "thresholds": THRESHOLDS},
+            indent=2,
+        ))
+
+        # Multiple component-combination analysis. For circular offset labels,
+        # threshold-passing clusters get the full PC-pair set; simple labels keep
+        # PCA-only pair pages in the same PDF, without circular interpretation.
+        pairs_to_plot = EXTRA_PC_PAIRS if (analysis_mode == "circular" and passes) else [(1, 3), (2, 3)]
+        plotted_pairs = []
+        for pci, pcj in pairs_to_plot:
+            out_p = out_dir / f"cluster_{c_id:02d}_pca_pc{pci}_pc{pcj}.png" if legacy_cluster_files else None
+            plot_pca_pair_extra(
+                pci, pcj, pca_state, pca_state_raw,
+                label_name, concept, anchor, c_id, out_p, pdf_pages=pdf_pages,
+            )
+            plotted_pairs.append((pci, pcj))
+        pdf_pages.close()
+        print(f"      cluster {c_id}: analysis report saved → {report_path.name}; PC pairs {plotted_pairs}")
 
     cf_path = out_dir / "cluster_features.json"
     with cf_path.open("w") as f:
@@ -921,7 +996,7 @@ def run_analysis(
     if summaries:
         print(f"\n    {'C':>4}  {'N':>4}  {'SV2/1':>6}  "
               f"{'var12%':>7}  {'maxR²':>6}  {'bestPC':>7}")
-        for s in sorted(summaries, key=lambda x: x["max_fourier_r2"], reverse=True):
+        for s in sorted(summaries, key=lambda x: -1 if math.isnan(x["max_fourier_r2"]) else x["max_fourier_r2"], reverse=True):
             print(f"    {s['cluster_id']:>4}  {s['n_features']:>4}  "
                   f"{s['sv_ratio_12']:>6.3f}  {s['var_pc12']*100:>6.1f}%  "
                   f"{s['max_fourier_r2']:>6.3f}  PC{s['best_pc']:>2}")
@@ -948,13 +1023,19 @@ def main() -> None:
     parser.add_argument("--top_k",     type=int, default=100)
     parser.add_argument("--n_clusters",type=int, default=6)
     parser.add_argument("--n_pcs",     type=int, default=6)
+    parser.add_argument("--legacy_cluster_files", action="store_true",
+                        help="Also save separate per-cluster PNGs in addition to the combined PDF report")
+    parser.add_argument("--out_dir", default=None,
+                        help="Output directory for --sweep_dir mode")
     args = parser.parse_args()
 
     tmpl = None if args.template.lower() == "none" else args.template
 
     if args.sweep_dir:
         run_analysis(Path(args.sweep_dir), template=tmpl,
-                     top_k=args.top_k, n_clusters=args.n_clusters, n_pcs=args.n_pcs)
+                     top_k=args.top_k, n_clusters=args.n_clusters, n_pcs=args.n_pcs,
+                     out_dir=Path(args.out_dir) if args.out_dir else None,
+                     legacy_cluster_files=args.legacy_cluster_files)
         return
 
     if args.all:
@@ -973,7 +1054,8 @@ def main() -> None:
                 continue
             print(f"\n{'─'*60}")
             run_analysis(sweep_dir, template=tmpl,
-                         top_k=args.top_k, n_clusters=args.n_clusters, n_pcs=args.n_pcs)
+                         top_k=args.top_k, n_clusters=args.n_clusters, n_pcs=args.n_pcs,
+                         legacy_cluster_files=args.legacy_cluster_files)
 
 
 if __name__ == "__main__":

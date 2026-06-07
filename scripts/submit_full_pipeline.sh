@@ -52,7 +52,6 @@ ALL_CONCEPTS=(
     negation_scope
     balanced_parentheses
     decimal_termination
-    decimal_termination_large_prime
     doppler_shift
     dot_product_sign
     geometric_series
