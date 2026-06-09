@@ -13,7 +13,7 @@ Output: runs/concept_localization/carry/feature_vs_fourier/
 
 Usage
 -----
-    python scripts/sweeps/plot_feature_vs_fourier.py \
+    python experiments/concept_localization/concept_fits/plot_feature_vs_fourier.py \
         --features_json runs/concept_localization/carry/features_list_to_plot.json \
         --sweep_dir     runs/concept_localization/carry/carry_T0 \
         --out_dir       runs/concept_localization/carry/feature_vs_fourier
@@ -36,12 +36,12 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 import numpy as np
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 import experiments.plot_style as ps
-from scripts.sweeps.fourier_feature_analysis import (
+from experiments.concept_localization.concept_fits.fourier_feature_analysis import (
     _build_grid_from_sweep,
     find_min_k,
     classify_mode,

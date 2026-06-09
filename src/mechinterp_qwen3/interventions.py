@@ -163,6 +163,34 @@ def make_capture_hook(
 
 
 @torch.no_grad()
+def run_with_transcoder_reconstruction(
+    model: AttributionModel,
+    tokens: torch.Tensor,
+) -> torch.Tensor:
+    """Forward pass with all MLP outputs replaced by transcoder reconstructions.
+
+    No features are zeroed — this measures transcoder faithfulness relative to
+    the original model.  Layers without a transcoder are left untouched.
+
+    Args:
+        model: AttributionModel instance
+        tokens: Token IDs, shape (1, n_pos) or (n_pos,)
+
+    Returns:
+        Output logits, shape (1, n_pos, d_vocab)
+    """
+    layer_map: dict[int, list[int]] = {}
+    for layer in range(model.cfg.n_layers):
+        try:
+            tc = model.transcoders[layer]
+            if tc is not None:
+                layer_map[layer] = []
+        except (KeyError, IndexError):
+            pass
+    return inhibit_features(model, tokens, layer_map, alpha=0.0)
+
+
+@torch.no_grad()
 def inhibit_features(
     model: AttributionModel,
     tokens: torch.Tensor,

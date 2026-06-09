@@ -88,6 +88,7 @@ def _resolve_target(tokenizer, pair) -> tuple[list[int], int | None, int | None]
     label_pos / label_neg.  Returns (shared_prefix_ids, pos_target_id,
     neg_target_id) so callers can do teacher forcing: append shared_prefix_ids
     to both prompt sequences and measure the logit margin at position -1.
+    NOT to be used in ablation studies!
     """
     pred_pos = pair.predict_pos if pair.predict_pos else pair.label_pos
     pred_neg = pair.predict_neg if pair.predict_neg else pair.label_neg
