@@ -13,14 +13,10 @@
 
 \usetikzlibrary{arrows.meta, decorations.pathreplacing}
 
-% Use symmetric, slightly tighter margins for screen/PDF reading.  The class
-% defaults are two-sided print margins (30mm inner, 20mm outer), which alternate
-% left/right whitespace on consecutive pages.
 \makeatletter
 \cam@calcpaperdims{18mm}{18mm}{18mm}{18mm}
 \makeatother
 
-%% The title of the thesis:
 \title{Title}
 \author{Elisabeta-Iulia (Julia) Dima}
 
@@ -29,7 +25,6 @@
 
 \submissiondate{June, 2026}
 
-%% Declaration date:
 \date{June, 2026}
 
 %% PDF meta-info:
@@ -37,42 +32,34 @@
 \keywords{mechanistic interpretability, Large Language Models}
 
 
-%% Abstract:
 \abstract{%
   My abstract ...
 }
 
-%% Acknowledgements:
 \acknowledgements{%
   My acknowledgements ...
 }
 
 
-%% Contents:
 \begin{document}
 
 %% Title page, abstract, declaration etc.:
 \frontmatter{}
 
-%% Thesis body:
 \input{Pages/11Introduction} \label{sec:introduction}
 \input{Pages/12RelatedWork} \label{sec:RelatedWork}
 \input{Pages/13_Reproducibility}
-% \input{Pages/KnowledgeEditing}
 \input{Pages/ConceptLocalisation}
 
-%% Bibliography:
 \cleardoublepage
 \phantomsection
 \addcontentsline{toc}{chapter}{Bibliography}
 \bibliographystyle{plainnat}
 \bibliography{thesis}
 
-%% Appendix:
 \appendix
 \input{Pages/Glossary}
 
-%% Index:
 \printthesisindex
 
 \end{document}
