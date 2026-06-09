@@ -200,6 +200,9 @@ def main():
             r2_threshold=args.r2_threshold, seed=args.seed,
             template=args.template, n_pairs=args.n_pairs, dtype=args.dtype,
             features=args.features,
+            no_attr_filter=args.no_attr_filter,
+            attr_min_survival=args.attr_min_survival,
+            attr_survival_file=args.attr_survival_file,
         ))
     if all_results:
         best = sorted(all_results, key=lambda r: r["r2"] or 0, reverse=True)
