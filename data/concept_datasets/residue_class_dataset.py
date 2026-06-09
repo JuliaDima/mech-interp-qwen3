@@ -91,7 +91,8 @@ def generate_residue_pairs(
                     predict_pos=str(R_POS),
                     predict_neg=str(r_neg),
                     template=t,
-                    meta={"a_pos": a_pos, "a_neg": a_neg, "m": M, "r_pos": R_POS, "r_neg": r_neg},
+                    meta={"a_pos": a_pos, "a_neg": a_neg, "m": M, "r_pos": R_POS, "r_neg": r_neg,
+                          "offset": r_neg - R_POS},
                 )
             )
             counts[t] += 1

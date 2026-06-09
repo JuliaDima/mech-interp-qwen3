@@ -1,18 +1,26 @@
-"""PySR on the top-k transcoder features most aligned with the concept delta.
+"""PySR on top-k transcoder features for MODULAR concepts.
+
+For concepts with modular or grid structure: carry, gcd, residue_class.
+
+  - carry       uses the 10×10 ones-digit grid mode (a mod 10, b mod 10)
+  - gcd / residue_class  use generic-meta mode with numeric fields (a, b, g/m)
+
+For concepts whose task is better described by relational or inequality
+structure (transitive_ordering, triangle_inequality, …), use the
+concept-specific scripts in this directory instead — they add derived
+variables tailored to each concept's semantics.
 
 Selects features by |cos(δ_l, e^dec_f)| across all layers, computed from the
-loaded model's transcoders and cached to edec_features.npz
-in the anchor dir for reuse. Generates their activations over the concept
-dataset at the anchor used for the run, then runs PySR via fit_pysr_sweep.fit_feature.
+loaded model's transcoders and cached to edec_features.npz in the anchor dir
+for reuse. Generates their activations over the concept dataset at the anchor
+used for the run, then runs PySR via fit_pysr_sweep.fit_feature.
 
-Carry uses the 10×10 ones-digit grid; every other concept uses generic mode,
-fitting activations against the numeric meta variables. Only fits whose R²
-exceeds --r2_threshold are plotted.
+Only fits whose R² exceeds --r2_threshold are plotted.
 
 Usage
 -----
-    python scripts/sweeps/pysr_top_edec_features.py \\
-        --anchor_dir runs/concept_localization/carry/anchor_rank5_pos9 \\
+    python experiments/concept_localization/concept_fits/pysr_modular.py \\
+        --anchor_dir runs/concept_localization/carry/carry_T0/anchor_rank5_pos9 \\
         --concept carry --top_k 15 --r2_threshold 0.5
 """
 from __future__ import annotations
@@ -26,7 +34,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 for p in (_REPO_ROOT, _REPO_ROOT / "src", _REPO_ROOT / "scripts" / "sweeps"):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))

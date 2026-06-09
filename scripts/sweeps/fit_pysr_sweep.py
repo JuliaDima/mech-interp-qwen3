@@ -719,7 +719,7 @@ def _plot_carry_combined(
     equation text. This keeps long PySR/Fourier formulas readable and avoids
     Matplotlib mathtext overlap.
     """
-    from scripts.sweeps.fourier_feature_analysis import find_min_k
+    from experiments.concept_localization.concept_fits.fourier_feature_analysis import find_min_k
 
     ps.apply()
     X_full = _carry_full_X(variable_names)

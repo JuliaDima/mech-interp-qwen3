@@ -27,7 +27,6 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from experiments.concept_localization.causal_analysis import _resolve_target
 from experiments.concept_localization.run_concept import (
     CONCEPTS,
     _MODEL,
@@ -46,10 +45,6 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 log = logging.getLogger("feature_ablation")
-
-_DEFAULT_CARRY_FEATURES_FILE = (
-    _REPO_ROOT / "runs" / "concept_localization" / "carry" / "features_list_to_plot.json"
-)
 
 
 @dataclass(frozen=True)
@@ -104,8 +99,6 @@ def _dedupe_preserving_order(names: list[str]) -> list[str]:
 def load_feature_names(args: argparse.Namespace) -> list[str]:
     names = list(args.features or [])
     features_file = args.features_file
-    if features_file is None and args.concept == "carry" and not names:
-        features_file = str(_DEFAULT_CARRY_FEATURES_FILE)
 
     if features_file:
         path = Path(features_file)
@@ -157,33 +150,53 @@ def _metrics(rows: list[dict], skipped: int) -> EvalMetrics:
 def evaluate(
     model,
     pairs: list,
-    feature: FeatureSpec | None = None,
+    feature_map: dict[int, list[int]] | None = None,
     alpha: float = 0.0,
     batch_size: int = 8,
+    desc: str | None = None,
 ) -> EvalMetrics:
+    """Teacher-forced full-answer accuracy.
+
+    feature_map=None         → plain model forward pass (absolute baseline, no transcoder)
+    feature_map={L: []}      → transcoder reconstruction at layer L, no features zeroed
+    feature_map={L: [fid]}   → transcoder reconstruction at layer L, feature fid zeroed
+
+    The intended usage is to compare {L: []} (reconstruction baseline) against {L: [fid]}
+    (ablated), so both conditions share the same transcoder reconstruction error and the
+    delta isolates only the feature contribution.
+    """
     rows: list[dict] = []
     skipped = 0
-    feature_map = None if feature is None else {feature.layer: [feature.feature_id]}
 
-    examples_by_len: dict[int, list[tuple[str, list[int], int, int]]] = {}
+    if desc is None:
+        if feature_map is None:
+            desc = "raw-model"
+        else:
+            parts = []
+            for layer in sorted(feature_map):
+                fids = feature_map[layer]
+                parts.append(f"L{layer}" + (f"_F{fids[0]}" if len(fids) == 1 else f"[{len(fids)}feat]" if fids else "_tc"))
+            desc = "+".join(parts) or "tc-baseline"
+
+    # key = total tokens fed to the model (prompt + answer), for same-length batching
+    examples_by_len: dict[int, list[tuple[str, list[int], list[int]]]] = {}
     for pair in pairs:
-        prefix_ids, pos_target_id, neg_target_id = _resolve_target(model.tokenizer, pair)
-        if pos_target_id is None or neg_target_id is None:
-            skipped += 2
-            continue
+        pred_pos = pair.predict_pos if pair.predict_pos else pair.label_pos
+        pred_neg = pair.predict_neg if pair.predict_neg else pair.label_neg
 
-        examples = [
-            ("pos", pair.prompt_pos, pos_target_id, neg_target_id),
-            ("neg", pair.prompt_neg, neg_target_id, pos_target_id),
-        ]
-        for split, prompt, correct_id, foil_id in examples:
+        for split, prompt, answer_str in [
+            ("pos", pair.prompt_pos, pred_pos),
+            ("neg", pair.prompt_neg, pred_neg),
+        ]:
             prompt_ids = model.tokenizer(prompt, add_special_tokens=False).input_ids
-            input_ids = prompt_ids + prefix_ids
-            examples_by_len.setdefault(len(input_ids), []).append(
-                (split, input_ids, correct_id, foil_id)
+            answer_ids = model.tokenizer(answer_str, add_special_tokens=False).input_ids
+            if not answer_ids:
+                skipped += 1
+                continue
+            examples_by_len.setdefault(len(prompt_ids) + len(answer_ids), []).append(
+                (split, prompt_ids, answer_ids)
             )
 
-    desc = "Baseline" if feature is None else feature.key
     total = sum(len(items) for items in examples_by_len.values())
     batch_size = max(1, batch_size)
     with tqdm(total=total, desc=desc) as pbar:
@@ -192,8 +205,10 @@ def evaluate(
                 batch = items[start : start + batch_size]
                 tokens = torch.stack(
                     [
-                        tokenize_qwen_input(input_ids, model.tokenizer, model.cfg.device)
-                        for _, input_ids, _, _ in batch
+                        tokenize_qwen_input(
+                            prompt_ids + answer_ids, model.tokenizer, model.cfg.device
+                        )
+                        for _, prompt_ids, answer_ids in batch
                     ],
                     dim=0,
                 )
@@ -203,32 +218,22 @@ def evaluate(
                 else:
                     logits = inhibit_features(model, tokens, feature_map, alpha=alpha)
 
-                probs = torch.softmax(logits[:, -1], dim=-1)
-                correct_ids = torch.tensor(
-                    [correct_id for _, _, correct_id, _ in batch],
-                    device=probs.device,
-                    dtype=torch.long,
-                )
-                foil_ids = torch.tensor(
-                    [foil_id for _, _, _, foil_id in batch],
-                    device=probs.device,
-                    dtype=torch.long,
-                )
-                batch_idx = torch.arange(len(batch), device=probs.device)
-                correct_probs = probs[batch_idx, correct_ids].float().cpu().tolist()
-                foil_probs = probs[batch_idx, foil_ids].float().cpu().tolist()
-
-                for (split, _, _, _), correct_prob, foil_prob in zip(
-                    batch, correct_probs, foil_probs, strict=False
-                ):
-                    rows.append(
-                        {
-                            "split": split,
-                            "correct": correct_prob > foil_prob,
-                            "correct_prob": correct_prob,
-                            "foil_prob": foil_prob,
-                        }
+                for i, (split, prompt_ids, answer_ids) in enumerate(batch):
+                    n = len(prompt_ids)
+                    # logits[i, n + j] predicts answer_ids[j]
+                    # (tokenize_qwen_input prepends one sink token, shifting input positions
+                    # by +1, but logit indices are 0-based so the offset cancels)
+                    correct_prob = torch.softmax(logits[i, n], dim=-1)[answer_ids[0]].item()
+                    all_correct = all(
+                        int(logits[i, n + j].argmax()) == tok_id
+                        for j, tok_id in enumerate(answer_ids)
                     )
+                    rows.append({
+                        "split": split,
+                        "correct": all_correct,
+                        "correct_prob": correct_prob,
+                    })
+
                 pbar.update(len(batch))
 
     return _metrics(rows, skipped)
@@ -385,10 +390,7 @@ def main() -> None:
         "--features",
         nargs="+",
         default=None,
-        help=(
-            "Feature names to ablate. For --concept carry, defaults to "
-            "runs/concept_localization/carry/features_list_to_plot.json when omitted."
-        ),
+        help="Feature names to ablate, e.g. L13_F56616 L14_F107848",
     )
     parser.add_argument("--features_file", default=None, help="Text or JSON list of feature names")
     parser.add_argument("--model", default=_MODEL)
@@ -401,6 +403,8 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--template", default=None, help="Optional template filter, e.g. T0")
     parser.add_argument("--alpha", type=float, default=0.0, help="Feature scale; 0 fully ablates")
+    parser.add_argument("--joint", action="store_true",
+                        help="Ablate all features simultaneously instead of one at a time")
     parser.add_argument(
         "--out_dir",
         default=None,
@@ -444,48 +448,113 @@ def main() -> None:
             )
 
     repeats = max(1, args.repeats)
-    rows = [
-        {
-            "feature": feature.key,
-            "input_name": feature.name,
-            "layer": feature.layer,
-            "feature_id": feature.feature_id,
-            "runs": [],
-        }
-        for feature in features
-    ]
 
-    for repeat_idx in range(repeats):
-        sample_seed = args.seed + repeat_idx
-        pairs = select_pairs(all_pairs, args.sample_per_class, sample_seed)
-        log.info(
-            "Repeat %d/%d: sampled %d positive and %d negative examples with seed %d",
-            repeat_idx + 1,
-            repeats,
-            len(pairs),
-            len(pairs),
-            sample_seed,
-        )
-        baseline = evaluate(model, pairs, batch_size=args.batch_size)
-        for feature, row in zip(features, rows, strict=False):
-            ablated = evaluate(
-                model,
-                pairs,
-                feature=feature,
-                alpha=args.alpha,
-                batch_size=args.batch_size,
-            )
-            row["runs"].append(
-                {
-                    "sample_seed": sample_seed,
-                    "metrics": diff_metrics(baseline, ablated),
-                }
-            )
+    if args.joint:
+        # Ablate all features simultaneously in a single forward pass
+        joint_feature_map: dict[int, list[int]] = {}
+        for f in features:
+            joint_feature_map.setdefault(f.layer, []).append(f.feature_id)
+        joint_key = "+".join(f.key for f in features)
+        log.info("Joint ablation of %d features: %s", len(features), joint_key)
 
-    for row in rows:
-        row["summary"] = summarize_runs([run["metrics"] for run in row["runs"]])
-        if repeats == 1:
-            row["metrics"] = row["runs"][0]["metrics"]
+        joint_row = {"feature": joint_key, "features": [f.key for f in features], "runs": []}
+
+        @torch.no_grad()
+        def _evaluate_joint(pairs):
+            rows_: list[dict] = []
+            skipped_ = 0
+            examples_by_len: dict[int, list] = {}
+            for pair in pairs:
+                pred_pos = pair.predict_pos if pair.predict_pos else pair.label_pos
+                pred_neg = pair.predict_neg if pair.predict_neg else pair.label_neg
+                for split, prompt, answer_str in [
+                    ("pos", pair.prompt_pos, pred_pos),
+                    ("neg", pair.prompt_neg, pred_neg),
+                ]:
+                    prompt_ids = model.tokenizer(prompt, add_special_tokens=False).input_ids
+                    answer_ids = model.tokenizer(answer_str, add_special_tokens=False).input_ids
+                    if not answer_ids:
+                        skipped_ += 1
+                        continue
+                    examples_by_len.setdefault(len(prompt_ids) + len(answer_ids), []).append(
+                        (split, prompt_ids, answer_ids))
+
+            total = sum(len(v) for v in examples_by_len.values())
+            with tqdm(total=total, desc="joint-ablated") as pbar:
+                for items in examples_by_len.values():
+                    for start in range(0, len(items), args.batch_size):
+                        batch = items[start: start + args.batch_size]
+                        tokens = torch.stack([
+                            tokenize_qwen_input(
+                                prompt_ids + answer_ids, model.tokenizer, model.cfg.device)
+                            for _, prompt_ids, answer_ids in batch], dim=0)
+                        logits = inhibit_features(model, tokens, joint_feature_map, alpha=args.alpha)
+                        for i, (split, prompt_ids, answer_ids) in enumerate(batch):
+                            n = len(prompt_ids)
+                            correct_prob = torch.softmax(logits[i, n], dim=-1)[answer_ids[0]].item()
+                            all_correct = all(
+                                int(logits[i, n + j].argmax()) == tok_id
+                                for j, tok_id in enumerate(answer_ids)
+                            )
+                            rows_.append({"split": split, "correct": all_correct,
+                                          "correct_prob": correct_prob})
+                        pbar.update(len(batch))
+            return _metrics(rows_, skipped_)
+
+        joint_baseline_map = {l: [] for l in joint_feature_map}
+        for repeat_idx in range(repeats):
+            sample_seed = args.seed + repeat_idx
+            pairs = select_pairs(all_pairs, args.sample_per_class, sample_seed)
+            baseline = evaluate(model, pairs, feature_map=joint_baseline_map,
+                                batch_size=args.batch_size, desc="joint-baseline")
+            ablated  = _evaluate_joint(pairs)
+            joint_row["runs"].append({"sample_seed": sample_seed,
+                                      "metrics": diff_metrics(baseline, ablated)})
+
+        joint_row["summary"] = summarize_runs([r["metrics"] for r in joint_row["runs"]])
+        rows = [joint_row]
+
+    else:
+        rows = [
+            {
+                "feature": feature.key,
+                "input_name": feature.name,
+                "layer": feature.layer,
+                "feature_id": feature.feature_id,
+                "runs": [],
+            }
+            for feature in features
+        ]
+
+        for repeat_idx in range(repeats):
+            sample_seed = args.seed + repeat_idx
+            pairs = select_pairs(all_pairs, args.sample_per_class, sample_seed)
+            log.info(
+                "Repeat %d/%d: sampled %d positive and %d negative examples with seed %d",
+                repeat_idx + 1, repeats, len(pairs), len(pairs), sample_seed,
+            )
+            # One baseline per unique layer — both baseline and ablated run through the
+            # same transcoder, so reconstruction error cancels and delta is feature-only.
+            layer_baselines: dict[int, EvalMetrics] = {}
+            for feature in features:
+                if feature.layer not in layer_baselines:
+                    layer_baselines[feature.layer] = evaluate(
+                        model, pairs, feature_map={feature.layer: []},
+                        batch_size=args.batch_size,
+                        desc=f"L{feature.layer}_tc-baseline",
+                    )
+            for feature, row in zip(features, rows, strict=False):
+                baseline = layer_baselines[feature.layer]
+                ablated = evaluate(model, pairs,
+                                   feature_map={feature.layer: [feature.feature_id]},
+                                   alpha=args.alpha, batch_size=args.batch_size)
+                row["runs"].append({"sample_seed": sample_seed,
+                                    "metrics": diff_metrics(baseline, ablated)})
+
+        for row in rows:
+            row["summary"] = summarize_runs([run["metrics"] for run in row["runs"]])
+            if repeats == 1:
+                row["metrics"] = row["runs"][0]["metrics"]
 
     out_dir = Path(args.out_dir or f"runs/concept_localization/{args.concept}/ablation")
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -503,14 +572,7 @@ def main() -> None:
             "seed": args.seed,
             "template": args.template,
             "alpha": args.alpha,
-            "features_file": (
-                args.features_file
-                or (
-                    str(_DEFAULT_CARRY_FEATURES_FILE)
-                    if args.concept == "carry" and args.features is None
-                    else None
-                )
-            ),
+            "features_file": args.features_file,
         },
         "features": rows,
     }

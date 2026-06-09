@@ -48,3 +48,4 @@ scripts/sweeps/closest_features.py
 scripts/sweeps/find_closest_all_feature_grid.py
 scripts/sweeps/fourier_feature_analysis.py
 scripts/sweeps/plot_closest_all_feature_grids.py
+data/concept_datasets/*.txt
