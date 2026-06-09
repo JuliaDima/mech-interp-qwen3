@@ -45,6 +45,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 import experiments.plot_style as ps
+from experiments.concept_localization.attr_survival import load_survival_set
 
 _BASE = _REPO_ROOT / "runs" / "concept_localization"
 _DEFAULT_PEAK_LAYERS_JSON = Path(__file__).with_name("peak_layers.json")
@@ -294,6 +295,7 @@ def plot_peak_features(
     max_features: int = 30,
     top_pct: float = 0.30,
     ncols: int = 5,
+    survival_set: set[tuple[int, int]] | None = None,
 ) -> list[tuple]:
     """Plot carry grids for top-jac×|score| features; return items for Figure 2."""
     ranked_path = sweep_dir / "sweep_ranked.json"
@@ -312,6 +314,10 @@ def plot_peak_features(
 
     peak_set   = set(peak_layers)
     from_peak  = [r for r in ranked_all if r["layer"] in peak_set]
+    if survival_set is not None:
+        n_before = len(from_peak)
+        from_peak = [r for r in from_peak if (r["layer"], r["feat_id"]) in survival_set]
+        print(f"  [attr-survival] {anchor_name}: {n_before} → {len(from_peak)} features after graph-survival filter")
     if not from_peak:
         print(f"  [skip] no ranked features at peak layers {peak_layers}")
         return []
@@ -466,6 +472,7 @@ def plot_peak_feature_clusters(
     top_per_cluster: int = 5,
     sort_by: str = "rank",
     out_name: str = "top_features_peak_layer_clusters.png",
+    survival_set: set[tuple[int, int]] | None = None,
 ) -> None:
     """Cluster top peak-layer features and plot top features per cluster.
 
@@ -488,7 +495,13 @@ def plot_peak_feature_clusters(
     candidates = []
     vectors = []
 
-    for rank_idx, r in enumerate(row for row in ranked_all if row["layer"] in peak_set):
+    pool = [row for row in ranked_all if row["layer"] in peak_set]
+    if survival_set is not None:
+        n_before = len(pool)
+        pool = [r for r in pool if (r["layer"], r["feat_id"]) in survival_set]
+        print(f"  [attr-survival] {anchor_name} clusters: {n_before} → {len(pool)} after graph-survival filter")
+
+    for rank_idx, r in enumerate(pool):
         if len(candidates) >= cluster_pool_size:
             break
         key = f"L{r['layer']}_F{r['feat_id']}"
@@ -623,6 +636,7 @@ def plot_fourier_features(
     threshold: float = 0.25,
     max_features: int = 50,
     ncols: int = 5,
+    survival_set: set[tuple[int, int]] | None = None,
 ) -> None:
     """Scan all ranked features, filter by Fourier R² threshold, plot as carry grids."""
     ranked_path = sweep_dir / "sweep_ranked.json"
@@ -641,9 +655,14 @@ def plot_fourier_features(
         print(f"  [fourier] skip Fourier analysis for non-carry concept {anchor_name}")
         return
 
-    # Score all features
+    # Score all features (pre-filter by attr survival if provided)
+    pool = ranked_all
+    if survival_set is not None:
+        n_before = len(pool)
+        pool = [r for r in pool if (r["layer"], r["feat_id"]) in survival_set]
+        print(f"  [attr-survival] {anchor_name} fourier: {n_before} → {len(pool)} after graph-survival filter")
     scored: list[tuple] = []
-    for r in ranked_all:
+    for r in pool:
         key = f"L{r['layer']}_F{r['feat_id']}"
         if key not in npz:
             continue
@@ -723,6 +742,12 @@ def main() -> None:
     parser.add_argument("--fourier_threshold",    type=float, default=0.25,
                         help="Min R² for a feature to appear in the Fourier figure")
     parser.add_argument("--fourier_max_features", type=int,   default=50)
+    parser.add_argument("--no_attr_filter",       action="store_true",
+                        help="Disable attribution-graph survival pre-filter (not recommended)")
+    parser.add_argument("--attr_min_survival",    type=float, default=0.05,
+                        help="Min fraction of graphs a feature must survive to pass the filter")
+    parser.add_argument("--attr_survival_file",   type=Path,  default=None,
+                        help="Explicit path to survival_stats.json (overrides default location)")
     args = parser.parse_args()
 
     concept_dir = _BASE / args.concept
@@ -739,6 +764,17 @@ def main() -> None:
     if len(win) != 2:
         raise ValueError("--window must be two comma-separated integers, e.g. -1,2")
     global_peak_layer_config = load_peak_layer_config(args.peak_layers_json)
+
+    if args.no_attr_filter:
+        survival_set = None
+        print("  [attr-survival] filter disabled via --no_attr_filter")
+    else:
+        survival_set = load_survival_set(
+            concept=args.concept,
+            min_survival=args.attr_min_survival,
+            survival_file=args.attr_survival_file,
+            required=True,
+        )
 
     for anchor_dir in anchor_dirs:
         m = re.match(r"anchor_rank(\d+)_pos(\d+)", anchor_dir.name)
@@ -787,6 +823,7 @@ def main() -> None:
             max_features = args.max_features,
             top_pct      = args.top_pct,
             ncols        = args.ncols,
+            survival_set = survival_set,
         )
         plot_peak_feature_clusters(
             sweep_dir         = anchor_dir / "sweep",
@@ -799,6 +836,7 @@ def main() -> None:
             top_per_cluster   = args.top_per_cluster,
             sort_by           = "rank",
             out_name          = "top_features_peak_layer_clusters.png",
+            survival_set      = survival_set,
         )
         plot_peak_feature_clusters(
             sweep_dir         = anchor_dir / "sweep",
@@ -811,6 +849,7 @@ def main() -> None:
             top_per_cluster   = args.top_per_cluster,
             sort_by           = "activation",
             out_name          = "top_features_peak_layer_clusters_by_activation.png",
+            survival_set      = survival_set,
         )
         plot_fourier_features(
             sweep_dir    = anchor_dir / "sweep",
@@ -820,6 +859,7 @@ def main() -> None:
             threshold    = args.fourier_threshold,
             max_features = args.fourier_max_features,
             ncols        = args.ncols,
+            survival_set = survival_set,
         )
 
 

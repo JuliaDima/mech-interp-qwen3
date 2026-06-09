@@ -72,9 +72,17 @@ def run_anchor_carry(
     seed: int,
     dtype: str,
     plot_only: bool = False,
+    no_attr_filter: bool = False,
+    attr_min_survival: float = 0.05,
+    attr_survival_file: Path | None = None,
 ) -> list[dict]:
-    ok = _ensure_edec_data(anchor_dir, _CONCEPT,
-                           n_pairs=n_pairs, top_k=top_k, seed=seed, dtype_str=dtype)
+    ok = _ensure_edec_data(
+        anchor_dir, _CONCEPT,
+        n_pairs=n_pairs, top_k=top_k, seed=seed, dtype_str=dtype,
+        no_attr_filter=no_attr_filter,
+        attr_min_survival=attr_min_survival,
+        attr_survival_file=attr_survival_file,
+    )
     if not ok:
         return []
 
@@ -96,6 +104,25 @@ def run_anchor_carry(
     keys = sorted(k for k in npz_dict if k.startswith("L"))
     if not keys:
         print(f"  [skip] {anchor_dir.name}: no features in npz")
+        return []
+
+    # Apply attr-survival filter to cached keys (covers case where NPZ pre-exists
+    # and was generated without the filter).
+    if not no_attr_filter:
+        from experiments.concept_localization.attr_survival import load_survival_set
+        survival_set = load_survival_set(
+            concept=_CONCEPT,
+            min_survival=attr_min_survival,
+            survival_file=attr_survival_file,
+            required=True,
+        )
+        if survival_set is not None:
+            n_before = len(keys)
+            keys = [k for k in keys
+                    if (int(k.split("_F")[0][1:]), int(k.split("_F")[1])) in survival_set]
+            print(f"  [attr-survival] keys: {n_before} → {len(keys)} after graph-survival filter")
+    if not keys:
+        print(f"  [skip] {anchor_dir.name}: no keys survive attr filter")
         return []
 
     # Load cos_sims if available (saved by _ensure_edec_data)
@@ -162,6 +189,9 @@ def main():
             seed=args.seed,
             dtype=args.dtype,
             plot_only=args.plot_only,
+            no_attr_filter=args.no_attr_filter,
+            attr_min_survival=args.attr_min_survival,
+            attr_survival_file=args.attr_survival_file,
         ))
 
     if all_results:

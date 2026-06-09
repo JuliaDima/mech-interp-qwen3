@@ -32,6 +32,7 @@ for p in (_REPO_ROOT, _REPO_ROOT / "src", _SWEEPS_DIR):
 from fit_pysr_sweep import _fit_pysr
 from sweep_utils import apply_transcoder_all
 
+from experiments.concept_localization.attr_survival import load_survival_set
 from experiments.concept_localization.analyze import (
     collect_layer_residuals,
     project_onto_E_dec_model,
@@ -67,6 +68,7 @@ def _resolve_top_edec(
     model,
     top_k: int,
     active_features: dict[int, set],
+    survival_set: set[tuple[int, int]] | None = None,
 ) -> tuple[list[tuple[int, int]], list[float]]:
     raw = torch.load(str(anchor_dir / "deltas.pt"), map_location="cpu")
     per_layer = project_onto_E_dec_model(model, raw["all"], top_k=1000)
@@ -74,6 +76,8 @@ def _resolve_top_edec(
     for ms in per_layer.values():
         for m in ms:
             if m.feature_id not in active_features.get(m.layer, set()):
+                continue
+            if survival_set is not None and (m.layer, m.feature_id) not in survival_set:
                 continue
             flat.append((abs(m.cos_sim), m.layer, m.feature_id, m.cos_sim))
     flat.sort(reverse=True)
@@ -107,6 +111,9 @@ def _ensure_edec_data(
     top_k: int = 15,
     seed: int = 42,
     dtype_str: str = "bfloat16",
+    no_attr_filter: bool = False,
+    attr_min_survival: float = 0.05,
+    attr_survival_file: Path | None = None,
 ) -> bool:
     """Generate sweep/edec_pysr/sweep_activations.npz if it doesn't exist.
 
@@ -153,7 +160,19 @@ def _ensure_edec_data(
         acts = apply_transcoder_all(model, layer, H_scan[layer])
         active_features[layer] = set(np.where(acts.max(axis=0) > 0)[0].tolist())
 
-    features, _cos_sims = _resolve_top_edec(anchor_dir, model, top_k, active_features)
+    if no_attr_filter:
+        survival_set = None
+        print("  [attr-survival] filter disabled via no_attr_filter=True")
+    else:
+        survival_set = load_survival_set(
+            concept=concept,
+            min_survival=attr_min_survival,
+            survival_file=attr_survival_file,
+            required=True,
+        )
+
+    features, _cos_sims = _resolve_top_edec(anchor_dir, model, top_k, active_features,
+                                             survival_set=survival_set)
     if not features:
         print(f"  [skip] {anchor_dir.name}: no top E_dec features found")
         return False
@@ -203,6 +222,9 @@ def run_anchor(
     n_pairs: int = 200,
     dtype: str = "bfloat16",
     features: list[str] | None = None,
+    no_attr_filter: bool = False,
+    attr_min_survival: float = 0.05,
+    attr_survival_file: Path | None = None,
 ) -> list[dict]:
     """Load (or generate) edec_pysr sweep data, rank features, fit PySR, plot, save summary.
 
@@ -214,8 +236,13 @@ def run_anchor(
     ex_path   = sweep_dir / "sweep_examples.pkl"
 
     if not acts_path.exists() or not ex_path.exists():
-        ok = _ensure_edec_data(anchor_dir, concept,
-                               n_pairs=n_pairs, top_k=top_k, seed=seed, dtype_str=dtype)
+        ok = _ensure_edec_data(
+            anchor_dir, concept,
+            n_pairs=n_pairs, top_k=top_k, seed=seed, dtype_str=dtype,
+            no_attr_filter=no_attr_filter,
+            attr_min_survival=attr_min_survival,
+            attr_survival_file=attr_survival_file,
+        )
         if not ok:
             return []
 
@@ -304,8 +331,14 @@ def make_parser(concept: str, anchors_root: Path):
     ap.add_argument("--seed",         type=int,   default=42)
     ap.add_argument("--dtype",        type=str,   default="bfloat16",
                     help="Model dtype for edec extraction")
-    ap.add_argument("--template",     type=str,   default="T0",
+    ap.add_argument("--template",        type=str,   default="T0",
                     help="Filter to this template (T0/T1/T2). Empty string = all.")
+    ap.add_argument("--no_attr_filter",  action="store_true",
+                    help="Disable attribution-graph survival pre-filter (not recommended)")
+    ap.add_argument("--attr_min_survival", type=float, default=0.05,
+                    help="Min fraction of graphs a feature must survive to pass the filter")
+    ap.add_argument("--attr_survival_file", type=Path, default=None,
+                    help="Explicit path to survival_stats.json (overrides default location)")
     return ap
 
 

@@ -50,6 +50,7 @@ from sweep_utils import apply_transcoder_all
 from fit_pysr_sweep import fit_feature, _meta_mode, _carry_table
 from run_concept_sweep import _load_concept
 import experiments.plot_style as ps
+from experiments.concept_localization.attr_survival import load_survival_set
 from experiments.concept_localization.analyze import (
     collect_layer_residuals,
     project_onto_E_dec_model,
@@ -162,6 +163,12 @@ def main() -> None:
     ap.add_argument("--r2_threshold", type=float, default=0.0)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--dtype", default="bfloat16")
+    ap.add_argument("--no_attr_filter", action="store_true",
+                    help="Disable attribution-graph survival pre-filter (not recommended)")
+    ap.add_argument("--attr_min_survival", type=float, default=0.05,
+                    help="Min fraction of graphs a feature must survive to pass the filter")
+    ap.add_argument("--attr_survival_file", type=Path, default=None,
+                    help="Explicit path to survival_stats.json (overrides default location)")
     args = ap.parse_args()
 
     anchor_dir = Path(args.anchor_dir)
@@ -197,7 +204,18 @@ def main() -> None:
         active_features[layer] = set(active_ids)
         print(f"  Layer {layer}: {len(active_ids)} active features / {acts.shape[1]}")
 
-    features, cos_sims = _resolve_top_edec(anchor_dir, model, args.top_k, active_features)
+    if args.no_attr_filter:
+        survival_set = None
+        print("  [attr-survival] filter disabled via --no_attr_filter")
+    else:
+        survival_set = load_survival_set(
+            concept=args.concept,
+            min_survival=args.attr_min_survival,
+            survival_file=args.attr_survival_file,
+            required=True,
+        )
+    features, cos_sims = _resolve_top_edec(anchor_dir, model, args.top_k, active_features,
+                                            survival_set=survival_set)
     layers = sorted({l for l, _ in features})
     print(f"Top-{args.top_k} active E_dec features: {[f'L{l}_F{f}' for l, f in features]}")
     print(f"Concept: {args.concept}  anchor mode: {anchor_mode}  layers: {layers}")
