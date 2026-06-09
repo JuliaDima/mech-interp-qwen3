@@ -7,7 +7,9 @@ to find a layer at which a concept is linearly separable, but also to connect th
 separation to sparse transcoder features and to causal effects on the model's
 answer. The method therefore combines four views of the same object: residual-stream
 deltas, feature-decoder alignment, activation patterns over structured datasets,
-and intervention scores.
+and intervention scores. This follows the broader use of activation-space directions as causal
+controls over scientific concepts, including recent work on steering physical behaviours in
+scientific foundation models~\citep{fear2025physics}.
 
 \section{Contrastive Pair Construction}
 \label{sec:concept_pairs}
@@ -214,7 +216,11 @@ Many arithmetic feature visualisations are functions on a digit torus,
 \[
 a,b \in \{0,\ldots,9\}, \qquad f(a,b) \in \mathbb{R}.
 \]
-Fourier analysis gives a compact way to describe these grids. The natural basis is
+% Fourier analysis gives a compact way to describe these grids, and is especially relevant because
+% pretrained language models have been shown to use Fourier-like numerical features when computing
+% addition~\citep{zhou2024fourier}. 
+
+The natural basis is
 \begin{equation}
 \exp\!\left(\frac{2\pi i}{10}(ua+vb)\right),
 \qquad u,v\in\{0,\ldots,9\}.

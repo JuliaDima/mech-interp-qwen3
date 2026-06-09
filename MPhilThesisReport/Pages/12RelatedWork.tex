@@ -13,6 +13,9 @@ memorised data, corresponds to the emergence of a Fourier-based algorithm.
 The trained model encodes operands as superpositions of trigonometric features and composes them
 across layers to compute the result. The emergence of this structure can be tracked
 through interpretable progress measures even before the accuracy curve improves significantly.
+Related work on pretrained language models similarly finds Fourier-structured numerical
+representations, suggesting that frequency-domain arithmetic features are not limited to
+small synthetic models~\citep{zhou2024fourier}.
 
 \citet{zhong2023clock} revisited modular addition and showed that the same task admits two
 qualitatively distinct algorithmic solutions: a Fourier-based strategy they term the ``clock''
@@ -25,7 +28,9 @@ For standard integer addition, \citet{quirke2024understanding} identified a carr
 circuit distributed across attention and MLP layers, bearing a structural resemblance to the
 long-addition algorithm familiar from elementary arithmetic.
 \citet{quirkeneo2025understanding} extended this account to subtraction, characterising how the
-same underlying circuit adapts to accommodate sign.
+same underlying circuit adapts to accommodate sign. Complementary work on compositional
+arithmetic studies how transformers combine variable assignment with modular addition,
+connecting arithmetic generalisation to composable internal mechanisms~\citep{exoo2026assign}.
 
 \citet{musat2024clustering} approached the problem from the perspective of training dynamics,
 tracing how the internal representations of operands and results cluster and align over the course
@@ -33,13 +38,13 @@ of training on modular addition.
 Their analysis shows that organised algorithmic structure is not installed gradually but emerges
 through identifiable phase transitions, reinforcing the view that grokking marks a qualitative
 change in the model's internal organisation rather than a smooth accumulation of generalising
-evidence.
+evidence. Recent work also explores targeted updates to sparse task-relevant subnetworks as
+a way to improve mathematical reasoning, linking circuit localisation to controlled model
+modification~\citep{prakash2025constructive}.
 
-These results establish a strong prior that transformers trained specifically on arithmetic
-tasks do not merely interpolate over training examples but converge on discrete, inspectable
-computational procedures.
-All of the models studied, however, are small transformers trained from scratch on a single
-arithmetic task.
 The present work asks whether comparable structure is recoverable in \texttt{Qwen3}, a
 multi-billion-parameter instruction-tuned model trained on a broad natural-language corpus with
-no explicit arithmetic curriculum.
+no explicit arithmetic curriculum. This question is sharpened by evidence that transformers can
+fail systematically on compositional tasks even when their surface behaviour appears
+competent~\citep{dziri2023faith}, making mechanism-level analysis necessary rather than
+optional.

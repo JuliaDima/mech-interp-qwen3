@@ -13,17 +13,37 @@
 
 \usetikzlibrary{arrows.meta, decorations.pathreplacing}
 
+\hypersetup{linkcolor=black}
+
 \makeatletter
 \cam@calcpaperdims{18mm}{18mm}{18mm}{18mm}
+\renewcommand\section{\@startsection {section}{1}{\z@}%
+  {-3.5ex \@plus -1ex \@minus -.2ex}%
+  {2.3ex \@plus .2ex}%
+  {\normalfont\large\bfseries}}
+\renewcommand\subsection{\@startsection{subsection}{2}{\z@}%
+  {-3.25ex\@plus -1ex \@minus -.2ex}%
+  {1.5ex \@plus .2ex}%
+  {\normalfont\normalsize\bfseries}}
+\renewcommand\subsubsection{\@startsection{subsubsection}{3}{\z@}%
+  {-3.25ex\@plus -1ex \@minus -.2ex}%
+  {1.5ex \@plus .2ex}%
+  {\normalfont\normalsize\itshape}}
 \makeatother
 
-\title{Title}
+\title{Circuits of Abstraction \textcolor{gray}{\textit{(working title)}}}
+\reportsubtitle{Mechanistic Interpretability for Learned Abstract Concepts across Structured Reasoning in Open-Source Language Models}
 \author{Elisabeta-Iulia (Julia) Dima}
 
 \college{King's College}
 \collegeshield{Pages/Figures/CollegeShields/Kings}
 
 \submissiondate{June, 2026}
+
+\supervision{Dr Miles Cranmer, Dr Alessandro Favero}
+
+\departments{Department of Applied Mathematics and Theoretical Physics\\
+Department of Physics}
 
 \date{June, 2026}
 
@@ -35,11 +55,6 @@
 \abstract{%
   My abstract ...
 }
-
-\acknowledgements{%
-  My acknowledgements ...
-}
-
 
 \begin{document}
 
