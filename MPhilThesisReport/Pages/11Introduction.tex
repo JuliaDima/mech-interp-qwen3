@@ -1,21 +1,25 @@
 \chapter{Introduction}
 \label{sec:introduction}
 
-Understanding what neural networks \textit{compute}, not only what they \textit{output},
+\begin{flushright}
+\emph{``There is a way of grasping a rule which is \textnormal{not} an interpretation.''}\\
+--- Ludwig Wittgenstein, \emph{Philosophical Investigations}
+\end{flushright}
+
+Understanding what neural networks compute, not only what they output,
 is the central problem of mechanistic interpretability. A model that correctly solves arithmetic problems or chains
 reasoning steps coherently need not be implementing anything resembling the algorithm a human would use.
-Whether it does, where in the network that computation lives, and whether it can be manipulated predictably
+Whether it does, where in the network that computation lives, and whether it can be altered in controlled ways
 are empirical questions that evaluation benchmarks cannot answer.
 
 \section{Mechanistic Interpretability}
 
-As neural networks scale from toy models to systems executed in consequential and complex settings,
-the gap between performance and understanding becomes untenable. Thus, a model achieving near-human accuracy on reasoning benchmarks
-cannot be straightforwardly understood. A system that has learned a spurious shortcut is indistinguishable from one that has learned the intended
-algorithm until it fails at the margin.
-The interpretability methods that accompanied earlier machine learning, such as saliency maps,
+As neural networks scale from idealised models to agentic systems executed in consequential and complex settings,
+the gap between performance and understanding becomes untenable. A model achieving near-human accuracy on reasoning benchmarks
+is often not straightforwardly understood. A system that has learned a spurious shortcut is indistinguishable from one that has learned the intended
+algorithm until it fails at the margin. The interpretability methods that accompanied earlier machine learning, such as saliency maps,
 attribution scores, and probing classifiers, operate in the input or output space and offer
-correlational accounts but are not mechanistic, as they describe what the model attends to, not what it computes.
+correlational accounts. However, these methods are not mechanistic, as they describe what the model attends to, not what it computes.
 
 Evidence for the tractability of mechanistic questions accumulated independently. Work on convolutional vision networks
 identified low-level features, including edge detectors, curve analysers, and frequency filters,
@@ -24,30 +28,28 @@ revealed heads implementing specific, describable operations, such as induction 
 repeated token sequences and positional heads copying information from fixed offsets~\citep{elhage2021mathematical}.
 A direct demonstration of such mechanisms is the grokking phenomenon~\citep{power2022grokking}, which shows that small models
 trained on modular arithmetic initially memorise their training data and later undergo a phase transition,
-developing compressed algorithms that generalise across all held-out operand pairs for the trained modulus.
-The transition is invisible to accuracy metrics evaluated on the training set. However, Fourier decomposition
+developing compressed algorithms that generalise across all held-out operand pairs for the trained modulus. Fourier decomposition
 of the learned weight matrices reveals that the converged model implements modular arithmetic through
 specific trigonometric identities encoded in the residual stream, an algorithm with no surface
-similarity to the training objective~\citep{nanda2023progress}.
-
-Further work has confirmed that small transformers trained on arithmetic tasks converge on specific,
+similarity to the training objective~\citep{nanda2023progress}. Further work has confirmed that small transformers trained on arithmetic tasks converge on specific,
 inspectable algorithms, independent of surface statistical regularities in the
 data~\cite{zhong2023clock, quirke2024understanding, quirkeneo2025understanding, musat2024clustering}.
 
 The same interpretability considerations apply to large language models (LLMs), yet at a scale that makes manual
 circuit analysis infeasible. As LLMs are trained on vastly more diverse data and without explicit algorithmic
-curricula, they nonetheless achieve high accuracy on structured reasoning tasks. However, whether this reflects stable, localisable internal computation or brittle surface associations
-cannot be determined from evaluation alone. This distinction matters wherever model outputs yield real consequences.
+curricula, they nonetheless achieve high accuracy on structured reasoning tasks. However, whether this reflects stable, 
+localisable internal computation or fragile surface associations
+cannot be determined from evaluation alone.
 
 Anthropic's \textit{On the Biology of a Large Language Model}~\cite{lindsey2025biology} proposes
-a reproducible methodology for approaching interpretability on a large language model (LLM).
-Combining sparse autoencoders (SAEs) with cross-layer transcoders (CLTs) and backward-pass attribution,
+a reproducible foundational methodology for approaching interpretability on an LLM.
+Combining sparse autoencoders (SAEs) and backward-pass attribution,
 it constructs dependency graphs that trace information flow from input tokens through intermediate
 features to output logits. The framework forms the methodological foundation of this thesis, which
 examines how structured reasoning is implemented within large instruction-tuned models and what
 the geometry of those representations reveals about the nature of computation.
 
-\section{Interpretability Methods}
+\section{Notation and Methods}
 \label{sec:interp-methods}
 
 Let $\mathcal{M}$ be a transformer with $L$ layers, residual stream dimension $d$, and MLP
@@ -62,14 +64,13 @@ Each layer contributes an additive update,
     \label{eq:residual}
 \end{equation}
 where $\mathbf{H}^{(\ell)}$ denotes the full sequence of residual-stream vectors at layer $\ell$.
-This additive structure makes the residual stream a natural object for linear analysis, as each
-layer writes into a shared representation that accumulates across depth.
+This additive structure makes the residual stream well suited to linear analysis, as each
+layer writes into a shared representation that accumulates across layers.
 
 Mechanistic analysis replaces each MLP sublayer $\mathrm{MLP}^{(\ell)}$ with a pretrained
-\textit{transcoder} $\mathcal{T}_\ell$, a sparse encoder--decoder whose weights are fit offline
-to reconstruct the MLP output while decomposing it into $K$ interpretable
-directions~\citep{bricken2023monosemanticity, cunningham2023sparse}.  For the input
-$\mathbf{x} \in \mathbb{R}^d$ to the MLP sublayer at layer $\ell$, the transcoder computes
+\textit{transcoder} $\mathcal{T}_\ell$, a sparse encoder--decoder layer whose weights are trained separately 
+to reconstruct the MLP output while expressing it as a sparse combination of \(K\) learned feature directions~\citep{bricken2023monosemanticity, cunningham2023sparse}.  
+For the input $\mathbf{x} \in \mathbb{R}^d$ to the MLP sublayer at layer $\ell$, the transcoder computes
 pre-activations
 \begin{equation}
   z_{\ell,k}(\mathbf{x})
@@ -89,17 +90,34 @@ and the reconstructed MLP output is
 where $\mathbf{W}_\mathrm{dec}^{(\ell)} \in \mathbb{R}^{d \times K}$ and
 $\mathbf{a}_\ell(\mathbf{x})$ is the vector of all feature activations at layer $\ell$.
 Features are indexed throughout by the double subscript $(\ell, k)$, with $\ell$ specifying
-the layer and $k$ the index within that layer's dictionary.  Sparsity ensures that at most a
-small active set contributes for any given input, making each feature's role inspectable in
+the layer and $k$ the index within that layer's dictionary.  Sparsity implies that at most a
+small active set of features contributes for any given input, making each feature's role examinable in
 isolation.
 
 Attribution scores are computed on the \textit{linearised} model, in which attention outputs
-are detached and treated as constants, so the residual stream propagates solely through the
+are detached and treated as constants, so that residual stream propagates only through the
 transcoder reconstruction path.  This linearisation is the necessary condition for the scores
-to be additive and interpretable as influence flows through the network.  Let $T$ denote the
-position of the final input token, and let $y_j = \mathbf{v}_j^\top \mathbf{h}_T$ be the
-logit for output token $j$, where $\mathbf{h}_T$ is the pre-unembedding hidden state and
-$\mathbf{v}_j$ is the demeaned unembedding direction for token $j$.  The attribution score
+to be additive and interpretable as influence flows through the network.  Let \(T\) denote the position of the final input token, and let
+\(\mathbf{h}_T \in \mathbb{R}^d\) be the corresponding pre-unembedding hidden
+state. Let \(V\) denote the model vocabulary and
+\(W_U \in \mathbb{R}^{d \times |V|}\) the unembedding matrix. For output token
+\(j \in V\), the demeaned unembedding direction is
+\begin{equation}
+    \mathbf{v}_j
+    =
+    W_U[:,j]
+    -
+    \frac{1}{|V|}\sum_{r \in V} W_U[:,r].
+    \label{eq:demeaned-unembedding}
+\end{equation}
+The target logit is then
+\begin{equation}
+    y_j = \mathbf{v}_j^\top \mathbf{h}_T ,
+    \label{eq:target-logit}
+\end{equation}
+
+
+and the attribution score
 of feature $k$ at position $t$ in layer $\ell$ is
 \begin{equation}
     \alpha_{\ell,k,t}
@@ -115,7 +133,7 @@ earlier features to later ones.  The graph is pruned by retaining only those nod
 that account for a fixed fraction of the total downstream influence on $y_j$, controlled by
 a node threshold $\tau_\mathrm{node}$ and an edge threshold $\tau_\mathrm{edge}$.
 
-Activation patching establishes causal claims~\citep{conmy2023automated}. Given a clean prompt
+\textit{Activation patching} establishes causal claims~\citep{conmy2023automated}. Given an original prompt
 $x$ and a counterfactual prompt $x'$, patching replaces the residual stream at layer $\ell$
 and position $t$,
 \begin{equation}
@@ -124,11 +142,14 @@ and position $t$,
 \end{equation}
 and measures the resulting shift in output logit,
 $\Delta_j = y_j(\tilde{\mathbf{h}}) - y_j(\mathbf{h})$.  A non-zero $\Delta_j$ confirms
-that the patched representation is causally sufficient to alter the prediction.  Constrained
-patching restricts the replacement to a targeted subset of positions or components, enabling
-finer localisation of causal dependence.
+that the patched representation is causally sufficient to alter the prediction. 
+This form of patching localises causal information to a layer and token position, 
+but it does not isolate which part of the residual-stream vector is responsible. 
+\textit{Constrained patching} makes the intervention more selective, restricting it to chosen positions, layers, 
+or sparse feature activations while leaving the remaining computation unchanged. 
+The resulting logit difference can then be attributed to a more specific internal component.
 
-Steering vectors are extracted by contrasting two prompt sets, $D_+$ where a concept is
+\textit{Steering vectors} are extracted by contrasting two prompt sets, $D_+$ where a concept is
 present and $D_-$ where it is absent, and computing their mean difference at a designated
 anchor position $t^*$,
 \begin{equation}
@@ -137,22 +158,34 @@ anchor position $t^*$,
     \label{eq:delta}
 \end{equation}
 Under the linear representation hypothesis~\citep{park2023linear}, $\delta^{(\ell)}$
-approximates the axis along which the concept is encoded at depth $\ell$.  Injecting
-$\alpha\,\delta^{(\ell)}$ into the residual stream at inference time provides a continuous
-lever on the concept representation without modifying model weights.  The norm profile
-$\lVert\delta^{(\ell)}\rVert$ across layers is the primary signal used for concept
-localisation throughout this thesis.  In combination, these four methods support mechanistic
-claims about how a model computes, not only whether it succeeds on a given input.
+approximates the axis along which the concept is encoded at depth $\ell$.  Thus, injecting
+$\alpha_{\mathrm{steer}}\,\delta^{(\ell)}$ where \(\alpha_{\mathrm{steer}} \in \mathbb{R}\) is a scalar intervention strength, provides a
+continuous lever on the concept representation without modifying model weights.  The norm magnitude
+$\lVert\delta^{(\ell)}\rVert$ across layers is the main indicator used for concept
+localisation throughout this thesis.
 
 \section{This Thesis}
 
-We take the open-access model \texttt{Qwen3-4B} as our subject. The primary contribution is a
-systematic concept localisation study across a diverse set of concepts spanning three structural categories:
-modular arithmetic (carry propagation in integer addition, GCD divisibility, and residue class membership),
-relational reasoning (transitive ordering and negation scope), and physical and causal plausibility
-(energy conservation and causal direction). The central hypothesis is that modular concepts,
-whose outcomes are determined by discrete thresholds or periodic relations, produce qualitatively different localisation signatures from relational and
-physical concepts, whose outcomes depend on monotone comparison or world knowledge.
+This thesis studies whether mechanisms described in Anthropic's \textit{On the Biology of a Large Language Model} 
+can be identified in the open-access model \texttt{Qwen3-4B-Instruct}. 
+Its first aim is to reproduce two of the behaviours analysed in that work under an independent implementation: 
+the arithmetic addition circuit, with particular attention to carry-related lookup features and attribution graphs, 
+and a multilingual circuit experiment testing whether operation, operand, and output-language components can be separately intervened on.
+These reproductions are not treated as numerical replication exercises, 
+but as mechanistic tests of whether the analogous sparse features, graph structure, 
+and causal interventions transfer to a different model family.
+
+The second aim is to extend this analysis through a systematic concept-localisation study. 
+These experiments ask how scientific and numerical concepts emerge as the model processes a prompt: 
+whether the relevant direction appears gradually or as a sharp layer-wise spike, whether it stabilises across depth, 
+and how narrowly it can be localised to particular layers, token positions, or sparse features. 
+Using contrastive residual-stream directions, feature alignment, activation grids, and targeted interventions, 
+the thesis compares concepts across modular arithmetic (carry propagation in integer addition, GCD divisibility, 
+and residue class membership), relational reasoning (transitive ordering and negation scope), 
+and physical or causal plausibility (energy conservation and causal direction). 
+The central hypothesis is that modular concepts, whose outcomes are determined by 
+discrete thresholds or periodic relations, produce qualitatively different localisation 
+trajectories from relational and physical concepts, whose outcomes depend on monotone comparison or world knowledge.
 
 The rest of this dissertation is structured as follows. Chapter~\ref{sec:related}
 covers the relevant background. ......
