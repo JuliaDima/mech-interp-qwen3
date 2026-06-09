@@ -206,11 +206,6 @@
 \newcommand{\@abstract}{}
 \renewcommand{\abstract}[1]{\renewcommand{\@abstract}{#1}}
 
-% DOCVAR: acknowledgements (The text that will be instered into the
-% acknowledgments of the thesis.)
-\newcommand{\@acknowledgements}{}
-\newcommand{\acknowledgements}[1]{\renewcommand{\@acknowledgements}{#1}}
-
 % DOCVAR: college (The name of the thesis writer's college, which will appear
 % just below their name.)
 \newcommand{\@college}{}
@@ -246,12 +241,25 @@ This dissertation is submitted
 \ifcam@submissiondate
     on \@submissiondate{}
 \fi
-\ifcam@firstyr
-in partial fulfilment of the requirements
-\fi
-for the degree of Master of Philosophy%
+for the degree of MPhil Data Intensive Science%
 }
 \newcommand{\submissionnotice}[1]{\renewcommand{\@submissionnotice}{#1}}
+% DOCVAR: reportsubtitle (Optional subtitle shown below the title on the title page.)
+\newcommand{\@reportsubtitle}{}
+\newcommand{\reportsubtitle}[1]{\renewcommand{\@reportsubtitle}{#1}}
+
+% DOCVAR: departments (Departments shown on the title page.)
+\newcommand{\@departments}{}
+\newcommand{\departments}[1]{\renewcommand{\@departments}{#1}}
+
+% DOCVAR: degree (Degree shown on the title page.)
+% \newcommand{\@degree}{Master of Philosophy}
+% \newcommand{\degree}[1]{\renewcommand{\@degree}{#1}}
+
+% DOCVAR: supervision (Supervisors shown on the title page.)
+\newcommand{\@supervision}{}
+\newcommand{\supervision}[1]{\renewcommand{\@supervision}{#1}}
+
 
 % DOCVAR: collegeshield (The name of the file that contains the image of the
 % college's shield. If `collegeshield' is provided, it will be included in the
@@ -303,11 +311,11 @@ for the degree of Master of Philosophy%
 % (vertically).
 
 %% LOGO box
-\newlength{\cam@logorightnudge}
-\setlength{\cam@logorightnudge}{-0.5\paperwidth+12mm}
 \newsavebox{\cam@logo}
 \begin{lrbox}{\cam@logo}
-\hspace*{\cam@logorightnudge}\includegraphics[width=73mm]{Pages/Figures/CollegeShields/CUni}
+\begin{minipage}{.98\textwidth}
+\includegraphics[width=45mm]{Pages/Figures/CollegeShields/CUni}\hfill\raisebox{-0.5mm}{\includegraphics[height=10mm]{Pages/Figures/dis_logo.pdf}}
+\end{minipage}
 \end{lrbox}
 
 %% THESIS TITLE box
@@ -315,15 +323,18 @@ for the degree of Master of Philosophy%
 \begin{lrbox}{\cam@title}
     \begin{minipage}[c][\height][c]{.98\textwidth}
         \begin{center}
-			\Huge%
-				\ifcam@times\else%
-				\bfseries%
-				\fi%
-			{\@title{}}%
-			\ifcam@firstyr\\%
-				{\vspace{5mm}\emph{\LARGE PhD Proposal}}%
-			\fi%
-		\end{center}
+            \LARGE%
+                \ifcam@times\else%
+                \bfseries%
+                \fi%
+            {\@title{}}%
+            \ifx\@reportsubtitle\@empty\else\\[2.5mm]
+                {\Large\normalfont\@reportsubtitle{}}%
+            \fi
+            \ifcam@firstyr\\%
+                {\vspace{5mm}\emph{\LARGE PhD Proposal}}%
+            \fi%
+        \end{center}
     \end{minipage}
 \end{lrbox}
 
@@ -331,7 +342,10 @@ for the degree of Master of Philosophy%
 \ifcam@collegeshield%
     \newsavebox{\cam@collegeshieldbox}
     \begin{lrbox}{\cam@collegeshieldbox}
-    \includegraphics[height=20mm]{\@collegeshield}
+    \begin{tabular}{c}
+    \includegraphics[height=18mm]{\@collegeshield}\\[1mm]
+    {\small\textsc{\@college{}}}
+    \end{tabular}
     \end{lrbox}
 \fi
 
@@ -341,10 +355,19 @@ for the degree of Master of Philosophy%
     \begin{minipage}[c][\height][c]{.98\textwidth}
         \begin{center}
         {\large \@author{}~\\[1ex]}
-        \ifcam@collegeshield%
-            \vspace{2mm}{\usebox{\cam@collegeshieldbox}}\\
-        \fi
-        \@college{}
+        \end{center}
+    \end{minipage}
+\end{lrbox}
+
+%% REPORT METADATA box
+\newsavebox{\cam@reportmetadata}
+\begin{lrbox}{\cam@reportmetadata}
+    \begin{minipage}[c][\height][c]{.98\textwidth}
+        \begin{center}
+        {\bfseries Supervision}\\[-0.2ex]
+        \begin{tabular}{c}\@supervision\end{tabular}\\[1.4ex]
+        {\bfseries Departments}\\[-0.2ex]
+        \begin{tabular}{c}\@departments\end{tabular}
         \end{center}
     \end{minipage}
 \end{lrbox}
@@ -354,7 +377,7 @@ for the degree of Master of Philosophy%
 \begin{lrbox}{\cam@submitnotice}
     \begin{minipage}[c][\height][c]{.98\textwidth}
         \begin{center}
-            \@submissionnotice{}
+            {\small\textcolor{gray}{\@submissionnotice{}}}
         \end{center}
     \end{minipage}
 \end{lrbox}
@@ -362,25 +385,30 @@ for the degree of Master of Philosophy%
 % Now calculate the exact free vertical space
 \newlength{\cam@titlepagevspace}
 \setlength{\cam@titlepagevspace}{\textheight%
-	-\totalheightof{\usebox{\cam@logo}}%
-	-\totalheightof{\usebox{\cam@submitnotice}}%
-	-\totalheightof{\usebox{\cam@authorcollege}}%
-	-\totalheightof{\usebox{\cam@title}}}
-
+    -\totalheightof{\usebox{\cam@logo}}%
+    -\totalheightof{\usebox{\cam@submitnotice}}%
+    -\totalheightof{\usebox{\cam@authorcollege}}%
+    -\totalheightof{\usebox{\cam@reportmetadata}}%
+    -\totalheightof{\usebox{\cam@title}}}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%
-%% Title Page: Put the components (logo, title, author, college and submit
-%% notice) onto the title page.
+%% Title Page: Put the components onto the title page.
 %%
 %%%%%
 \begin{center}
 ~\vspace{.02\cam@titlepagevspace}\\
 {\usebox{\cam@logo}}\\
-\vspace{.28\cam@titlepagevspace}
+\vspace{.18\cam@titlepagevspace}
 {\usebox{\cam@title}}\\
-\vspace{.23\cam@titlepagevspace}
+\vspace{.16\cam@titlepagevspace}
 {\usebox{\cam@authorcollege}}\\
+\vspace{.12\cam@titlepagevspace}
+{\usebox{\cam@reportmetadata}}\\
+\vspace{.08\cam@titlepagevspace}
+\ifcam@collegeshield%
+    {\usebox{\cam@collegeshieldbox}}\\[2mm]
+\fi
 \null\vfill
 {\usebox{\cam@submitnotice}}
 \end{center}
@@ -408,56 +436,6 @@ for the degree of Master of Philosophy%
 \@abstract{}
 \fi
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%
-%% Declaration
-%%
-%%%%%
-\ifcam@techreport
-% Technical report doesn't need the declaration
-% (see http://www.cl.cam.ac.uk/techreports/submission.html).
-\else
-{\ifcam@firstyr
-% First yr report doesn't need the declaration
-\else
-\chapter*{Declaration}
-\thispagestyle{empty}
-This dissertation is the result of my own work and includes nothing which is the outcome
-of work done in collaboration except as declared in the Preface and specified in the text.
-It is not substantially the same as any that I have submitted, or am concurrently
-submitting, for a degree or diploma or other qualification at the University of Cambridge
-or any other University or similar institution except as declared in the Preface and
-specified in the text. I further state that no substantial part of my dissertation has
-already been submitted, or is being concurrently submitted, for any such degree, diploma
-or other qualification at the University of Cambridge or any other University or similar
-institution except as declared in the Preface and specified in the text.
-This dissertation does not exceed the prescribed limit of 60\,000 words.
-
-% Leaving some space for the signature:
-\vspace{15mm}
-
-\begin{flushright}
-\@author{}\\
-\@date{}\\
-\end{flushright}
-\vfill
-\fi}
-\fi
-
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%
-%% Acknowledgements
-%%
-%%%%%
-
-\ifcam@firstyr
-% First yr report doesn't need the declaration
-\else
-\chapter*{Acknowledgements}
-\thispagestyle{empty}
-\@acknowledgements{}
-\fi
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%
