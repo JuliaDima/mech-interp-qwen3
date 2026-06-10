@@ -17,7 +17,7 @@ scientific foundation models~\citep{fear2025physics}.
 Each concept is represented by a set of matched prompt pairs
 \((x_i^+, x_i^-)\). The positive prompt contains the target property and the
 negative prompt differs in the smallest controlled way that removes it. Matching is
-important: if the two prompts differed in many incidental details, the mean residual
+important since if the two prompts differed in many incidental details, the mean residual
 stream difference would mostly recover those nuisance changes rather than the
 concept. The contrastive design attempts to hold syntax, length, operand scale, and
 answer format fixed while changing the mathematical property of interest.
@@ -145,6 +145,54 @@ concept direction persists. Rapid sign changes or isolated high-norm layers sugg
 that the model may be transforming the representation rather than maintaining a
 single stable code.
 
+Because the residual stream accumulates contributions from every preceding layer,
+the raw norm $D_l$ carries a monotone growth bias: later layers tend to have larger
+norms even if they contribute nothing new to the concept. To remove this trend, $D_l$
+is normalised by the mean residual-stream activation norm at each layer,
+\begin{equation}
+\mu_l^{\mathrm{act}} = \mathbb{E}_{x}\!\left[\lVert h_{l,t^*}(x)\rVert_2\right],
+\label{eq:mean_act_norm}
+\end{equation}
+where the expectation is taken over both positive and negative examples. The
+activation-normalised delta norm,
+\begin{equation}
+D_l^{\mathrm{act}} = \frac{D_l}{\mu_l^{\mathrm{act}} + \varepsilon},
+\label{eq:act_norm_delta}
+\end{equation}
+is a dimensionless ratio that measures the fraction of the concept delta relative to the typical
+residual-stream scale. To make trajectories comparable across anchors
+with different absolute separations, the curve is further divided by its own peak,
+giving the double-normalised trajectory
+\begin{equation}
+\tilde{D}_l^{\mathrm{act}}
+=
+\frac{D_l^{\mathrm{act}}}{\max_j D_j^{\mathrm{act}} + \varepsilon}
+\in [0,1].
+\label{eq:double_norm}
+\end{equation}
+A peak in $\tilde{D}_l^{\mathrm{act}}$ identifies a layer where the concept delta is
+disproportionately large relative to the ambient residual-stream scale.
+
+A scalar summary of peak concentration is used to rank anchor positions. Let
+$c_l = \tilde{D}_l^{\mathrm{act}}$. The non-monotonicity score is
+\begin{equation}
+\mathrm{nm}(t^*)
+=
+\max_{l}
+\min\!\left(
+  c_l - \min_{j < l} c_j,\quad
+  c_l - \min_{j > l} c_j
+\right).
+\label{eq:nonmonotonicity}
+\end{equation}
+This quantity is the prominence of the most prominent local peak: it equals the
+smaller of how much the curve rises to reach layer $l$ from the left and how much it
+falls away to the right. A monotone curve scores near zero; a sharp, isolated peak
+scores near one. The top-$k$ anchors by this score are selected for detailed
+analysis, since high non-monotonicity indicates that concept-specific computation is
+concentrated in a narrow depth window, without being diffusely distributed across
+the network.
+
 \section{Feature-Space Interpretation}
 \label{sec:feature_projection}
 
@@ -166,12 +214,7 @@ The decoder cosine score is
 \end{equation}
 A high positive value means that when the feature writes to the residual stream, it
 writes in approximately the same direction as the contrastive concept delta. A high
-negative value means that the feature writes in the opposite direction. This is not
-the same as saying that the feature's activation grid visually resembles the concept:
-a sparse feature can have high decoder alignment if its effect vector points along
-\(\delta_l\), even if it is active on only a few examples. For this reason, feature
-interpretation uses both decoder alignment and activation statistics.
-
+negative value means that the feature writes in the opposite direction.
 For a selected feature, the activation grid is formed by averaging feature activations
 over arithmetic variables. In the carry case the grid is
 \begin{equation}
@@ -208,6 +251,99 @@ Cosine is sensitive to graded shape; Jaccard is sensitive to support overlap. Th
 pipeline uses both because a smooth Fourier-like feature and a sharp detector can
 have similar support but different amplitudes, or similar amplitudes but different
 support.
+
+\subsection{Feature-Layer Duality and the Gram Matrix Connection}
+\label{sec:gram_connection}
+
+The decoder cosine scores $\operatorname{cos}_{l,f}^{\mathrm{dec}}$ compares a delta to a single feature direction, 
+while the inter-layer similarity matrix $C_{l,m}$ compares each two deltas. 
+Under the transcoder linear reconstruction, the two are directly connected.
+
+The transcoder approximates the residual stream as a sparse sum of decoder directions:
+\begin{equation}
+h_{l,t^*}(x)
+\approx
+\sum_{f=1}^{F} z_{l,f}(x)\, w_{l,f}^{\mathrm{dec}} + b_l^{\mathrm{dec}},
+\label{eq:transcoder_approx}
+\end{equation}
+where $z_{l,f}(x) \geq 0$ is the transcoder activation for feature $f$ and
+$b_l^{\mathrm{dec}}$ is the decoder bias. Taking the mean difference between
+positive and negative examples and noting that the bias cancels, the concept delta
+decomposes as
+\begin{equation}
+\delta_l
+\approx
+\sum_{f=1}^{F} \overline{\Delta z}_{l,f}\, w_{l,f}^{\mathrm{dec}},
+\qquad
+\overline{\Delta z}_{l,f}
+= \mathbb{E}[z_{l,f}(x^+)] - \mathbb{E}[z_{l,f}(x^-)].
+\label{eq:delta_decomp}
+\end{equation}
+Each scalar $\overline{\Delta z}_{l,f}$ is the mean differential activation of
+feature $f$ at layer $l$: positive when the feature fires more on positive examples,
+negative otherwise.
+
+Consider now the inner product $\delta_l \cdot \delta_m$ that enters the
+inter-layer cosine $C_{l,m}$. Substituting the decomposition gives
+\begin{equation}
+\delta_l \cdot \delta_m
+\approx
+\sum_{f,\,f'} \overline{\Delta z}_{l,f}\;\overline{\Delta z}_{m,f'}
+\left(w_{l,f}^{\mathrm{dec}} \cdot w_{m,f'}^{\mathrm{dec}}\right).
+\label{eq:delta_inner_full}
+\end{equation}
+When decoder directions at the same layer are approximately orthogonal — a condition
+that holds asymptotically for over-complete dictionaries and approximately for the
+transcoder feature sets used here - the off-diagonal terms $(f \neq f')$ are small,
+and the self inner-product simplifies to
+\begin{equation}
+\delta_l \cdot \delta_l
+\approx
+\sum_{f} \overline{\Delta z}_{l,f}^{2}\;\lVert w_{l,f}^{\mathrm{dec}}\rVert_2^2.
+\label{eq:delta_self_approx}
+\end{equation}
+Combining with the definition of the decoder cosine score
+(Equation~\ref{eq:decoder_cosine}), one obtains
+\begin{equation}
+\overline{\Delta z}_{l,f}
+\approx
+\frac{\operatorname{cos}_{l,f}^{\mathrm{dec}}\;\lVert\delta_l\rVert_2}
+     {\lVert w_{l,f}^{\mathrm{dec}}\rVert_2}.
+\label{eq:dz_from_cos}
+\end{equation}
+Substituting into $\delta_l \cdot \delta_m$ and dividing by
+$\lVert\delta_l\rVert_2\lVert\delta_m\rVert_2$ yields
+\begin{equation}
+C_{l,m}
+\approx
+\sum_{f=1}^{F}
+\operatorname{cos}_{l,f}^{\mathrm{dec}} \cdot \operatorname{cos}_{m,f}^{\mathrm{dec}}
+=
+\mathbf{p}_l \cdot \mathbf{p}_m,
+\label{eq:gram_connection}
+\end{equation}
+where $\mathbf{p}_l \in \mathbb{R}^F$ is the vector of decoder cosine scores at
+layer $l$, indexed by feature. Under the transcoder approximation, the inter-layer
+cosine matrix is therefore the Gram matrix of the per-layer feature-projection
+profiles.
+
+This identity has a direct interpretive consequence for reading the anchor summary
+plots. A block of high values in $C_{l,m}$ indicates that layers $l$ and $m$ have
+nearly identical profiles $\mathbf{p}_l \approx \mathbf{p}_m$: the same features
+project onto the delta with approximately the same relative magnitudes. A sharp
+transition in the heatmap corresponds to a layer at which the concept-aligned feature
+set changes. The two panels therefore carry equivalent information expressed in
+complementary coordinate systems: the inter-layer cosine matrix reveals when the
+concept direction rotates, and the decoder cosine scatter reveals which features are
+responsible for that rotation.
+
+The approximation degrades in the presence of superposition, where decoder directions
+are not orthogonal. In that regime the cross terms in
+Equation~\eqref{eq:delta_inner_full} are non-zero, and $C_{l,m}$ receives
+contributions from pairs of co-activated features. A systematic discrepancy between
+the two views — blocks that appear in $C_{l,m}$ but not in the decoder scatter, or
+vice versa — can therefore signal structured feature co-activation that lies outside
+the sparse reconstruction picture.
 
 \section{Fourier Patterns in Arithmetic Feature Grids}
 \label{sec:fourier_patterns}
@@ -452,11 +588,37 @@ without causal effect is only a representation. A causal score without template
 robustness may be a surface-form artefact. The strongest evidence comes when these
 signals agree at the same anchor and nearby layers.
 
+Figure~\ref{fig:anchor_layer_grid} shows this summary for the six carry anchors with
+the highest non-monotonicity scores (Equation~\ref{eq:nonmonotonicity}) under
+template \texttt{T0}. Each column is one anchor; the five rows correspond, from top
+to bottom, to the decoder cosine scatter, the delta-norm trajectory (raw and
+double-normalised), the inter-layer cosine heatmap, the null comparison, and the
+causal overlay. The grid makes the structural regularities across anchors immediately
+apparent: decoder-aligned features cluster near the same layers where the
+double-normalised trajectory peaks and the causal overlay is high, consistent with
+the Gram-matrix identity derived in
+Section~\ref{sec:gram_connection}.
+
+\begin{figure}[p]
+\centering
+\includegraphics[width=\textwidth]{../runs/concept_localization/carry/anchor_layer_grid_T0_top6}
+\caption{Per-anchor layer summary for the six highest-ranked carry anchors under
+template \texttt{T0}. Each column is one anchor token position. \textbf{Row 1:}
+decoder cosine scatter --- $x$-axis is layer, $y$-axis is feature index, colour is
+$\operatorname{cos}_{l,f}^{\mathrm{dec}}$ (diverging scale). \textbf{Row 2:}
+delta-norm trajectory --- purple curve is $\tilde{D}_l = D_l / \max D_l$ (left
+axis), orange curve is the double-normalised $\tilde{D}_l^{\mathrm{act}}$ (right
+axis). \textbf{Row 3:} inter-layer cosine heatmap $C_{l,m}$. \textbf{Row 4:}
+null-permutation comparison --- solid line is the real normalised delta norm; shaded
+band and dotted line show the permutation null mean~$\pm$~1\,SD and 95th percentile.
+\textbf{Row 5:} causal overlay --- delta norm (purple), activation patching score
+(green), and gradient-dot-delta (orange), each normalised by its own peak.}
+\label{fig:anchor_layer_grid}
+\end{figure}
+
 \section{Results}
 \label{sec:concept_results}
 
 The empirical results for each concept are reported using the metrics defined above.
 The main comparisons are between anchors, layers, and templates, with feature-level
-plots used to interpret the most aligned directions. The remaining analysis focuses
-on whether the arithmetic concepts produce localised, reusable feature structure or
-whether they remain distributed across many weakly aligned components.
+plots used to interpret the most aligned directions.

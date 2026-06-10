@@ -30,6 +30,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 import experiments.plot_style as ps
+from experiments.concept_localization.peak_layers import select_peak_layers
 
 
 def _load_json(path: Path) -> dict | None:
@@ -88,8 +89,12 @@ def _plot_feature_projection(ax, results: dict, layers: list[int], top_k: int) -
     ax.set_xlim(min(layers) - 0.5, max(layers) + 0.5)
 
 
-def _plot_delta_trajectory(ax, deltas: dict[int, torch.Tensor], results: dict, layers: list[int]) -> None:
+def _plot_delta_trajectory(
+    ax, deltas: dict[int, torch.Tensor], results: dict, layers: list[int],
+    null: dict | None = None,
+) -> None:
     raw = [float(deltas[l].norm().item()) if l in deltas else 0.0 for l in layers]
+    peak = max(abs(v) for v in raw) if raw else 1.0
     ax.plot(layers, _peak_norm(raw), color=ps.NAVY, lw=2.0, label="raw norm / peak")
 
     mean_act = {int(k): float(v) for k, v in results.get("mean_act_norm", {}).items()}
@@ -104,8 +109,34 @@ def _plot_delta_trajectory(ax, deltas: dict[int, torch.Tensor], results: dict, l
             label="act-normalised norm / peak",
         )
 
-    peak_layer = int(results.get("sharpness", {}).get("peak_layer", layers[int(np.argmax(raw))]))
-    ax.axvline(peak_layer, color=ps.VIOLET, lw=0.9, ls=":", alpha=0.8)
+    # Null-excess overlay
+    if null is not None:
+        nlayers = [int(x) for x in null.get("layers", [])]
+        real_n  = np.asarray(null.get("real_norms",  []), dtype=float)
+        nulls   = np.asarray(null.get("null_norms",  []), dtype=float)
+        if real_n.size > 0 and nulls.size > 0 and len(nlayers) == len(real_n):
+            null_mean = nulls.mean(axis=0)
+            null_std  = nulls.std(axis=0)
+            excess = np.maximum(0.0, real_n - (null_mean + null_std))
+            ax.fill_between(nlayers, 0, excess,
+                            color=ps.MAUVE, alpha=0.40,
+                            label="excess above null+1SD")
+
+    try:
+        from pathlib import Path as _Path
+        _anchor_dir = _Path(results.get("config", {}).get("anchor_dir", ""))
+        _pr = select_peak_layers(_anchor_dir) if _anchor_dir.exists() else None
+    except Exception:
+        _pr = None
+
+    if _pr is not None and _pr.valid and _pr.peak_layers:
+        for _rank, _pl in enumerate(_pr.peak_layers):
+            ax.axvline(_pl, color=ps.VIOLET, lw=1.1 if _rank == 0 else 0.7, ls=":", alpha=0.85)
+            ax.text(_pl + 0.3, ax.get_ylim()[1] * 0.92 - _rank * 0.10,
+                    f"L{_pl}", fontsize=6, color=ps.VIOLET, alpha=0.85)
+    else:
+        peak_layer = int(results.get("sharpness", {}).get("peak_layer", layers[int(np.argmax(raw))]))
+        ax.axvline(peak_layer, color=ps.VIOLET, lw=0.9, ls=":", alpha=0.8)
     ax.set_ylim(bottom=0)
     ax.set_ylabel("norm")
     ax.set_title("Delta trajectory: raw and activation-normalised", fontsize=10, pad=4)
@@ -217,7 +248,7 @@ def plot_anchor_layer_summary(anchor_dir: Path, template: str = "T0", out_path: 
     )
 
     _plot_feature_projection(axes[0], results, layers, int(results.get("config", {}).get("top_k", 15)))
-    _plot_delta_trajectory(axes[1], deltas, results, layers)
+    _plot_delta_trajectory(axes[1], deltas, results, layers, null=null)
     _plot_layer_cosine(axes[2], deltas, layers)
     _plot_null(axes[3], null, layers)
     _plot_causal(axes[4], results, deltas, template, layers)

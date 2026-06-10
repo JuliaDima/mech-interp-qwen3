@@ -14,7 +14,7 @@ Output: runs/concept_localization/carry/feature_vs_fourier/
 Usage
 -----
     python experiments/concept_localization/concept_fits/plot_feature_vs_fourier.py \
-        --features_json runs/concept_localization/carry/features_list_to_plot.json \
+        --features_json scripts/sweeps/features_to_analyse.json \
         --sweep_dir     runs/concept_localization/carry/carry_T0 \
         --out_dir       runs/concept_localization/carry/feature_vs_fourier
 """
