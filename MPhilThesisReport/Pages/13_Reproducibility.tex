@@ -44,8 +44,7 @@ structure.  A feature that fires selectively for a specific pair of ones
 digits $(d_1, d_2)$ produces a regular grid of isolated point clusters,
 concentrated on the $200$ cells where $a \bmod 10 \in \{d_1, d_2\}$ and
 $b \bmod 10 \in \{d_1, d_2\}$.  These \textit{lookup table features}
-constitute $2\%$ of the operand space; a uniform feature would achieve
-the same coverage by chance.
+constitute $2\%$ of the operand space.
 
 To identify lookup candidates automatically, each feature is assigned the
 concentration score
@@ -117,7 +116,7 @@ A smaller number of features at this position show broader diagonal
 regions reflecting coarser magnitude sensitivity rather than exact digit
 values.
 
-\begin{figure}[ht]
+\begin{figure}[ht!]
   \centering
   \includegraphics[width=\textwidth]{../runs/addition/operand_plots_by_pos/ctx5_ones(a)/combined_ones(a)_filtered}
   \vspace{0.6em}
@@ -156,7 +155,7 @@ of their combination.
 The experiment is structured around four prompt collections,
 summarised in Table~\ref{tab:addition-dataset}.
 
-\begin{table}[ht]
+\begin{table}[ht!]
   \centering
   \small
   \caption{%
@@ -231,7 +230,7 @@ the correct leading digit, a pattern that is consistent with a mechanism
 that maps directly from the operand ones-digits to the output rather than
 propagating carries sequentially.
 
-\begin{figure}[ht]
+\begin{figure}[ht!]
   \centering
   \includegraphics[width=\textwidth]{../runs/addition/accuracy_sweep/plots/positional_cascade}
   \caption{%
@@ -261,7 +260,7 @@ $(a \bmod 10,\, b \bmod 10)$ rather than on the absolute values of $a$ and
 $b$.  This is the behavioural signature one would expect if the computation
 were implemented by features selective to specific ones-digit pairs.
 
-\begin{figure}[ht]
+\begin{figure}[ht!]
   \centering
   \includegraphics[width=0.62\textwidth]{../runs/addition/accuracy_sweep/plots/entropy_map}
   \caption{%
@@ -330,7 +329,7 @@ This dissociation between carry complexity and model accuracy constitutes
 behavioural evidence that the computation is not organised around carry
 propagation.
 
-\begin{figure}[ht]
+\begin{figure}[ht!]
   \centering
   \includegraphics[width=\textwidth]{../runs/addition/accuracy_sweep/plots/carry_structure}
   \caption{%
@@ -344,6 +343,49 @@ propagation.
   }
   \label{fig:carry-structure}
 \end{figure}
+
+\paragraph{Transcoder sparsity diagnostics.}
+The carry layers are sparse but not uniformly so; layer 16 shows the largest active burst among the selected diagnostic layers.
+
+\begin{figure}[ht!]
+  \centering
+  \includegraphics[width=0.92\textwidth]{../runs/addition/sparsity_per_layer_T0.png}
+  \caption{Mean active transcoder features per token position for carry and no-carry prompts under template \texttt{T0}. Dashed red lines mark the carry-feature layers used in the addition diagnostics.}
+  \label{fig:carry-sparsity-per-layer}
+\end{figure}
+
+\begin{table}[ht!]
+  \centering
+  \small
+  \begin{tabular}{@{}rrrrr@{}}
+    \toprule
+    Layer & Mean active/pos & Max active/pos & Active total & Fraction active \\
+    \midrule
+    13 & 41.3 & 154 & 537 & 0.0003 \\
+    14 & 260.3 & 3006 & 3384 & 0.0016 \\
+    16 & 2291.5 & 29409 & 29789 & 0.0140 \\
+    21 & 139.5 & 1239 & 1814 & 0.0009 \\
+    \bottomrule
+  \end{tabular}
+  \caption{Single-prompt active-feature counts for \texttt{calc: 209+531=}.}
+  \label{tab:carry-active-feature-counts}
+\end{table}
+
+\begin{table}[ht!]
+  \centering
+  \small
+  \begin{tabular}{@{}lrrrr@{}}
+    \toprule
+    Condition & Accuracy & $P(\mathrm{correct})$ & Pos. acc. & Neg. acc. \\
+    \midrule
+    Raw model & 0.03 & 0.0539 & 0.00 & 0.06 \\
+    Full transcoder & 0.31 & 0.1891 & 0.32 & 0.30 \\
+    Bias+skip only & 0.15 & 0.0994 & 0.16 & 0.14 \\
+    \bottomrule
+  \end{tabular}
+  \caption{Bias/skip diagnostic on the addition carry set at layers 13, 14, 16, and 21, with 50 examples per class.}
+  \label{tab:carry-bias-skip-diagnostic}
+\end{table}
 
 TODO: Conclusions...
 

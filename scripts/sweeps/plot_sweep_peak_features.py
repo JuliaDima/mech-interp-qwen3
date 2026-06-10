@@ -757,6 +757,9 @@ def main() -> None:
 
     anchor_dirs = sorted(concept_dir.glob("anchor_rank*_pos*"))
     if not anchor_dirs:
+        # anchors may live inside a template subdir, e.g. carry/carry_T0/anchor_rank*
+        anchor_dirs = sorted(concept_dir.glob("*/anchor_rank*_pos*"))
+    if not anchor_dirs:
         print(f"No anchor subdirectories found in {concept_dir}")
         sys.exit(1)
 

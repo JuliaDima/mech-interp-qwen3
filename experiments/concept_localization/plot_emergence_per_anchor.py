@@ -42,6 +42,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 import experiments.plot_style as ps
+from experiments.concept_localization.peak_layers import select_peak_layers, PeakLayerResult
 
 BASE = _REPO_ROOT / "runs" / "concept_localization"
 
@@ -358,20 +359,45 @@ def discover_anchors(concept: str, template: str, top_k: int) -> list[dict]:
         token      = labels[pos_idx] if pos_idx < len(labels) else str(pos_idx)
         anchor_dir = pos_to_dir.get(pos_idx)
         supp       = _load_anchor_dir(anchor_dir, template) if anchor_dir else None
+        pr         = _load_peak_result(anchor_dir, template)
+        # Combined anchor score: best peak score when run data available, else nm
+        if pr is not None and pr.valid and pr.peak_scores:
+            combined_score = float(pr.peak_scores[0])
+        elif pr is not None and not pr.valid:
+            combined_score = 0.0
+        else:
+            combined_score = non_mono[pos_idx]  # fallback to nm
         entries.append({
-            "pos":        pos_idx,
-            "token":      token,
-            "rank":       nm_ranks[pos_idx],
-            "nm":         non_mono[pos_idx],
-            "norms_raw":  norms_raw[pos_idx],
-            "act_normed": act_normed[pos_idx],
-            "layers":     layers,
-            "dir":        anchor_dir,
-            "results":    supp["results"] if supp else {},
-            "deltas":     supp["deltas"]  if supp else {},
-            "null":       supp["null"]    if supp else None,
+            "pos":            pos_idx,
+            "token":          token,
+            "rank":           nm_ranks[pos_idx],
+            "nm":             non_mono[pos_idx],
+            "combined_score": combined_score,
+            "norms_raw":      norms_raw[pos_idx],
+            "act_normed":     act_normed[pos_idx],
+            "layers":         layers,
+            "dir":            anchor_dir,
+            "results":        supp["results"] if supp else {},
+            "deltas":         supp["deltas"]  if supp else {},
+            "null":           supp["null"]    if supp else None,
+            "peak_result":    pr,
         })
+
+    # Assign combined ranks (1 = best) for highlighting
+    sorted_by_combined = sorted(entries, key=lambda e: e["combined_score"], reverse=True)
+    for crank, e in enumerate(sorted_by_combined, start=1):
+        e["combined_rank"] = crank
+
     return entries
+
+
+def _load_peak_result(anchor_dir: Path | None, template: str) -> PeakLayerResult | None:
+    if anchor_dir is None:
+        return None
+    try:
+        return select_peak_layers(anchor_dir, template=template)
+    except Exception:
+        return None
 
 
 def _draw_feature_projection(ax, results: dict, layers: list[int],
@@ -400,9 +426,13 @@ def _draw_feature_projection(ax, results: dict, layers: list[int],
 
 
 def _draw_delta_trajectory(ax, norms_raw_i: np.ndarray, act_normed_i: np.ndarray,
-                            layers: list[int], show_legend: bool = False) -> list:
-    ax.plot(layers, norms_raw_i, color=ps.VIOLET, lw=1.6, label="raw ‖δ‖")
-    ax.set_ylabel("raw ‖δ‖", fontsize=7, color=ps.VIOLET)
+                            layers: list[int], show_legend: bool = False,
+                            null: dict | None = None,
+                            peak_result: PeakLayerResult | None = None) -> list:
+    peak = float(norms_raw_i.max()) if norms_raw_i.max() > 1e-12 else 1.0
+    norms_normed = norms_raw_i / peak
+    ax.plot(layers, norms_normed, color=ps.VIOLET, lw=1.6, label=r"‖δ‖ / max‖δ‖")
+    ax.set_ylabel(r"‖δ‖ / max‖δ‖", fontsize=7, color=ps.VIOLET)
     ax.tick_params(axis="y", labelcolor=ps.VIOLET, labelsize=6)
     ax.set_ylim(bottom=0)
 
@@ -414,14 +444,41 @@ def _draw_delta_trajectory(ax, norms_raw_i: np.ndarray, act_normed_i: np.ndarray
     ax2.spines["right"].set_edgecolor(ps.TEAL)
     ax2.set_ylim(bottom=0)
 
-    peak_layer = layers[int(np.argmax(norms_raw_i))]
-    ax.axvline(peak_layer, color=ps.VIOLET, lw=0.8, ls=":", alpha=0.7)
+    # Null-excess overlay: fill under the norm curve, capped at how far above
+    # null mean + 1 SD the real signal is (same scale as norms_normed).
+    if null is not None:
+        nlayers = [int(x) for x in null.get("layers", [])]
+        real_n  = np.asarray(null.get("real_norms",  []), dtype=float)
+        nulls   = np.asarray(null.get("null_norms",  []), dtype=float)
+        if real_n.size > 0 and nulls.size > 0 and len(nlayers) == len(real_n):
+            null_mean = nulls.mean(axis=0)
+            null_std  = nulls.std(axis=0)
+            excess    = np.maximum(0.0, real_n - (null_mean + null_std))
+            ax.fill_between(nlayers, 0, excess,
+                            color=ps.MAUVE, alpha=0.40,
+                            label="excess above null+1SD")
+
+    # Peak layer vlines: use select_peak_layers result if available, else fallback to argmax
+    if peak_result is not None and peak_result.valid and peak_result.peak_layers:
+        for rank, pl in enumerate(peak_result.peak_layers):
+            lw = 1.1 if rank == 0 else 0.7
+            ax.axvline(pl, color=ps.VIOLET, lw=lw, ls=":", alpha=0.85)
+            ax.text(pl + 0.3, 0.92 - rank * 0.14, f"L{pl}",
+                    fontsize=5, color=ps.VIOLET, alpha=0.85,
+                    transform=ax.get_xaxis_transform())
+    else:
+        fallback = layers[int(np.argmax(norms_normed))]
+        ax.axvline(fallback, color=ps.VIOLET, lw=0.8, ls=":", alpha=0.7)
 
     if show_legend:
-        ax.legend(handles=[
-            Line2D([0], [0], color=ps.VIOLET, lw=1.6, label="raw ‖δ‖"),
+        handles = [
+            Line2D([0], [0], color=ps.VIOLET, lw=1.6, label=r"‖δ‖ / max‖δ‖"),
             Line2D([0], [0], color=ps.TEAL,   lw=1.4, ls=":", label="double-norm"),
-        ], fontsize=5, loc="upper left", framealpha=0.7)
+        ]
+        if null is not None:
+            import matplotlib.patches as mpatches
+            handles.append(mpatches.Patch(color=ps.MAUVE, alpha=0.40, label="excess above null+1SD"))
+        ax.legend(handles=handles, fontsize=5, loc="upper left", framealpha=0.7)
     return [ax2]
 
 
@@ -545,7 +602,10 @@ def plot_anchor_layer_grid(
         norms_raw_i  = entry["norms_raw"]
         act_normed_i = entry["act_normed"]
         rank         = entry["rank"]
-        highlight    = rank <= highlight_k
+        combined_rank = entry.get("combined_rank", rank)
+        pr           = entry.get("peak_result")
+        is_null      = pr is not None and not pr.valid
+        highlight    = combined_rank <= highlight_k
         ticks        = list(range(min(layers), max(layers) + 1, 5))
         leftmost     = (col == 0)
         col_axes: list = []
@@ -557,7 +617,8 @@ def plot_anchor_layer_grid(
             axes[0, col].set_title(ROW_LABELS[0], fontsize=8, pad=4)
 
         extra = _draw_delta_trajectory(axes[1, col], norms_raw_i, act_normed_i,
-                                       layers, show_legend=leftmost)
+                                       layers, show_legend=leftmost, null=null,
+                                       peak_result=entry.get("peak_result"))
         col_axes += [axes[1, col]] + extra
         if leftmost:
             axes[1, col].set_title(ROW_LABELS[1], fontsize=8, pad=4)
@@ -608,16 +669,41 @@ def plot_anchor_layer_grid(
 
     for col, entry in enumerate(anchors):
         rank      = entry["rank"]
-        highlight = rank <= highlight_k
-        col_header = f"pos {entry['pos']}  '{entry['token']}'  (rank {rank})  nm={entry['nm']:.2f}"
+        pr        = entry.get("peak_result")
+        is_null   = pr is not None and not pr.valid
+        highlight = (rank <= highlight_k) and not is_null
+        hdr_color = ps.RED if highlight else (ps.GRAY if is_null else "black")
+
+        col_header = (
+            f"pos {entry['pos']}  '{entry['token']}'  "
+            f"nm_rank={rank}  combined_rank={combined_rank}  "
+            f"score={entry['combined_score']:.2f}"
+        )
         axes[0, col].annotate(
             col_header,
             xy=(0.5, 1), xycoords="axes fraction",
-            xytext=(0, 22), textcoords="offset points",
+            xytext=(0, 18), textcoords="offset points",
             ha="center", va="bottom", fontsize=8,
             fontweight="bold" if highlight else "normal",
-            color=ps.RED if highlight else "black",
+            color=hdr_color,
             annotation_clip=False,
+        )
+        # peak info inside the panel, top-left corner
+        if pr is not None and not pr.valid:
+            peak_str  = "⊘ null anchor"
+            pk_color  = ps.GRAY
+        elif pr is not None and pr.peak_layers:
+            atype    = "S" if pr.stable else "C"
+            peak_str = f"peaks: {', '.join(f'L{l}' for l in pr.peak_layers)}  [{atype}]"
+            pk_color  = ps.VIOLET
+        else:
+            peak_str = "no peaks"
+            pk_color = ps.GRAY
+        axes[0, col].text(
+            0.02, 0.97, peak_str,
+            transform=axes[0, col].transAxes,
+            fontsize=6, color=pk_color, va="top", ha="left",
+            bbox=dict(boxstyle="round,pad=0.15", fc="white", alpha=0.6, lw=0),
         )
 
     fig.text(

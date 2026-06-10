@@ -51,3 +51,8 @@ scripts/sweeps/plot_closest_all_feature_grids.py
 data/concept_datasets/*.txt
 specs.md
 experiments/concept_localization/check_top_tokens.py
+docs/anchor_layer_grid_formulas.md
+experiments/concept_localization/count_active_features.py
+experiments/concept_localization/plot_sparsity_per_layer.py
+experiments/concept_localization/run_bias_skip_diagnostic.py
+scripts/print_carry_t0_pairs.py
