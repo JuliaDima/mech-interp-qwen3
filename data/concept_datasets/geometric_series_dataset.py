@@ -19,16 +19,10 @@ from experiments.concept_localization.concept_pair import ConceptPair
 # Large denominators so that both p_pos and p_neg are two-digit (10-99)
 DENOMINATORS = [11, 13, 14, 17, 19, 21, 22, 23, 26, 29, 31, 34, 37, 38, 41, 43]
 
-TEMPLATES = {
-    "T0": ("Yes or No: geometric series ratio {r} converges: ", "Yes or No: geometric series ratio {r} converges: "),
-    "T1": (
-        "Yes or No: the series with ratio {r} has a finite sum: ",
-        "Yes or No: the series with ratio {r} has a finite sum: ",
-    ),
-    "T2": (
-        "Yes or No: does the geometric series with ratio {r} converge? ",
-        "Yes or No: does the geometric series with ratio {r} converge? ",
-    ),
+TEMPLATES: dict[str, tuple[str, str, str]] = {
+    "T0": ("Does geometric series with ratio {r} converge? Answer yes or no: ", "yes", "no"),
+    "T1": ("Does the series with ratio {r} have a finite sum? Answer yes or no: ", "yes", "no"),
+    "T2": ("Is the geometric series with ratio {r} a convergent series? Answer yes or no:", "yes", "no"),
 }
 
 
@@ -78,15 +72,15 @@ def generate_geometric_pairs(
         for t in templates:
             if counts[t] >= n_per_template:
                 continue
-            fmt_pos, fmt_neg = TEMPLATES[t]
+            fmt, predict_pos, predict_neg = TEMPLATES[t]
             pairs.append(
                 ConceptPair(
-                    prompt_pos=fmt_pos.format(r=r_pos),
-                    prompt_neg=fmt_neg.format(r=r_neg),
+                    prompt_pos=fmt.format(r=r_pos),
+                    prompt_neg=fmt.format(r=r_neg),
                     label_pos="yes",
                     label_neg="no",
-                    predict_pos="Yes",
-                    predict_neg="No",
+                    predict_pos=predict_pos,
+                    predict_neg=predict_neg,
                     template=t,
                     meta={"p_pos": p_pos, "p_neg": p_neg, "q": q},
                 )

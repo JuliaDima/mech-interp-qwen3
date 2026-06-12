@@ -60,16 +60,10 @@ def _build_neg(seed: int = 42) -> list[int]:
 _POS: list[int] = [n for n in range(100, 1000) if _terminates(n)]
 _NEG: list[int] = _build_neg()
 
-TEMPLATES = {
-    "T0": ("Yes or No: 1/{n} terminates: ", "Yes or No: 1/{n} terminates: "),
-    "T1": (
-        "Yes or No: 1 divided by {n} has a finite decimal: ",
-        "Yes or No: 1 divided by {n} has a finite decimal: ",
-    ),
-    "T2": (
-        "Yes or No: does 1/{n} have a terminating decimal? ",
-        "Yes or No: does 1/{n} have a terminating decimal? ",
-    ),
+TEMPLATES: dict[str, tuple[str, str, str]] = {
+    "T0": ("Does 1/{n} have a terminating decimal? Answer yes or no:", "yes", "no"),
+    "T1": ("1 divided by {n} has a finite decimal? Answer yes or no:", "yes", "no"),
+    "T2": ("Does 1/{n} terminate? Answer yes or no:", "yes", "no"),
 }
 
 
@@ -127,15 +121,15 @@ def generate_decimal_pairs(
         for t in templates:
             if counts[t] >= n_per_template:
                 continue
-            fmt_pos, fmt_neg = TEMPLATES[t]
+            fmt, predict_pos, predict_neg = TEMPLATES[t]
             pairs.append(
                 ConceptPair(
-                    prompt_pos=fmt_pos.format(n=n_pos),
-                    prompt_neg=fmt_neg.format(n=n_neg),
+                    prompt_pos=fmt.format(n=n_pos),
+                    prompt_neg=fmt.format(n=n_neg),
                     label_pos="yes",
                     label_neg="no",
-                    predict_pos="Yes",
-                    predict_neg="No",
+                    predict_pos=predict_pos,
+                    predict_neg=predict_neg,
                     template=t,
                     meta={"n_pos": n_pos, "n_neg": n_neg},
                 )

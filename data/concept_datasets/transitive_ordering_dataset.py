@@ -13,16 +13,10 @@ import random
 
 from experiments.concept_localization.concept_pair import ConceptPair
 
-TEMPLATES = {
-    "T0": ("True or False: {a}>{b}>{c}: ", "True or False: {a}>{b}>{c}: "),
-    "T1": (
-        "True or False: {a} is greater than {b} which is greater than {c}: ",
-        "True or False: {a} is greater than {b} which is greater than {c}: ",
-    ),
-    "T2": (
-        "True or False: given {a}>{b} and {b}>{c}: ",
-        "True or False: given {a}>{b} and {b}>{c}: ",
-    ),
+TEMPLATES: dict[str, tuple[str, str, str]] = {
+    "T0": ("Is {a}>{b}>{c}? Answer yes or no:", "yes", "no"),
+    "T1": ("{a} is greater than {b} which is greater than {c}? Answer yes or no:", "yes", "no"),
+    "T2": ("Is {a}>{b}>{c}? Answer yes or no:", "yes", "no"),
 }
 
 _SCALES = [
@@ -96,15 +90,15 @@ def generate_ordering_pairs(
             for t in templates:
                 if counts[t] >= n_per_template:
                     continue
-                fmt_pos, fmt_neg = TEMPLATES[t]
+                fmt, predict_pos, predict_neg = TEMPLATES[t]
                 pairs.append(
                     ConceptPair(
-                        prompt_pos=fmt_pos.format(a=a, b=b, c=c_pos),
-                        prompt_neg=fmt_neg.format(a=a, b=b, c=c_neg),
-                        label_pos="True",
-                        label_neg="False",
-                        predict_pos="True",
-                        predict_neg="False",
+                        prompt_pos=fmt.format(a=a, b=b, c=c_pos),
+                        prompt_neg=fmt.format(a=a, b=b, c=c_neg),
+                        label_pos="yes",
+                        label_neg="no",
+                        predict_pos=predict_pos,
+                        predict_neg=predict_neg,
                         template=t,
                         meta={"a": a, "b": b, "c_pos": c_pos, "c_neg": c_neg, "n_digits": len(str(a))},
                     )

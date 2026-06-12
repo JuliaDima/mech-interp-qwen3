@@ -16,19 +16,10 @@ import random
 
 from experiments.concept_localization.concept_pair import ConceptPair
 
-TEMPLATES = {
-    "T0": (
-        "Yes or No: v1={v1}→{v1a}, v2={v2}→{v2a}. conserves momentum: ",
-        "Yes or No: v1={v1}→{v1a}, v2={v2}→{v2a}. conserves momentum: ",
-    ),
-    "T1": (
-        "Yes or No: object 1 goes {v1} then {v1a}, object 2 goes {v2} then {v2a}. conserves momentum: ",
-        "Yes or No: object 1 goes {v1} then {v1a}, object 2 goes {v2} then {v2a}. conserves momentum: ",
-    ),
-    "T2": (
-        "Yes or No: does {v1a}+{v2a} equal {v1}+{v2}? ",
-        "Yes or No: does {v1a}+{v2a} equal {v1}+{v2}? ",
-    ),
+TEMPLATES: dict[str, tuple[str, str, str]] = {
+    "T0": ("Object 1 goes {v1} then {v1a}, object 2 goes {v2} then {v2a}. conserves momentum? Answer yes or no: ", "yes", "no"),
+    "T1": ("Object 1 goes {v1} then {v1a}, object 2 goes {v2} then {v2a}. conserves momentum? Answer yes or no: ", "yes", "no"),
+    "T2": ("Does v1={v1}\u2192{v1a}, v2={v2}\u2192{v2a} conserve momentum? Answer yes or no: ", "yes", "no"),
 }
 
 
@@ -78,15 +69,15 @@ def generate_momentum_pairs(
         for t in templates:
             if counts[t] >= n_per_template:
                 continue
-            fmt_pos, fmt_neg = TEMPLATES[t]
+            fmt, predict_pos, predict_neg = TEMPLATES[t]
             pairs.append(
                 ConceptPair(
-                    prompt_pos=fmt_pos.format(v1=v1, v2=v2, v1a=v1a, v2a=v2a_pos),
-                    prompt_neg=fmt_neg.format(v1=v1, v2=v2, v1a=v1a, v2a=v2a_neg),
+                    prompt_pos=fmt.format(v1=v1, v2=v2, v1a=v1a, v2a=v2a_pos),
+                    prompt_neg=fmt.format(v1=v1, v2=v2, v1a=v1a, v2a=v2a_neg),
                     label_pos="yes",
                     label_neg="no",
-                    predict_pos="Yes",
-                    predict_neg="No",
+                    predict_pos=predict_pos,
+                    predict_neg=predict_neg,
                     template=t,
                     meta={
                         "v1": v1,

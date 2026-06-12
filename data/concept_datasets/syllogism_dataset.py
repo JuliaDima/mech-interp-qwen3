@@ -25,19 +25,22 @@ _all_triples = list(itertools.permutations(_POOL, 3))
 random.Random(0).shuffle(_all_triples)
 _LETTER_TRIPLES: list[tuple[str, str, str]] = _all_triples[:120]
 
-TEMPLATES = {
-    "T0": (
-        "Yes or No: {a} is in {b} and {b} is in {c}, therefore {a} is in {c}: ",
-        "Yes or No: {a} is in {b} and {c} is in {b}, therefore {a} is in {c}: ",
-    ),
-    "T1": (
-        "Yes or No: every {a} is a {b}; every {b} is a {c}; so every {a} is a {c}: ",
-        "Yes or No: every {a} is a {b}; every {c} is a {b}; so every {a} is a {c}: ",
-    ),
-    "T2": (
-        "Yes or No: all {a} are {b}, all {b} are {c}, so all {a} are {c}: ",
-        "Yes or No: all {a} are {b}, all {c} are {b}, so all {a} are {c}: ",
-    ),
+TEMPLATES: dict[str, tuple[str, str, str]] = {
+    "T0": ("All {a} are {b}, {mid}, so all {a} are {c}? Answer yes or no: ", "yes", "no"),
+    "T1": ("Every {a} is a {b}; {mid}; so every {a} is a {c}? Answer yes or no: ", "yes", "no"),
+    "T2": ("{a} is in {b} and {mid}, therefore {a} is in {c}? Answer yes or no: ", "yes", "no"),
+}
+
+# Valid (pos) and invalid (neg) middle premises per template
+MID_POS: dict[str, str] = {
+    "T0": "all {b} are {c}",
+    "T1": "every {b} is a {c}",
+    "T2": "{b} is in {c}",
+}
+MID_NEG: dict[str, str] = {
+    "T0": "all {c} are {b}",
+    "T1": "every {c} is a {b}",
+    "T2": "{c} is in {b}",
 }
 
 
@@ -66,15 +69,17 @@ def generate_syllogism_pairs(
             if key in seen:
                 continue
             seen.add(key)
-            fmt_pos, fmt_neg = TEMPLATES[t]
+            fmt, predict_pos, predict_neg = TEMPLATES[t]
+            mid_pos = MID_POS[t].format(b=b, c=c)
+            mid_neg = MID_NEG[t].format(b=b, c=c)
             pairs.append(
                 ConceptPair(
-                    prompt_pos=fmt_pos.format(a=a, b=b, c=c),
-                    prompt_neg=fmt_neg.format(a=a, b=b, c=c),
+                    prompt_pos=fmt.format(a=a, b=b, c=c, mid=mid_pos),
+                    prompt_neg=fmt.format(a=a, b=b, c=c, mid=mid_neg),
                     label_pos="yes",
                     label_neg="no",
-                    predict_pos="Yes",
-                    predict_neg="No",
+                    predict_pos=predict_pos,
+                    predict_neg=predict_neg,
                     template=t,
                     meta={"a": a, "b": b, "c": c},
                 )

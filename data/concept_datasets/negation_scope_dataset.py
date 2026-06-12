@@ -12,13 +12,10 @@ import random
 
 from experiments.concept_localization.concept_pair import ConceptPair
 
-TEMPLATES = {
-    "T0": (
-        "True or False: {m} is not greater than {n}: ",
-        "True or False: {m} is not greater than {n}: ",
-    ),
-    "T1": ("True or False: {m} does not exceed {n}: ", "True or False: {m} does not exceed {n}: "),
-    "T2": ("True or False: is {m} at most {n}? ", "True or False: is {m} at most {n}? "),
+TEMPLATES: dict[str, tuple[str, str, str]] = {
+    "T0": ("{m} is not greater than {n}? Answer only with yes or no:", "yes", "no"),
+    "T1": ("{m} does not exceed {n}? Answer only with yes or no: ", "yes", "no"),
+    "T2": ("Is {m} at most {n}? Answer only with yes or no: ", "yes", "no"),
 }
 
 
@@ -64,15 +61,15 @@ def generate_negation_pairs(
         for t in templates:
             if counts[t] >= n_per_template:
                 continue
-            fmt_pos, fmt_neg = TEMPLATES[t]
+            fmt, predict_pos, predict_neg = TEMPLATES[t]
             pairs.append(
                 ConceptPair(
-                    prompt_pos=fmt_pos.format(m=m, n=n_pos),
-                    prompt_neg=fmt_neg.format(m=m, n=n_neg),
-                    label_pos="True",
-                    label_neg="False",
-                    predict_pos="True",
-                    predict_neg="False",
+                    prompt_pos=fmt.format(m=m, n=n_pos),
+                    prompt_neg=fmt.format(m=m, n=n_neg),
+                    label_pos="yes",
+                    label_neg="no",
+                    predict_pos=predict_pos,
+                    predict_neg=predict_neg,
                     template=t,
                     meta={"m": m, "n_pos": n_pos, "n_neg": n_neg},
                 )

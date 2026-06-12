@@ -12,19 +12,10 @@ import random
 
 from experiments.concept_localization.concept_pair import ConceptPair
 
-TEMPLATES = {
-    "T0": (
-        "True or False: drop={h}, bounce={b}. valid: ",
-        "True or False: drop={h}, bounce={b}. valid: ",
-    ),
-    "T1": (
-        "True or False: ball dropped from {h}m rebounds to {b}m. physical: ",
-        "True or False: ball dropped from {h}m rebounds to {b}m. physical: ",
-    ),
-    "T2": (
-        "True or False: does bouncing to {b}m after dropping from {h}m conserve energy? ",
-        "True or False: does bouncing to {b}m after dropping from {h}m conserve energy? ",
-    ),
+TEMPLATES: dict[str, tuple[str, str, str]] = {
+    "T0": ("Ball drop={h}, bounce={b}. valid? Answer yes or no:", "yes", "no"),
+    "T1": ("A ball dropped from {h}m rebounds to {b}m. Is this physical? Answer yes or no:", "yes", "no"),
+    "T2": ("Does bouncing to {b}m after dropping from {h}m conserve energy? Answer yes or no:", "yes", "no"),
 }
 
 
@@ -70,15 +61,15 @@ def generate_conservation_pairs(
         for t in templates:
             if counts[t] >= n_per_template:
                 continue
-            fmt_pos, fmt_neg = TEMPLATES[t]
+            fmt, predict_pos, predict_neg = TEMPLATES[t]
             pairs.append(
                 ConceptPair(
-                    prompt_pos=fmt_pos.format(h=h, b=b_pos),
-                    prompt_neg=fmt_neg.format(h=h, b=b_neg),
-                    label_pos="True",
-                    label_neg="False",
-                    predict_pos="True",
-                    predict_neg="False",
+                    prompt_pos=fmt.format(h=h, b=b_pos),
+                    prompt_neg=fmt.format(h=h, b=b_neg),
+                    label_pos="Yes",
+                    label_neg="No",
+                    predict_pos=predict_pos,
+                    predict_neg=predict_neg,
                     template=t,
                     meta={"h": h, "b_pos": b_pos, "b_neg": b_neg},
                 )

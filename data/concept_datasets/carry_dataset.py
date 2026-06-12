@@ -20,10 +20,10 @@ import random
 
 from experiments.concept_localization.concept_pair import ConceptPair
 
-TEMPLATES = {
-    "T0": ("calc: {a}+{b}= ", "calc: {a}+{b}= "),
-    "T1": ("{a} plus {b} is: ", "{a} plus {b} is: "),
-    "T2": ("what is {a}+{b}? ", "what is {a}+{b}? "),
+TEMPLATES: dict[str, tuple[str, str | None, str | None]] = {
+    "T0": ("what is {a}+{b}? Answer:", None, None),  # prediction computed per pair
+    "T1": ("Does {a}+{b} have a carry? Answer yes or no:", "yes", "no"),
+    "T2": ("calc: {a}+{b}= ", None, None),       # prediction computed per pair
 }
 
 
@@ -136,15 +136,15 @@ def generate_carry_pairs(
                         continue
                     seen.add(key)
 
-                    fmt_pos, fmt_neg = TEMPLATES[t]
+                    fmt, predict_pos_tmpl, predict_neg_tmpl = TEMPLATES[t]
                     pairs.append(
                         ConceptPair(
-                            prompt_pos=fmt_pos.format(a=a_pos, b=b_pos),
-                            prompt_neg=fmt_neg.format(a=a_neg, b=b_neg),
+                            prompt_pos=fmt.format(a=a_pos, b=b_pos),
+                            prompt_neg=fmt.format(a=a_neg, b=b_neg),
                             label_pos="carry",
                             label_neg="no_carry",
-                            predict_pos=str(a_pos + b_pos),
-                            predict_neg=str(a_neg + b_neg),
+                            predict_pos=predict_pos_tmpl if predict_pos_tmpl is not None else str(a_pos + b_pos),
+                            predict_neg=predict_neg_tmpl if predict_neg_tmpl is not None else str(a_neg + b_neg),
                             template=t,
                             meta={
                                 "a_pos": a_pos,

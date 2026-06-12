@@ -17,16 +17,10 @@ import random
 
 from experiments.concept_localization.concept_pair import ConceptPair
 
-TEMPLATES = {
-    "T0": ("Yes or No: balanced: {seq}: ", "Yes or No: balanced: {seq}: "),
-    "T1": (
-        "Yes or No: the sequence {seq} has matched brackets: ",
-        "Yes or No: the sequence {seq} has matched brackets: ",
-    ),
-    "T2": (
-        "Yes or No: is {seq} a valid bracket string? ",
-        "Yes or No: is {seq} a valid bracket string? ",
-    ),
+TEMPLATES: dict[str, tuple[str, str, str]] = {
+    "T0": ("Is {seq} a valid bracket string? Answer yes or no:", "yes", "no"),
+    "T1": ("Does the sequence {seq} has matched brackets? Answer yes or no:", "yes", "no"),
+    "T2": ("Is {seq} balanced? Answer yes or no:", "yes", "no"),
 }
 
 
@@ -47,8 +41,8 @@ def _generate_balanced(n: int) -> list[str]:
     _gen("", 0, 0)
     return results
 
-# C(6) = 132 balanced sequences of 6 pairs (12 parens)
-_BALANCED: list[str] = _generate_balanced(6)
+# C(4) = 14 balanced sequences of 4 pairs (8 parens)
+_BALANCED: list[str] = _generate_balanced(4)
 
 
 def _make_unbalanced(s: str, rng: random.Random) -> str | None:
@@ -66,10 +60,8 @@ def _make_unbalanced(s: str, rng: random.Random) -> str | None:
     return s[:pos] + "(" + s[pos + 1 :]
 
 
-
-
 def generate_parentheses_pairs(
-    n_per_template: int = 100,
+    n_per_template: int = 22,
     templates: list[str] | None = None,
     seed: int = 42,
 ) -> list[ConceptPair]:
@@ -78,7 +70,7 @@ def generate_parentheses_pairs(
 
     rng = random.Random(seed)
     pairs: list[ConceptPair] = []
-    seen: set[tuple[str, int]] = set()
+    seen: set[tuple[str, str, int]] = set()
     counts = {t: 0 for t in templates}
     attempts = 0
 
@@ -94,19 +86,19 @@ def generate_parentheses_pairs(
         for t in templates:
             if counts[t] >= n_per_template:
                 continue
-            key = (seq_pos, hash(t))
+            key = (seq_pos, seq_neg, hash(t))
             if key in seen:
                 continue
             seen.add(key)
-            fmt_pos, fmt_neg = TEMPLATES[t]
+            fmt, predict_pos, predict_neg = TEMPLATES[t]
             pairs.append(
                 ConceptPair(
-                    prompt_pos=fmt_pos.format(seq=seq_pos),
-                    prompt_neg=fmt_neg.format(seq=seq_neg),
+                    prompt_pos=fmt.format(seq=seq_pos),
+                    prompt_neg=fmt.format(seq=seq_neg),
                     label_pos="yes",
                     label_neg="no",
-                    predict_pos="Yes",
-                    predict_neg="No",
+                    predict_pos=predict_pos,
+                    predict_neg=predict_neg,
                     template=t,
                     meta={"seq_pos": seq_pos, "seq_neg": seq_neg},
                 )
