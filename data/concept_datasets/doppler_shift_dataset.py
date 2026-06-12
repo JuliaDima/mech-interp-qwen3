@@ -39,19 +39,17 @@ _SOURCES = [
     "streetcar", "monorail", "tram", "trolley", "metro", "subway",
 ]
 
-TEMPLATES = {
-    "T0": (
-        "Yes or No: {src} nearing, observed frequency exceeds emitted: ",
-        "Yes or No: {src} leaving, observed frequency exceeds emitted: ",
-    ),
-    "T1": (
-        "Yes or No: {src} incoming, measured pitch above emitted pitch: ",
-        "Yes or No: {src} outgoing, measured pitch above emitted pitch: ",
-    ),
-    "T2": (
-        "Yes or No: {src} oncoming, pitch measured higher than emitted: ",
-        "Yes or No: {src} receding, pitch measured higher than emitted: ",
-    ),
+TEMPLATES: dict[str, tuple[str, str, str]] = {
+    "T0": ("Given {src} {direction}, observed frequency exceeds emitted? Answer yes or no:", "yes", "no"),
+    "T1": ("Given {src} {direction}, measured pitch above emitted pitch? Answer yes or no:", "yes", "no"),
+    "T2": ("Given {src} {direction}, pitch measured higher than emitted? Answer yes or no:", "yes", "no"),
+    }
+
+# Approaching vs receding direction words per template
+DIRECTION_PAIRS: dict[str, tuple[str, str]] = {
+    "T0": ("oncoming", "receding"),
+    "T1": ("incoming", "outgoing"),
+    "T2": ("nearing", "leaving"),
 }
 
 
@@ -89,15 +87,16 @@ def generate_doppler_pairs(
             if key in seen:
                 continue
             seen.add(key)
-            fmt_pos, fmt_neg = TEMPLATES[t]
+            fmt, predict_pos, predict_neg = TEMPLATES[t]
+            dir_pos, dir_neg = DIRECTION_PAIRS[t]
             pairs.append(
                 ConceptPair(
-                    prompt_pos=fmt_pos.format(src=src),
-                    prompt_neg=fmt_neg.format(src=src),
+                    prompt_pos=fmt.format(src=src, direction=dir_pos),
+                    prompt_neg=fmt.format(src=src, direction=dir_neg),
                     label_pos="yes",
                     label_neg="no",
-                    predict_pos="Yes",
-                    predict_neg="No",
+                    predict_pos=predict_pos,
+                    predict_neg=predict_neg,
                     template=t,
                     meta={"src": src},
                 )

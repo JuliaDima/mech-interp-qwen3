@@ -20,10 +20,11 @@ M = 7
 R_POS = 1
 _R_NEG_CHOICES = [2, 3, 4, 5, 6]  # sampled per pair to vary the offset
 
-TEMPLATES = {
-    "T0": ("calc: {a}%7= ", "calc: {a}%7= "),
-    "T1": ("the remainder of {a} divided by 7 is: ", "the remainder of {a} divided by 7 is: "),
-    "T2": ("what is {a} mod 7? ", "what is {a} mod 7? "),
+TEMPLATES: dict[str, tuple[str, str, str | None]] = {
+    "T0": ("calc: {a}%7= ", str(R_POS), None),       # predict_pos fixed; neg varies per pair
+    "T1": ("What is the remainder of {a} divided by 7? Answer: ", str(R_POS), None),
+    "T2": ("Is {a} mod 7 equal to 1? Answer yes or no: ", "yes", "no"),  # pos: r_pos=1→yes, neg: r_neg≠1→no
+
 }
 
 
@@ -81,15 +82,15 @@ def generate_residue_pairs(
         for t in templates:
             if counts[t] >= n_per_template:
                 continue
-            fmt_pos, fmt_neg = TEMPLATES[t]
+            fmt, predict_pos_tmpl, predict_neg_tmpl = TEMPLATES[t]
             pairs.append(
                 ConceptPair(
-                    prompt_pos=fmt_pos.format(a=a_pos),
-                    prompt_neg=fmt_neg.format(a=a_neg),
+                    prompt_pos=fmt.format(a=a_pos),
+                    prompt_neg=fmt.format(a=a_neg),
                     label_pos=str(R_POS),
                     label_neg=str(r_neg),
-                    predict_pos=str(R_POS),
-                    predict_neg=str(r_neg),
+                    predict_pos=predict_pos_tmpl,
+                    predict_neg=predict_neg_tmpl if predict_neg_tmpl is not None else str(r_neg),
                     template=t,
                     meta={"a_pos": a_pos, "a_neg": a_neg, "m": M, "r_pos": R_POS, "r_neg": r_neg,
                           "offset": r_neg - R_POS},

@@ -18,10 +18,10 @@ import random
 
 from experiments.concept_localization.concept_pair import ConceptPair
 
-TEMPLATES = {
-    "T0": ("True or False: sqrt({n}) is integer: ", "True or False: sqrt({n}) is integer: "),
-    "T1": ("Yes or No: sqrt({n}) is an integer: ", "Yes or No: sqrt({n}) is an integer: "),
-    "T2": ("Yes or No: is {n} a perfect square? ", "Yes or No: is {n} a perfect square? "),
+TEMPLATES: dict[str, tuple[str, str, str]] = {
+    "T0": ("Is sqrt({n}) an integer? Answer yes or no: ", "yes", "no"),
+    "T1": ("sqrt({n}) is an integer? Answer yes or no: ", "yes", "no"),
+    "T2": ("is {n} a perfect square? Answer yes or no: ", "yes", "no"),
 }
 
 
@@ -76,17 +76,15 @@ def generate_perfect_square_pairs(
         for t in templates:
             if counts[t] >= n_per_template:
                 continue
-            fmt_pos, fmt_neg = TEMPLATES[t]
-            pred_pos = "True" if t == "T0" else "Yes"
-            pred_neg = "False" if t == "T0" else "No"
+            fmt, predict_pos, predict_neg = TEMPLATES[t]
             pairs.append(
                 ConceptPair(
-                    prompt_pos=fmt_pos.format(n=n_pos),
-                    prompt_neg=fmt_neg.format(n=n_neg),
+                    prompt_pos=fmt.format(n=n_pos),
+                    prompt_neg=fmt.format(n=n_neg),
                     label_pos="yes",
                     label_neg="no",
-                    predict_pos=pred_pos,
-                    predict_neg=pred_neg,
+                    predict_pos=predict_pos,
+                    predict_neg=predict_neg,
                     template=t,
                     meta={"k": k, "n_pos": n_pos, "n_neg": n_neg},
                 )

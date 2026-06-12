@@ -17,10 +17,10 @@ from experiments.concept_localization.concept_pair import ConceptPair
 
 G = 7
 
-TEMPLATES = {
-    "T0": ("calc: gcd({a},7)= ", "calc: gcd({a},7)= "),
-    "T1": ("the gcd of {a} and 7 is: ", "the gcd of {a} and 7 is: "),
-    "T2": ("what is gcd({a},7)? ", "what is gcd({a},7)? "),
+TEMPLATES: dict[str, tuple[str, str, str]] = {
+    "T0": ("the gcd of {a} and 7 is: ", str(G), "1"),  # pos: gcd=7, neg: gcd=1
+    "T1": ("calc: gcd({a},7)= ", str(G), "1"),
+    "T2": ("Is gcd({a},7) equal to 1? ", "no", "yes"),  # pos: gcd=7≠1→no, neg: gcd=1→yes
 }
 
 
@@ -73,15 +73,15 @@ def generate_gcd_pairs(
         for t in templates:
             if counts[t] >= n_per_template:
                 continue
-            fmt_pos, fmt_neg = TEMPLATES[t]
+            fmt, predict_pos_tmpl, predict_neg_tmpl = TEMPLATES[t]
             pairs.append(
                 ConceptPair(
-                    prompt_pos=fmt_pos.format(a=a_pos),
-                    prompt_neg=fmt_neg.format(a=a_neg),
+                    prompt_pos=fmt.format(a=a_pos),
+                    prompt_neg=fmt.format(a=a_neg),
                     label_pos=str(G),
                     label_neg="1",
-                    predict_pos=str(G),
-                    predict_neg="1",
+                    predict_pos=predict_pos_tmpl,
+                    predict_neg=predict_neg_tmpl,
                     template=t,
                     meta={"a_pos": a_pos, "a_neg": a_neg, "g": G, "offset": offset},
                 )

@@ -54,6 +54,7 @@ export PYTHONPATH="${PYTHONPATH:-}:${REPO_ROOT}/src:${REPO_ROOT}"
 export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}:/home/eid23/miniforge3/envs/p28_py311_env/lib"
 export OMP_NUM_THREADS=16
 export PYTHONUNBUFFERED=1
+export HF_HUB_OFFLINE=1
 
 mkdir -p logs
 

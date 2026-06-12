@@ -18,19 +18,10 @@ from experiments.concept_localization.concept_pair import ConceptPair
 
 WAVELENGTHS = [10, 12, 14, 15, 16, 18, 20, 21, 24, 25]
 
-TEMPLATES = {
-    "T0": (
-        "Yes or No: wavelength {lam}, path diff {d}, constructive: ",
-        "Yes or No: wavelength {lam}, path diff {d}, constructive: ",
-    ),
-    "T1": (
-        "Yes or No: waves lambda={lam} path={d} interfere constructively: ",
-        "Yes or No: waves lambda={lam} path={d} interfere constructively: ",
-    ),
-    "T2": (
-        "Yes or No: is path difference {d} a multiple of wavelength {lam}? ",
-        "Yes or No: is path difference {d} a multiple of wavelength {lam}? ",
-    ),
+TEMPLATES: dict[str, tuple[str, str, str]] = {
+    "T0": ("Waves lambda={lam} path={d} interfere constructively? Answer yes or no:", "yes", "no"),
+    "T1": ("Is path difference {d} a multiple of wavelength {lam}? Answer yes or no:", "yes", "no"),
+    "T2": ("Wavelength {lam} and path diff {d} is constructive? Answer yes or no:", "yes", "no"),
 }
 
 
@@ -74,15 +65,15 @@ def generate_wave_pairs(
         for t in templates:
             if counts[t] >= n_per_template:
                 continue
-            fmt_pos, fmt_neg = TEMPLATES[t]
+            fmt, predict_pos, predict_neg = TEMPLATES[t]
             pairs.append(
                 ConceptPair(
-                    prompt_pos=fmt_pos.format(lam=lam, d=d_pos),
-                    prompt_neg=fmt_neg.format(lam=lam, d=d_neg),
+                    prompt_pos=fmt.format(lam=lam, d=d_pos),
+                    prompt_neg=fmt.format(lam=lam, d=d_neg),
                     label_pos="yes",
                     label_neg="no",
-                    predict_pos="Yes",
-                    predict_neg="No",
+                    predict_pos=predict_pos,
+                    predict_neg=predict_neg,
                     template=t,
                     meta={"lam": lam, "d_pos": d_pos, "d_neg": d_neg, "k_pos": k_pos},
                 )

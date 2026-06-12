@@ -15,16 +15,10 @@ import random
 
 from experiments.concept_localization.concept_pair import ConceptPair
 
-TEMPLATES = {
-    "T0": ("Yes or No: {a}+{b}>{c}: ", "Yes or No: {a}+{b}>{c}: "),
-    "T1": (
-        "Yes or No: can {a}, {b}, {c} be sides of a triangle? ",
-        "Yes or No: can {a}, {b}, {c} be sides of a triangle? ",
-    ),
-    "T2": (
-        "Yes or No: triangle with sides {a},{b},{c} is valid: ",
-        "Yes or No: triangle with sides {a},{b},{c} is valid: ",
-    ),
+TEMPLATES: dict[str, tuple[str, str, str]] = {
+    "T0": ("Triangle with sides {a},{b},{c} is valid? Answer yes or no:", "yes", "no"),
+    "T1": ("Can {a}, {b}, {c} be sides of a triangle? Answer yes or no:", "yes", "no"),
+    "T2": ("Does {a}+{b}>{c}? Answer yes or no:", "yes", "no"),
 }
 
 
@@ -71,15 +65,15 @@ def generate_triangle_pairs(
         for t in templates:
             if counts[t] >= n_per_template:
                 continue
-            fmt_pos, fmt_neg = TEMPLATES[t]
+            fmt, predict_pos, predict_neg = TEMPLATES[t]
             pairs.append(
                 ConceptPair(
-                    prompt_pos=fmt_pos.format(a=a, b=b, c=c_pos),
-                    prompt_neg=fmt_neg.format(a=a, b=b, c=c_neg),
+                    prompt_pos=fmt.format(a=a, b=b, c=c_pos),
+                    prompt_neg=fmt.format(a=a, b=b, c=c_neg),
                     label_pos="yes",
                     label_neg="no",
-                    predict_pos="Yes",
-                    predict_neg="No",
+                    predict_pos=predict_pos,
+                    predict_neg=predict_neg,
                     template=t,
                     meta={"a": a, "b": b, "c_pos": c_pos, "c_neg": c_neg},
                 )

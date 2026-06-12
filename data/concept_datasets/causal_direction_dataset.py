@@ -13,50 +13,77 @@ import random
 from experiments.concept_localization.concept_pair import ConceptPair
 
 _CAUSAL_FACTS: list[tuple[str, str]] = [
-    ("sun", "heat"), ("cold", "ice"), ("pressure", "pain"),
-    ("impact", "damage"), ("smoke", "pollution"), ("hunger", "weakness"),
-    ("heat", "evaporation"), ("drought", "famine"), ("noise", "stress"),
-    ("fire", "ash"), ("salt", "rust"), ("acid", "rust"),
-    ("force", "motion"), ("rain", "growth"), ("sun", "light"),
-    ("cold", "death"), ("sun", "burn"), ("work", "stress"),
-    ("rain", "rust"), ("heat", "rust"), ("cold", "snow"),
-    ("fire", "heat"), ("wind", "erosion"), ("light", "warmth"),
-    ("frost", "death"), ("flood", "damage"), ("spark", "fire"),
-    ("debt", "stress"),
-    ("fall", "injury"), ("shock", "pain"), ("age", "decay"),
-    ("war", "death"), ("storm", "flood"), ("speed", "heat"),
-    ("weight", "strain"), ("gravity", "fall"), ("cold", "frost"),
-    ("heat", "fire"), ("wind", "waves"), ("rain", "mud"),
-    ("light", "growth"), ("dark", "fear"), ("loud", "damage"),
-    ("stress", "illness"), ("sleep", "rest"), ("food", "energy"),
-    ("sun", "drought"), ("ice", "cold"), ("mud", "slip"),
-    ("dust", "cough"), ("smoke", "cancer"), ("fat", "weight"),
-    ("salt", "thirst"), ("sugar", "energy"), ("water", "life"),
-    ("fear", "flight"), ("joy", "laughter"), ("pain", "crying"),
-    ("cold", "flu"), ("heat", "sweat"), ("rain", "flood"),
-    ("wind", "dust"), ("ice", "slip"), ("fire", "smoke"),
-    ("shock", "fear"), ("loss", "grief"), ("gain", "joy"),
-    ("effort", "result"), ("age", "wisdom"), ("youth", "energy"),
-    ("sun", "warmth"), ("cold", "shivers"), ("rain", "mold"),
-    ("heat", "drought"), ("storm", "damage"), ("flood", "loss"),
-    ("war", "poverty"), ("peace", "growth"), ("trust", "bond"),
-    ("doubt", "fear"), ("hope", "action"), ("love", "care"),
-    ("hate", "conflict"), ("pride", "confidence"), ("shame", "silence"),
-    ("light", "vision"), ("dark", "sleep"), ("sound", "hearing"),
-    ("smell", "memory"), ("touch", "feeling"), ("taste", "pleasure"),
-    ("fall", "bruise"), ("run", "sweat"), ("lift", "strain"),
-    ("cut", "bleeding"), ("burn", "scar"), ("freeze", "numbness"),
-    ("tension", "headache"), ("calm", "sleep"), ("anger", "aggression"),
-    ("kindness", "trust"), ("cruelty", "fear"), ("neglect", "decline"),
+    # Physical / environmental — reverse direction is clearly implausible
+    ("sun", "heat"),            # heat doesn't cause the sun
+    ("impact", "damage"),       # damage doesn't cause impacts
+    ("heat", "evaporation"),    # evaporation cools, doesn't produce heat
+    ("drought", "famine"),      # famine doesn't cause drought
+    ("fire", "ash"),            # ash doesn't cause fire
+    ("salt", "rust"),           # rust doesn't produce salt
+    ("acid", "rust"),           # rust doesn't produce acid
+    ("rain", "growth"),         # plant growth doesn't cause rain (on relevant scale)
+    ("cold", "death"),          # death doesn't cause cold temperatures
+    ("sun", "burn"),            # sunburn; burn doesn't produce the sun
+    ("work", "stress"),         # stress doesn't drive people to work physically
+    ("rain", "rust"),           # rust doesn't produce rain
+    ("heat", "rust"),           # rust doesn't produce heat
+    ("wind", "erosion"),        # erosion doesn't cause wind
+    ("light", "warmth"),        # warmth doesn't produce light on its own
+    ("frost", "death"),         # death doesn't cause frost
+    ("flood", "damage"),        # damage doesn't cause floods
+    ("storm", "flood"),         # flood doesn't cause storms
+    ("gravity", "fall"),        # falling doesn't generate gravity
+    ("wind", "waves"),          # waves don't cause wind
+    ("rain", "mud"),            # mud doesn't cause rain
+    ("dark", "fear"),           # fear doesn't create darkness
+    ("sun", "drought"),         # drought doesn't produce the sun
+    ("mud", "slip"),            # slipping doesn't create mud
+    ("dust", "cough"),          # coughing doesn't produce dust
+    ("smoke", "cancer"),        # cancer doesn't produce smoke
+    ("salt", "thirst"),         # thirst doesn't produce salt
+    ("sugar", "energy"),        # energy doesn't produce sugar
+    ("heat", "sweat"),          # sweat doesn't generate heat
+    ("rain", "flood"),          # flood doesn't cause rain
+    ("wind", "dust"),           # dust doesn't cause wind
+    ("ice", "slip"),            # slipping doesn't create ice
+    ("fire", "smoke"),          # smoke doesn't cause fire
+    ("storm", "damage"),        # damage doesn't cause storms
+    ("flood", "loss"),          # loss doesn't cause floods
+    ("lightning", "fire"),      # fire doesn't cause lightning
+    ("poison", "death"),        # death doesn't produce poison
+    ("heat", "burn"),           # burns don't generate heat
+    ("cut", "scar"),            # scars don't cause cuts
+    # Biological / physiological
+    ("smoke", "pollution"),     # pollution doesn't produce smoke
+    ("noise", "stress"),        # stress doesn't generate loud noise
+    ("cold", "shivers"),        # shivering doesn't cause cold
+    ("fall", "bruise"),         # bruises don't cause falls
+    ("run", "sweat"),           # sweat doesn't cause running
+    ("cut", "bleeding"),        # bleeding doesn't cause cuts
+    ("burn", "scar"),           # scars don't cause burns
+    ("debt", "stress"),         # stress doesn't produce debt
+    ("weight", "strain"),       # strain doesn't create weight
+    # Psychological / social
+    ("fear", "flight"),         # flight (fleeing) doesn't cause fear
+    ("loss", "grief"),          # grief doesn't cause loss
+    ("effort", "result"),       # results don't generate effort
+    ("rain", "mold"),           # mold doesn't cause rain
+    ("light", "vision"),        # vision doesn't produce light
+    ("sound", "hearing"),       # hearing doesn't produce sound
+    ("smell", "memory"),        # memory doesn't produce smells
+    ("touch", "feeling"),       # feelings don't cause touch
+    ("tension", "headache"),    # headaches don't cause tension
+    ("cruelty", "fear"),        # fear doesn't cause cruelty (weaker reverse)
+    ("neglect", "decline"),     # decline doesn't cause neglect
+    ("gain", "joy"),            # joy doesn't produce gain
+    ("loss", "sadness"),        # sadness doesn't produce loss
 ]
 
-TEMPLATES = {
-    "T0": ("True or False: {A} causes {B}: ", "True or False: {B} causes {A}: "),
-    "T1": ("True or False: {A} leads to {B}: ", "True or False: {B} leads to {A}: "),
-    "T2": ("True or False: {A} produces {B}: ", "True or False: {B} produces {A}: "),
+TEMPLATES: dict[str, tuple[str, str, str]] = {
+    "T0": ("Does {A} lead to {B}? Answer yes or no:", "yes", "no"),
+    "T1": ("Does {A} cause {B}? Answer yes or no:", "yes", "no"),
+    "T2": ("Does {A} produce {B}? Answer yes or no:", "yes", "no"),
 }
-
-
 
 
 def generate_causal_pairs(
@@ -83,15 +110,15 @@ def generate_causal_pairs(
             if key in seen:
                 continue
             seen.add(key)
-            fmt_pos, fmt_neg = TEMPLATES[t]
+            fmt, predict_pos, predict_neg = TEMPLATES[t]
             pairs.append(
                 ConceptPair(
-                    prompt_pos=fmt_pos.format(A=cause, B=effect),
-                    prompt_neg=fmt_neg.format(A=cause, B=effect),
-                    label_pos="True",
-                    label_neg="False",
-                    predict_pos="True",
-                    predict_neg="False",
+                    prompt_pos=fmt.format(A=cause, B=effect),
+                    prompt_neg=fmt.format(A=effect, B=cause),
+                    label_pos="yes",
+                    label_neg="no",
+                    predict_pos=predict_pos,
+                    predict_neg=predict_neg,
                     template=t,
                     meta={"cause": cause, "effect": effect},
                 )
