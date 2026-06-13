@@ -52,10 +52,10 @@ from mechinterp_qwen3.attribution_model import AttributionModel  # noqa: E402
 from mechinterp_qwen3.utils.hf_utils import load_transcoder_from_hub  # noqa: E402
 from mechinterp_qwen3.utils.model_utils import get_default_device, parse_dtype  # noqa: E402
 
-_STITCH_DIR = str(Path(__file__).parent.parent / "stitching")
-if _STITCH_DIR not in sys.path:
-    sys.path.insert(0, _STITCH_DIR)
-from utils import load_addition_dataset  # noqa: E402
+_OTHERS_DIR = str(Path(__file__).parent.parent)
+if _OTHERS_DIR not in sys.path:
+    sys.path.insert(0, _OTHERS_DIR)
+from common.small_addition import load_addition_dataset  # noqa: E402
 
 from experiments.soft_prompt.model import PrefixTuning, SoftPrompt, load_prefix  # noqa: E402
 

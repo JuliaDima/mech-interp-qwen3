@@ -14,7 +14,7 @@ Two injection modes are compared:
 
    # Full pipeline
    python experiments/knowledge_editing/run.py --all \
-       --small_model_path runs/stitching/rope/small_model.pt \
+       --small_model_path runs/small_addition/rope/small_model.pt \
        --dataset_path data/addition_dataset.jsonl
 
    # Stages individually
@@ -204,7 +204,7 @@ Relation to SAE Feature Space
 
 The injection operates in **activation space** (``hook_mlp_out``), not directly in SAE feature space. The alignment loss ensures the injected vector :math:`\mathbf{v}` is geometrically consistent with the large model's transcoder geometry, but there is no guarantee that :math:`\mathbf{v}` decomposes cleanly into individual SAE features.
 
-A fully SAE-level edit would instead patch :math:`\mathbf{f}_B` directly (before decoding), activating specific transcoder features by name. That would require first identifying *which* features in :math:`\mathcal{A}_B` correspond to carry — which is precisely what the stitching and carry-discovery experiments aim to establish.
+A fully SAE-level edit would instead patch :math:`\mathbf{f}_B` directly (before decoding), activating specific transcoder features by name. That would require first identifying *which* features in :math:`\mathcal{A}_B` correspond to carry — which is a separate carry-discovery problem.
 
 
 References

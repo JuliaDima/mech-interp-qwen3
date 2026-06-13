@@ -54,13 +54,17 @@ from mechinterp_qwen3.utils.hf_utils import load_transcoder_from_hub  # noqa: E4
 from mechinterp_qwen3.utils.model_utils import get_default_device, parse_dtype  # noqa: E402
 from mechinterp_qwen3.utils.token_utils import tokenize_qwen_input  # noqa: E402
 
-# Stitching utilities (dataset loader + small model definition)
-_STITCH_DIR = str(Path(__file__).parent.parent / "stitching")
-if _STITCH_DIR not in sys.path:
-    sys.path.insert(0, _STITCH_DIR)
+_OTHERS_DIR = str(Path(__file__).parent.parent)
+if _OTHERS_DIR not in sys.path:
+    sys.path.insert(0, _OTHERS_DIR)
 
-from run import SmallAdditionTransformer, _load_small_model, _load_small_sae  # noqa: E402
-from utils import get_small_model_tokenizer, load_addition_dataset  # noqa: E402
+from common.small_addition import (  # noqa: E402
+    SmallAdditionTransformer,
+    _load_small_model,
+    _load_small_sae,
+    get_small_model_tokenizer,
+    load_addition_dataset,
+)
 
 from experiments.knowledge_editing.model import FeatureAlignmentModule  # noqa: E402
 
@@ -100,7 +104,7 @@ def collect_features(
     f_s         — small model SAE feature activations at '=' position (last layer),
                   shape (N, small_sae.d_transcoder).  Using SAE features rather than
                   the raw residual stream gives an interpretable, sparse representation
-                  of the carry circuit — matching what the stitching pipeline produces.
+                  of the carry circuit.
     decoded_f_B — big model SAE decoded output at '=' position, shape (N, d_model_large)
                   computed as  feat_acts @ W_dec  (lazy decoder loaded on first access)
     """
@@ -815,13 +819,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--small_model_path",
-        default="runs/stitching/rope/small_model.pt",
+        default="runs/small_addition/rope/small_model.pt",
         help="Path to trained small model checkpoint (.pt)",
     )
     parser.add_argument(
         "--small_sae_path",
-        default="runs/stitching/rope/small_sae.safetensors",
-        help="Path to small model SAE checkpoint (.safetensors) — trained by stitching pipeline",
+        default="runs/small_addition/rope/small_sae.safetensors",
+        help="Path to small model SAE checkpoint (.safetensors)",
     )
     # _load_small_sae reads args.small_sae_layer and args.small_model_layers
     parser.add_argument(

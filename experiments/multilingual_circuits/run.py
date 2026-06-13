@@ -137,12 +137,46 @@ def _resolve_ids(tokenizer, surface_forms: list[str]) -> list[int]:
     return list(seen)
 
 
+def _resolve_next_token_ids(tokenizer, prompt: str, surface_forms: list[str]) -> list[int]:
+    """Map answer strings to first token IDs in the actual prompt context.
+
+    Tokenizers can choose different token IDs for a standalone string than for
+    the same string after a prompt suffix. Resolve against ``prompt + answer``
+    so plotted probabilities match the next-token position being measured.
+    """
+    prompt_ids = tokenizer(prompt, add_special_tokens=False).input_ids
+    seen: dict[int, None] = {}
+
+    for surface in surface_forms:
+        full_ids = tokenizer(prompt + surface, add_special_tokens=False).input_ids
+        if full_ids[: len(prompt_ids)] == prompt_ids:
+            continuation = full_ids[len(prompt_ids):]
+        else:
+            div = next(
+                (i for i, (a, b) in enumerate(zip(prompt_ids, full_ids)) if a != b),
+                min(len(prompt_ids), len(full_ids)),
+            )
+            continuation = full_ids[div:]
+        if continuation:
+            seen.setdefault(continuation[0], None)
+
+    return list(seen)
+
+
 def _find_divergence_pos(ids_a: list[int], ids_b: list[int]) -> int:
     """Return the index of the first differing token between two sequences."""
     for i in range(min(len(ids_a), len(ids_b))):
         if ids_a[i] != ids_b[i]:
             return i
     return min(len(ids_a), len(ids_b)) - 1
+
+
+def _find_differing_positions(ids_a: list[int], ids_b: list[int]) -> list[int]:
+    """Return all token positions that differ between two token sequences."""
+    shared = min(len(ids_a), len(ids_b))
+    positions = [i for i in range(shared) if ids_a[i] != ids_b[i]]
+    positions.extend(range(shared, max(len(ids_a), len(ids_b))))
+    return positions or [_find_divergence_pos(ids_a, ids_b)]
 
 
 def _tok_label(tokenizer, tok_id: int) -> str:
@@ -176,6 +210,28 @@ def get_pos_activations(
     n_pos = act_cache.shape[1]
     abs_pos = pos if pos >= 0 else n_pos + pos
     return {layer: act_cache[layer, abs_pos, :].float() for layer in layers}
+
+
+@torch.no_grad()
+def get_mean_activations(
+    model: AttributionModel,
+    tokens: torch.Tensor,
+    layers: list[int],
+    positions: list[int],
+) -> dict[int, torch.Tensor]:
+    """Return mean transcoder feature activations over selected token positions."""
+    inp = tokens.unsqueeze(0) if tokens.ndim == 1 else tokens
+    with torch.inference_mode():
+        _, act_cache = model.get_activations(inp)  # (n_layers, n_pos, d_tc)
+    n_pos = act_cache.shape[1]
+    abs_positions = [p if p >= 0 else n_pos + p for p in positions]
+    abs_positions = [p for p in abs_positions if 0 <= p < n_pos]
+    if not abs_positions:
+        abs_positions = [n_pos - 1]
+    return {
+        layer: act_cache[layer, abs_positions, :].float().mean(dim=0)
+        for layer in layers
+    }
 
 
 def find_exclusive_features(
@@ -229,6 +285,42 @@ def find_exclusive_features(
     return suppress_by_layer, inject_by_layer, inject_vals_by_layer
 
 
+def _feature_logit_summary(
+    model: AttributionModel,
+    feature_ids_by_layer: dict[int, list[int]],
+    source_token_ids: list[int],
+    target_token_ids: list[int],
+) -> dict[str, float | int]:
+    """Summarize decoded logit effects of selected transcoder features."""
+    summary = {
+        "n_features": 0,
+        "source_logit_sum": 0.0,
+        "target_logit_sum": 0.0,
+        "source_logit_max": 0.0,
+        "target_logit_max": 0.0,
+    }
+    if not source_token_ids or not target_token_ids:
+        return summary
+
+    W_U = model.unembed.W_U.float()
+    src_dirs = W_U[:, source_token_ids]
+    tgt_dirs = W_U[:, target_token_ids]
+
+    for layer, feature_ids in feature_ids_by_layer.items():
+        if not feature_ids:
+            continue
+        dec = model.transcoders[layer].W_dec[feature_ids].float()
+        src_effect = (dec @ src_dirs).max(dim=1).values
+        tgt_effect = (dec @ tgt_dirs).max(dim=1).values
+        summary["n_features"] += int(len(feature_ids))
+        summary["source_logit_sum"] += float(src_effect.sum())
+        summary["target_logit_sum"] += float(tgt_effect.sum())
+        summary["source_logit_max"] = max(float(summary["source_logit_max"]), float(src_effect.max()))
+        summary["target_logit_max"] = max(float(summary["target_logit_max"]), float(tgt_effect.max()))
+
+    return summary
+
+
 # ── Intervention hooks ─────────────────────────────────────────────────────────
 
 
@@ -239,17 +331,14 @@ def _build_swap_hooks(
     inject_ids: list[int],
     inject_vals: list[float],
     alpha: float,
-    target_pos: int,
+    target_pos: int | list[int],
 ) -> list[tuple[str, Callable]]:
     """Build a (capture, swap) hook pair for one transcoder layer.
 
     The capture hook saves the pre-transcoder hidden state; the swap hook
-    re-encodes it, zeroes suppressed features, injects target features scaled
-    by alpha, then decodes back to residual space — replacing the normal MLP
-    output at `target_pos`.
-
-    In torch.no_grad() context the permanent add_skip_connection hook is
-    transparent, so our reconstruction is the final MLP contribution.
+    re-encodes it, attenuates suppressed features, injects target features scaled
+    by alpha, then decodes the edited-minus-original feature delta back to
+    residual space and adds only that delta to the raw MLP output.
     """
     tc = model.transcoders[layer]
 
@@ -259,18 +348,25 @@ def _build_swap_hooks(
             return mlp_out
         with torch.no_grad():
             pre = F.linear(h_in.to(tc.W_enc.dtype), tc.W_enc, tc.b_enc)
-            acts = tc.activation_function(pre)          # (1, n_pos, d_tc)
+            acts_orig = tc.activation_function(pre)          # (1, n_pos, d_tc)
+            acts = acts_orig.clone()
             n_pos = acts.shape[1]
-            pos = target_pos if target_pos >= 0 else n_pos + target_pos
-            if suppress_ids:
-                acts[:, pos, suppress_ids] = 0.0
-            if inject_ids and alpha > 0.0:
-                inj = torch.tensor(inject_vals, device=acts.device, dtype=acts.dtype)
-                acts[:, pos, inject_ids] += alpha * inj
-            out = acts @ tc.W_dec + tc.b_dec
-            if tc.W_skip is not None:
-                out = out + h_in.to(out.dtype) @ tc.W_skip.T
-        return out.to(mlp_out.dtype)
+            raw_positions = target_pos if isinstance(target_pos, list) else [target_pos]
+            positions = [p if p >= 0 else n_pos + p for p in raw_positions]
+            positions = [p for p in positions if 0 <= p < n_pos]
+            if positions and alpha > 0.0:
+                if suppress_ids:
+                    # Make the sweep continuous: alpha=0 is baseline, alpha=1 fully
+                    # suppresses source-exclusive features, and alpha>1 only over-injects.
+                    suppress_scale = max(0.0, 1.0 - min(float(alpha), 1.0))
+                    for pos in positions:
+                        acts[:, pos, suppress_ids] *= suppress_scale
+                if inject_ids:
+                    inj = torch.tensor(inject_vals, device=acts.device, dtype=acts.dtype)
+                    for pos in positions:
+                        acts[:, pos, inject_ids] += alpha * inj
+            delta = (acts - acts_orig) @ tc.W_dec
+        return mlp_out + delta.to(mlp_out.dtype)
 
     _swap._mlp_in = None  # type: ignore[attr-defined]
 
@@ -296,7 +392,7 @@ def intervention_sweep(
     inject_vals_by_layer: dict[int, list[float]],
     alphas: list[float],
     track_token_ids: list[int],
-    target_pos: int = -1,
+    target_pos: int | list[int] = -1,
 ) -> dict[int, list[float]]:
     """Run one forward pass per alpha value and record final-position softmax probs.
 
@@ -319,16 +415,19 @@ def intervention_sweep(
     result: dict[int, list[float]] = {tid: [] for tid in track_token_ids}
 
     for alpha in alphas:
-        hooks: list[tuple[str, Callable]] = []
-        for layer in all_layers:
-            hooks.extend(_build_swap_hooks(
-                model, layer,
-                suppress_by_layer.get(layer, []),
-                inject_by_layer.get(layer, []),
-                inject_vals_by_layer.get(layer, []),
-                alpha, target_pos,
-            ))
-        logits = model.run_with_hooks(tokens, fwd_hooks=hooks)
+        if alpha == 0.0:
+            logits = model(tokens)
+        else:
+            hooks: list[tuple[str, Callable]] = []
+            for layer in all_layers:
+                hooks.extend(_build_swap_hooks(
+                    model, layer,
+                    suppress_by_layer.get(layer, []),
+                    inject_by_layer.get(layer, []),
+                    inject_vals_by_layer.get(layer, []),
+                    alpha, target_pos,
+                ))
+            logits = model.run_with_hooks(tokens, fwd_hooks=hooks)
         probs = torch.softmax(logits[0, -1].float(), dim=-1)
         for tid in track_token_ids:
             result[tid].append(float(probs[tid]))
@@ -347,6 +446,7 @@ def _plot_sweep_panel(
     int_ids: list[int],
     tokenizer,
     title: str,
+    label_overrides: dict[int, str] | None = None,
 ) -> None:
     """Draw probability-vs-alpha curves on a single axis."""
     orig_cols = [GRAY, NAVY]
@@ -356,7 +456,7 @@ def _plot_sweep_panel(
         if tid not in probs:
             continue
         col = orig_cols[i % len(orig_cols)]
-        label = _tok_label(tokenizer, tid)
+        label = (label_overrides or {}).get(tid, _tok_label(tokenizer, tid))
         ax.plot(alphas, probs[tid], color=col, linewidth=1.6, label=label, zorder=3)
         ax.scatter([alphas[-1]], [probs[tid][-1]], color=col, s=28, zorder=4)
 
@@ -364,7 +464,7 @@ def _plot_sweep_panel(
         if tid not in probs:
             continue
         col = int_cols[i % len(int_cols)]
-        label = _tok_label(tokenizer, tid)
+        label = (label_overrides or {}).get(tid, _tok_label(tokenizer, tid))
         ax.plot(alphas, probs[tid], color=col, linewidth=1.6, label=label, zorder=3)
         ax.scatter([alphas[-1]], [probs[tid][-1]], color=col, s=28, zorder=4)
 
@@ -388,6 +488,7 @@ def plot_intervention_grid(
     suptitle: str,
     out_path: Path,
     lang_order: list[str] | None = None,
+    label_overrides_by_lang: dict[str, dict[int, str]] | None = None,
 ) -> None:
     """Produce a 1×3 grid of probability sweep curves, one column per language."""
     _apply_style()
@@ -402,6 +503,7 @@ def plot_intervention_grid(
             int_ids_by_lang.get(lang, []),
             tokenizer,
             title=LANG_LABELS.get(lang, lang),
+            label_overrides=(label_overrides_by_lang or {}).get(lang, {}),
         )
 
     axes[0].set_ylabel("Next Token Probability", fontsize=9)
@@ -424,6 +526,9 @@ def run_experiment(
     run_operation: bool = True,
     run_operand: bool = True,
     run_language: bool = True,
+    operand_feature_source: str = "en",
+    language_feature_scope: str = "final",
+    language_edit_scope: str = "final",
 ) -> None:
     """Orchestrate all three intervention experiments and save plots + JSON results."""
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -453,7 +558,27 @@ def run_experiment(
         pred = tok.decode([int(logits[0, -1].argmax())])
         log.info("  %s: %r", lang.upper(), pred)
 
-    all_results: dict[str, object] = {}
+    all_results: dict[str, object] = {
+        "metadata": {
+            "model_name": getattr(model.cfg, "model_name", None),
+            "tokenizer_name": getattr(tok, "name_or_path", None),
+            "top_k": top_k,
+            "exclusivity": exclusivity,
+            "operand_feature_source": operand_feature_source,
+            "language_feature_scope": language_feature_scope,
+            "language_edit_scope": language_edit_scope,
+            "prompts": {
+                "antonym": ANTONYM_PROMPTS,
+                "synonym_en": SYNONYM_PROMPT_EN,
+                "hot_antonym": HOT_ANTONYM_PROMPTS,
+            },
+            "tracked_surfaces": {
+                "antonym": ANTONYM_TOKENS,
+                "synonym": SYNONYM_TOKENS,
+                "cold": COLD_TOKENS,
+            },
+        }
+    }
 
     # ── Experiment 1: Operation swap (antonym → synonym) ─────────────────────
     if run_operation:
@@ -477,8 +602,8 @@ def run_experiment(
         int_op:  dict[str, list[int]] = {}
 
         for lang in ["en", "zh", "fr"]:
-            orig_ids = _resolve_ids(tok, ANTONYM_TOKENS[lang])
-            int_ids  = _resolve_ids(tok, SYNONYM_TOKENS[lang])
+            orig_ids = _resolve_next_token_ids(tok, ANTONYM_PROMPTS[lang], ANTONYM_TOKENS[lang])
+            int_ids  = _resolve_next_token_ids(tok, ANTONYM_PROMPTS[lang], SYNONYM_TOKENS[lang])
             track    = list(dict.fromkeys(orig_ids + int_ids))
             orig_op[lang] = orig_ids
             int_op[lang]  = int_ids
@@ -507,46 +632,49 @@ def run_experiment(
         log.info("=== Experiment 2: Operand swap ===")
         alphas_oper = [round(i * 0.1, 1) for i in range(16)]  # 0.0 … 1.5
 
-        # Find divergence position in the English reference pair
-        ant_ids_en = ant["en"].tolist()
-        hot_ids_en = hot["en"].tolist()
-        op_pos_en  = _find_divergence_pos(ant_ids_en, hot_ids_en)
-        log.info(
-            "  EN operand position: %d = %r",
-            op_pos_en, tok.decode([ant_ids_en[op_pos_en]]),
-        )
-
-        # Features at the operand token, early layers, from the English pair
-        ant_acts_oper = get_pos_activations(model, ant["en"], oper_layers, pos=op_pos_en)
-        hot_acts_oper = get_pos_activations(model, hot["en"], oper_layers, pos=op_pos_en)
-        sup_oper, inj_oper, vals_oper = find_exclusive_features(
-            ant_acts_oper, hot_acts_oper, oper_layers, top_k, exclusivity
-        )
-        log.info(
-            "  Small features (suppress): %d  |  Hot features (inject): %d",
-            sum(len(v) for v in sup_oper.values()),
-            sum(len(v) for v in inj_oper.values()),
-        )
-
         res_oper: dict[str, dict[int, list[float]]] = {}
         orig_oper: dict[str, list[int]] = {}
         int_oper:  dict[str, list[int]] = {}
+        label_overrides_oper: dict[str, dict[int, str]] = {}
+
+        en_oper_pos = _find_differing_positions(ant["en"].tolist(), hot["en"].tolist())
+        en_small_acts = get_mean_activations(model, ant["en"], oper_layers, en_oper_pos)
+        en_hot_acts = get_mean_activations(model, hot["en"], oper_layers, en_oper_pos)
+        sup_oper_en, inj_oper_en, vals_oper_en = find_exclusive_features(
+            en_small_acts, en_hot_acts, oper_layers, top_k, exclusivity
+        )
 
         for lang in ["en", "zh", "fr"]:
-            # Apply intervention at the language-specific operand position
+            # Apply to every differing operand subtoken.  French has pet+it vs cha+ud.
             lang_ant_ids = ant[lang].tolist()
             lang_hot_ids = hot[lang].tolist()
-            lang_op_pos  = _find_divergence_pos(lang_ant_ids, lang_hot_ids)
+            lang_op_pos = _find_differing_positions(lang_ant_ids, lang_hot_ids)
             log.info(
-                "  %s operand position: %d = %r",
-                lang.upper(), lang_op_pos, tok.decode([lang_ant_ids[lang_op_pos]]),
+                "  %s operand positions: %s = %r",
+                lang.upper(), lang_op_pos, tok.decode([lang_ant_ids[p] for p in lang_op_pos if p < len(lang_ant_ids)]),
             )
 
-            orig_ids = _resolve_ids(tok, ANTONYM_TOKENS[lang])
-            int_ids  = _resolve_ids(tok, COLD_TOKENS[lang])
+            if operand_feature_source == "in_language":
+                ant_acts_oper = get_mean_activations(model, ant[lang], oper_layers, lang_op_pos)
+                hot_acts_oper = get_mean_activations(model, hot[lang], oper_layers, lang_op_pos)
+                sup_oper, inj_oper, vals_oper = find_exclusive_features(
+                    ant_acts_oper, hot_acts_oper, oper_layers, top_k, exclusivity
+                )
+            else:
+                sup_oper, inj_oper, vals_oper = sup_oper_en, inj_oper_en, vals_oper_en
+            log.info(
+                "    Small features (suppress): %d  |  Hot features (inject): %d",
+                sum(len(v) for v in sup_oper.values()),
+                sum(len(v) for v in inj_oper.values()),
+            )
+
+            orig_ids = _resolve_next_token_ids(tok, ANTONYM_PROMPTS[lang], ANTONYM_TOKENS[lang])
+            int_ids  = _resolve_next_token_ids(tok, ANTONYM_PROMPTS[lang], COLD_TOKENS[lang])
             track    = list(dict.fromkeys(orig_ids + int_ids))
             orig_oper[lang] = orig_ids
             int_oper[lang]  = int_ids
+            if lang == "fr" and int_ids:
+                label_overrides_oper[lang] = {int_ids[0]: "froid"}
 
             res_oper[lang] = intervention_sweep(
                 model, ant[lang], sup_oper, inj_oper, vals_oper,
@@ -557,6 +685,7 @@ def run_experiment(
             res_oper, alphas_oper, orig_oper, int_oper, tok,
             suptitle="Operand Swap: Small → Hot",
             out_path=out_dir / "operand_swap.png",
+            label_overrides_by_lang=label_overrides_oper,
         )
         all_results["operand_swap"] = {
             "alphas": alphas_oper,
@@ -574,12 +703,19 @@ def run_experiment(
         lang_swap_res: dict[tuple[str, str], dict[int, list[float]]] = {}
         lang_orig_ids: dict[tuple[str, str], list[int]] = {}
         lang_int_ids:  dict[tuple[str, str], list[int]] = {}
+        lang_logit_diag: dict[tuple[str, str], dict[str, object]] = {}
 
         for src_lang, tgt_lang in LANG_SWAP_PAIRS:
             log.info("  %s → %s", src_lang.upper(), tgt_lang.upper())
 
-            src_acts = get_pos_activations(model, ant[src_lang], lang_layers, pos=-1)
-            tgt_acts = get_pos_activations(model, ant[tgt_lang], lang_layers, pos=-1)
+            src_positions = list(range(len(ant[src_lang].tolist())))
+            tgt_positions = list(range(len(ant[tgt_lang].tolist())))
+            if language_feature_scope == "prompt_mean":
+                src_acts = get_mean_activations(model, ant[src_lang], lang_layers, src_positions)
+                tgt_acts = get_mean_activations(model, ant[tgt_lang], lang_layers, tgt_positions)
+            else:
+                src_acts = get_pos_activations(model, ant[src_lang], lang_layers, pos=-1)
+                tgt_acts = get_pos_activations(model, ant[tgt_lang], lang_layers, pos=-1)
             sup_lang, inj_lang, vals_lang = find_exclusive_features(
                 src_acts, tgt_acts, lang_layers, top_k, exclusivity
             )
@@ -589,13 +725,18 @@ def run_experiment(
                 sum(len(v) for v in inj_lang.values()),
             )
 
-            orig_ids = _resolve_ids(tok, ANTONYM_TOKENS[src_lang])
-            int_ids  = _resolve_ids(tok, ANTONYM_TOKENS[tgt_lang])
+            orig_ids = _resolve_next_token_ids(tok, ANTONYM_PROMPTS[src_lang], ANTONYM_TOKENS[src_lang])
+            int_ids  = _resolve_next_token_ids(tok, ANTONYM_PROMPTS[src_lang], ANTONYM_TOKENS[tgt_lang])
             track    = list(dict.fromkeys(orig_ids + int_ids))
+            lang_logit_diag[(src_lang, tgt_lang)] = {
+                "suppress": _feature_logit_summary(model, sup_lang, orig_ids, int_ids),
+                "inject": _feature_logit_summary(model, inj_lang, orig_ids, int_ids),
+            }
 
+            target_pos = src_positions if language_edit_scope == "prompt" else -1
             probs = intervention_sweep(
                 model, ant[src_lang], sup_lang, inj_lang, vals_lang,
-                alphas_lang, track, target_pos=-1,
+                alphas_lang, track, target_pos=target_pos,
             )
             lang_swap_res[(src_lang, tgt_lang)] = probs
             lang_orig_ids[(src_lang, tgt_lang)] = orig_ids
@@ -631,6 +772,7 @@ def run_experiment(
                         str(tid): probs_list
                         for tid, probs_list in lang_swap_res[(src, tgt)].items()
                     },
+                    "selected_feature_logit_summary": lang_logit_diag[(src, tgt)],
                 }
                 for src, tgt in LANG_SWAP_PAIRS
             ],
@@ -663,6 +805,24 @@ def main() -> None:
         help="Feature exclusivity threshold: tgt < threshold * src to qualify as source-exclusive",
     )
     parser.add_argument("--out_dir", default="runs/multilingual_circuits")
+    parser.add_argument(
+        "--operand_feature_source",
+        choices=["en", "in_language"],
+        default="en",
+        help="Use English-derived operand features (spec) or derive them separately in each language",
+    )
+    parser.add_argument(
+        "--language_feature_scope",
+        choices=["final", "prompt_mean"],
+        default="final",
+        help="Collect language features on final token (spec) or mean over prompt tokens",
+    )
+    parser.add_argument(
+        "--language_edit_scope",
+        choices=["final", "prompt"],
+        default="final",
+        help="Apply language intervention at final token (spec) or across the source prompt",
+    )
     parser.add_argument("--no_operation", action="store_true", help="Skip operation swap experiment")
     parser.add_argument("--no_operand",   action="store_true", help="Skip operand swap experiment")
     parser.add_argument("--no_language",  action="store_true", help="Skip language swap experiment")
@@ -690,6 +850,9 @@ def main() -> None:
         run_operation=not args.no_operation,
         run_operand=not args.no_operand,
         run_language=not args.no_language,
+        operand_feature_source=args.operand_feature_source,
+        language_feature_scope=args.language_feature_scope,
+        language_edit_scope=args.language_edit_scope,
     )
     log.info("Done.")
 
