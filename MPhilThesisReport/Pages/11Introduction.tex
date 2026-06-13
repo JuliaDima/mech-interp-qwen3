@@ -2,7 +2,7 @@
 \label{sec:introduction}
 
 \begin{flushright}
-\emph{``There is a way of grasping a rule which is not an interpretation.''}\\
+\emph{\textcolor{softviolet}{``There is a way of grasping a rule which is not an interpretation.''}}\\
 --- Ludwig Wittgenstein, \emph{Philosophical Investigations}
 \end{flushright}
 
@@ -93,6 +93,8 @@ Features are indexed throughout by the double subscript $(\ell, k)$, with $\ell$
 the layer and $k$ the index within that layer's dictionary.  Sparsity implies that at most a
 small active set of features contributes for any given input, making each feature's role examinable in
 isolation.
+
+\textit{Attribution graphs}
 
 Attribution scores are computed on the \textit{linearised} model, in which attention outputs
 are detached and treated as constants, so that residual stream propagates only through the

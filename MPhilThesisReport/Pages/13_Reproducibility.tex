@@ -10,14 +10,12 @@ symbolic carry algorithm but instead activates a family of sparse
 the operand space satisfying $a \bmod 10 = d_1$ and $b \bmod 10 = d_2$
 for a specific digit pair $(d_1, d_2)$.  These features encode the ones
 digit of $d_1 + d_2$ and route this information directly to the output.
-The present reproduction asks whether the same mechanistic signature
+The present reproduction analyises whether the same mechanistic signature
 appears in Qwen3-4B, trained independently on a different corpus and with
-a different tokeniser, and whether the attribution methodology transfers
-faithfully to a model for which it was not originally calibrated.  The
+a different tokeniser, and whether the attribution methodology transfers to a 
+model for which it was not originally calibrated.  The
 analysis adopts the transcoder formalism and notation of
-Section~\ref{sec:interp-methods}; the faithfulness of the linearised
-attribution on Qwen3-4B is examined separately in
-Section~\ref{sec:faithfulness}.
+Section~\ref{sec:interp-methods}.
 
 \subsection{Operand Plots and Lookup Feature Identification}
 \label{subsec:operand-plots}
@@ -34,17 +32,15 @@ $(\ell, k)$ is
   \label{eq:operand-matrix}
 \end{equation}
 
-obtained by sweeping over the full $100 \times 100$ integer-pair grid.
-The geometry of $M_{\ell,k}$ encodes the feature's sensitivity in a
-directly interpretable form.  A feature that tracks the raw sum $a + b$
+obtained by scanning over the full $100 \times 100$ integer-pair grid.
+The geometry of $M_{\ell,k}$ encodes the feature's sensitivity in an interpretable form.  A feature that tracks the raw sum $a + b$
 produces diagonal stripes of constant activation; one that tracks a
 single operand produces horizontal or vertical bands; modular sensitivity
 to the ones digit of either operand produces a period-10 repeating
 structure.  A feature that fires selectively for a specific pair of ones
 digits $(d_1, d_2)$ produces a regular grid of isolated point clusters,
 concentrated on the $200$ cells where $a \bmod 10 \in \{d_1, d_2\}$ and
-$b \bmod 10 \in \{d_1, d_2\}$.  These \textit{lookup table features}
-constitute $2\%$ of the operand space.
+$b \bmod 10 \in \{d_1, d_2\}$.
 
 To identify lookup candidates automatically, each feature is assigned the
 concentration score
@@ -82,18 +78,18 @@ prompt \texttt{calc:~39+59=~}, which has ones digits $(9, 9)$ rather than
 $(6, 9)$; if the identified feature mediates the computation, the output
 should shift from predicting ones digit $5$ to ones digit $8$.
 
-\paragraph{Position-resolved feature sweep.}
+\paragraph{Position-resolved feature scan.}
 \citet{lindsey2025biology} observe that the features active during
 addition in Claude 3 Haiku differ systematically by token position:
 features at the operand tokens encode individual digit values, while
 features at the delimiter token encode their combination.  To examine
 whether an analogous positional structure is present in Qwen3-4B, the
-operand sweep of Equation~\ref{eq:operand-matrix} was applied at three
+operand scan of Equation~\ref{eq:operand-matrix} was applied at three
 token positions in the prompt \texttt{calc:~}$a$\texttt{+}$b$\texttt{=}:
 the ones digit of $a$ (position 4), the ones digit of $b$ (position 7),
 and the \texttt{=} token (position 8).  At each position the top-15 CLT features by attribution edge weight were
 selected; one representative per distinct ones-digit encoded is shown.
-Figure~\ref{fig:operand-pos-sweep} shows the resulting matrices.
+Figure~\ref{fig:operand-pos-scan} shows the resulting matrices.
 
 At position 4, the selected features activate in vertical bands with
 period 10 along the $a$ axis.  Activation is determined almost entirely
@@ -137,10 +133,10 @@ values.
     diagonal regions of sum sensitivity.
     Axes span two-digit operands $a, b \in [10, 99]$.
   }
-  \label{fig:operand-pos-sweep}
+  \label{fig:operand-pos-scan}
 \end{figure}
 
-The positional separation visible in Figure~\ref{fig:operand-pos-sweep}
+The positional separation visible in Figure~\ref{fig:operand-pos-scan}
 implies that ones-digit information is encoded before the two addends
 are jointly processed.  At the operand token positions, no retained feature shows sensitivity
 to both $a$ and $b$ simultaneously; the
@@ -160,8 +156,8 @@ summarised in Table~\ref{tab:addition-dataset}.
   \small
   \caption{%
     Prompt collections used in the addition circuit reproduction.
-    The operand grid drives the activation sweep; the focus prompt
-    anchors the attribution graph.
+    The operand grid drives the activation scan; the focus prompt
+    anchors the attribution graph described in Section \ref{sec:interp-methods}.
   }
   \label{tab:addition-dataset}
   \begin{tabular}{@{}llrl@{}}
@@ -171,7 +167,7 @@ summarised in Table~\ref{tab:addition-dataset}.
     Operand grid
       & \texttt{calc:~$a$+$b$=~}
       & $10{,}000$
-      & Feature activation sweep; $a,b \in \{0,\ldots,99\}$ \\
+      & Feature activation scan; $a,b \in \{0,\ldots,99\}$ \\
     Focus prompt
       & \texttt{calc:~36+59=~}
       & $1$
@@ -188,12 +184,12 @@ follows Anthropic's exact choice, enabling direct comparison of
 attribution graphs across models.
 
 \subsection{Behavioural Verification}
-\label{subsec:accuracy-sweep}
+\label{subsec:accuracy-scan}
 
 Before committing mechanistic resources to a single focus prompt, it is
 necessary to establish that the model solves the task reliably across the
 operand space.  A circuit identified on a prompt the model cannot answer
-carries no mechanistic authority.  The accuracy sweep therefore records,
+carries no mechanistic authority.  The accuracy scan therefore records,
 for every pair $a, b \in \{0,\ldots,99\}$, the \textit{teacher-forced
 confidence} at each output position.  Let
 $\mathbf{y}^*(a,b) = (y^*_0, y^*_1, \ldots)$ denote the ground-truth
@@ -234,19 +230,20 @@ propagating carries sequentially.
   \centering
   \includegraphics[width=\textwidth]{../runs/addition/accuracy_sweep/plots/positional_cascade}
   \caption{%
-    Teacher-forced confidence $P_k(a,b)$ (Eq.~\ref{eq:teacher-forced})
-    across the $100 \times 100$ operand grid for positions $k = 0, 1, 2$.
-    Each cell encodes the probability that Qwen3-4B assigns to the correct
-    $k$-th output token when all preceding tokens are forced to their
-    ground-truth values.  Grid means are $\mu_0 = 0.233$, $\mu_1 = 0.943$,
-    and $\mu_2 = 0.988$.  The leftmost panel reveals a period-10 grid structure
-    aligned with the decimal ones-digit boundaries: columns and rows separated
-    by ten units carry systematically different baseline confidence levels,
-    implying that $P_0$ depends primarily on $(a \bmod 10,\, b \bmod 10)$
-    rather than on operand magnitudes.  Empty cells in the middle panel
-    correspond to pairs with $a + b < 10$, whose single-digit sum has no
-    second output token; empty cells in the rightmost panel correspond to
-    pairs with $a + b < 100$, whose two-digit sum has no third digit.
+    All panels use template \texttt{calc:~$a$+$b$=}.
+    \textbf{Top row, left:} Carry-class partition $\kappa(a,b)$
+    (Eq.~\ref{eq:carry-class}), coloured by carry count: zero carries
+    (blue), one carry (yellow), two or more carries (red).
+    \textbf{Top row, right:} Prediction entropy $H(a,b)$
+    (Eq.~\ref{eq:entropy}) at output position $k=0$.  Entropy is elevated
+    along carry boundaries, where the correct units digit depends on an
+    unresolved carry.
+    \textbf{Bottom row:} Teacher-forced confidence $P_k(a,b)$
+    (Eq.~\ref{eq:teacher-forced}) for positions $k = 0, 1, 2$.
+    Grid means are $\mu_0 = 0.233$, $\mu_1 = 0.943$, and $\mu_2 = 0.988$.
+    Position~0 exhibits a period-10 grid structure aligned with the
+    decimal ones-digit boundaries, implying that $P_0$ depends primarily
+    on $(a \bmod 10,\, b \bmod 10)$ rather than on operand magnitudes.
   }
   \label{fig:positional-cascade}
 \end{figure}
@@ -259,22 +256,6 @@ geometry, and this periodicity implies that $P_0$ depends primarily on
 $(a \bmod 10,\, b \bmod 10)$ rather than on the absolute values of $a$ and
 $b$.  This is the behavioural signature one would expect if the computation
 were implemented by features selective to specific ones-digit pairs.
-
-\begin{figure}[ht!]
-  \centering
-  \includegraphics[width=0.62\textwidth]{../runs/addition/accuracy_sweep/plots/entropy_map}
-  \caption{%
-    Prediction entropy $H(a,b)$ (Eq.~\ref{eq:entropy}) at position $k = 0$.
-    Low-entropy cells (blue) form a period-10 grid aligned with the
-    high-confidence cells visible in the $k = 0$ panel of
-    Figure~\ref{fig:positional-cascade}, indicating that the model is both
-    decisive and correct on precisely the pairs where lookup features activate
-    strongly.  High-entropy cells (red) concentrate near carry boundaries and
-    for large operand values, reflecting genuine distributional indecision
-    rather than merely confident errors.
-  }
-  \label{fig:entropy-map}
-\end{figure}
 
 \paragraph{Prediction entropy.}
 Confidence $P_k(a,b)$ measures whether the top-ranked prediction is
@@ -291,11 +272,10 @@ Shannon entropy of the truncated output distribution at position $0$,
 
 where $p_{(1)}(a,b) \geq \cdots \geq p_{(K)}(a,b)$ are the top-$K$
 predicted probabilities, measures distributional spread independently of
-prediction correctness.  Figure~\ref{fig:entropy-map} plots $H(a,b)$
-across the grid.  Low-entropy cells (where the model commits decisively to
-a single token) form a period-10 grid aligned precisely with the
-high-confidence regions of the $k = 0$ panel of
-Figure~\ref{fig:positional-cascade}.
+prediction correctness.  The top-right panel of Figure~\ref{fig:positional-cascade}
+plots $H(a,b)$ across the grid.  Low-entropy cells (where the model commits
+decisively to a single token) form a period-10 grid aligned precisely with
+the high-confidence regions in the $k = 0$ panel.
 High-entropy cells (where the model distributes probability across several
 candidates) are concentrated at and near carry boundaries and for large
 operand values.  The agreement between the two maps establishes that the
@@ -316,11 +296,11 @@ arising in the sum.  Defining
   \label{eq:carry-class}
 \end{equation}
 
-Figure~\ref{fig:carry-structure} overlays the partition induced by
-$\kappa$ on the confidence grid.  If Qwen3-4B were implementing a symbolic
-carry algorithm, accuracy should deteriorate with carry complexity:
-pairs with $\kappa = 2$ should be hardest and pairs with $\kappa = 0$
-easiest.  The right panel of Figure~\ref{fig:carry-structure} contradicts
+The top-left panel of Figure~\ref{fig:positional-cascade} shows the partition
+induced by $\kappa$.  If Qwen3-4B were implementing a symbolic carry algorithm,
+accuracy should deteriorate with carry complexity: pairs with $\kappa = 2$
+should be hardest and pairs with $\kappa = 0$ easiest.
+The bottom-left panel of Figure~\ref{fig:positional-cascade} contradicts
 this prediction.  Regions of identical carry class exhibit substantial
 internal variation in $P_0$, and the drops in confidence cut across carry
 boundaries rather than aligning with them.  The period-10 grid structure
@@ -329,66 +309,9 @@ This dissociation between carry complexity and model accuracy constitutes
 behavioural evidence that the computation is not organised around carry
 propagation.
 
-\begin{figure}[ht!]
-  \centering
-  \includegraphics[width=\textwidth]{../runs/addition/accuracy_sweep/plots/carry_structure}
-  \caption{%
-    Left: carry-class partition $\kappa(a,b)$
-    (Eq.~\ref{eq:carry-class}) of the operand grid, coloured by carry count.
-    Right: first-token confidence $P_0(a,b)$ with carry-boundary contours
-    superimposed.  The period-10 structure of $P_0$ persists within each
-    carry class, and drops in confidence do not align with the
-    no-carry/single-carry/multi-carry boundaries, ruling out a symbolic
-    carry algorithm as the underlying mechanism.
-  }
-  \label{fig:carry-structure}
-\end{figure}
-
-\paragraph{Transcoder sparsity diagnostics.}
-The carry layers are sparse but not uniformly so; layer 16 shows the largest active burst among the selected diagnostic layers.
-
-\begin{figure}[ht!]
-  \centering
-  \includegraphics[width=0.92\textwidth]{../runs/addition/sparsity_per_layer_T0.png}
-  \caption{Mean active transcoder features per token position for carry and no-carry prompts under template \texttt{T0}. Dashed red lines mark the carry-feature layers used in the addition diagnostics.}
-  \label{fig:carry-sparsity-per-layer}
-\end{figure}
-
-\begin{table}[ht!]
-  \centering
-  \small
-  \begin{tabular}{@{}rrrrr@{}}
-    \toprule
-    Layer & Mean active/pos & Max active/pos & Active total & Fraction active \\
-    \midrule
-    13 & 41.3 & 154 & 537 & 0.0003 \\
-    14 & 260.3 & 3006 & 3384 & 0.0016 \\
-    16 & 2291.5 & 29409 & 29789 & 0.0140 \\
-    21 & 139.5 & 1239 & 1814 & 0.0009 \\
-    \bottomrule
-  \end{tabular}
-  \caption{Single-prompt active-feature counts for \texttt{calc: 209+531=}.}
-  \label{tab:carry-active-feature-counts}
-\end{table}
-
-\begin{table}[ht!]
-  \centering
-  \small
-  \begin{tabular}{@{}lrrrr@{}}
-    \toprule
-    Condition & Accuracy & $P(\mathrm{correct})$ & Pos. acc. & Neg. acc. \\
-    \midrule
-    Raw model & 0.03 & 0.0539 & 0.00 & 0.06 \\
-    Full transcoder & 0.31 & 0.1891 & 0.32 & 0.30 \\
-    Bias+skip only & 0.15 & 0.0994 & 0.16 & 0.14 \\
-    \bottomrule
-  \end{tabular}
-  \caption{Bias/skip diagnostic on the addition carry set at layers 13, 14, 16, and 21, with 50 examples per class.}
-  \label{tab:carry-bias-skip-diagnostic}
-\end{table}
-
 TODO: Conclusions...
 
+\clearpage
 % ============================================================
 \section{Reproducing the Multilingual Circuit}
 % ============================================================
@@ -511,7 +434,7 @@ monitored vocabulary index $t$ at the final position $T$ is
   \label{eq:pi-gamma}
 \end{equation}
 
-The sweep is conducted over $\gamma \in \{0,\,\delta,\,2\delta,\,\ldots,\,\gamma_{\max}\}$,
+The scan is conducted over $\gamma \in \{0,\,\delta,\,2\delta,\,\ldots,\,\gamma_{\max}\}$,
 yielding one probability curve $\pi_t$ per monitored token.  If the targeted
 component is causally sufficient for the corresponding aspect of the output,
 $\pi_t$ for the target-condition token should rise monotonically with $\gamma$
@@ -594,7 +517,143 @@ substituting target-language features for source-language ones should redirect
 the output toward the target-language antonym, leaving the underlying semantic
 relation undisturbed.
 
+
 \subsection{Results}
 \label{subsec:multilingual-results}
 
-% TODO: results pending full experimental runs.
+The intervention scans use $K=15$ active features per layer and an exclusivity
+threshold of $\rho=0.5$.  Next-token probabilities are always evaluated for the
+token that would actually follow the prompt, rather than for a token obtained
+from a word in isolation.  This distinction is relevant in a multilingual
+setting, where tokenisation is sensitive to the preceding quotation mark and to
+the script of the surrounding context.  The same issue is especially visible in
+the operand experiment: in French, both \textit{petit} and \textit{chaud} are
+split across two subtokens.  The intervention is therefore applied to the full
+operand span, and the plotted target is labelled as \textit{froid} even
+though the measured probability is attached to its first predicted subtoken.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.96\textwidth]{../runs/multilingual_circuits/op_swap.png}
+  \caption{Operation intervention.  Suppressing antonym features and injecting
+  synonym features in the middle layers redirects the semantic relation while
+  preserving the language of the prompt.}
+  \label{fig:multilingual-op-swap}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.96\textwidth]{../runs/multilingual_circuits/operand_swap.png}
+  \caption{Operand intervention.  Replacing small-related features with
+  hot-related features redirects the answer toward the antonym of \textit{hot};
+  the French case requires editing the two-subtoken operand span.}
+  \label{fig:multilingual-operand-swap}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.96\textwidth]{../runs/multilingual_circuits/lang_swap.png}
+  \caption{Language intervention.  In Qwen3-4B, the final-token language-feature
+  intervention does not produce a clean transfer of the answer into the target
+  language.}
+  \label{fig:multilingual-language-swap}
+\end{figure}
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \begin{tabular}{@{}llll@{}}
+    \toprule
+    Intervention & Case & Representative probability shift & Interpretation \\
+    \midrule
+    Operand & English & $P(\mathrm{cold})$: $2.1\!\times\!10^{-7}\to 0.994$ & crossover \\
+    Operand & Chinese & $P(\text{冷})$: $1.5\!\times\!10^{-7}\to 0.986$ & crossover \\
+    Operand & French & $P(\textit{froid})$: $1.5\!\times\!10^{-7}\to 0.037$; peak $0.998$ & crossover \\
+    Language & EN$\to$ZH & $P(\text{大})$: $2.3\!\times\!10^{-4}\to 0.044$ & weak transfer \\
+    Language & ZH$\to$FR & $P(\textit{grand})$: $2.1\!\times\!10^{-7}\to 2.3\!\times\!10^{-7}$ & no transfer \\
+    Language & FR$\to$EN & $P(\textit{large})$: $1.3\!\times\!10^{-5}\to 9.5\!\times\!10^{-6}$ & no transfer \\
+    \bottomrule
+  \end{tabular}
+  \caption{Summary of the multilingual intervention outcomes in Qwen3-4B.  The
+  operand intervention transfers across languages, whereas the language
+  intervention is weak or absent under the final-token transcoder edit.}
+  \label{tab:multilingual-summary}
+\end{table}
+
+The operation and operand interventions support a partially factorised account
+of the computation.  Changing the semantic relation, or changing the adjective
+whose antonym is requested, can redirect the model's answer while leaving the
+surrounding prompt fixed.  The operand result suggests that the same
+English-derived small-to-hot intervention produces the appropriate cold antonym
+in English, Chinese, and French once the relevant token spans are treated
+consistently.
+
+For the language intervention, The English-to-Chinese
+edit weakly increases probability on the Chinese answer token, but the effect
+is not significant enough to constitute a genuine output-language swap.  The
+Chinese-to-French and French-to-English interventions do not yield significant
+results.  A broader supplementary intervention, in which language features were averaged
+over the prompt and edited over all prompt positions, suppressed the original
+answer but still failed to move probability to the target-language token.  This
+suggests that the negative result is not explained by the choice of monitored
+token alone.  Rather, for Qwen3-4B, the output-language component appears not
+to be isolated by the selected early-layer MLP transcoder features. \textcolor{red}{refine}
+  
+% \clearpage
+
+
+\subsection{Attribution Graph Structure and Interactive Visualisation}
+\label{subsec:attr-graph}
+
+In this project, each attribution graph is stored as a JSON file containing three
+components.  The \textbf{node list} records every active transcoder
+feature: each node carries a layer index, a token position
+(\texttt{ctx\_idx}), a feature identifier, and a feature type
+(\texttt{CLT} for cross-layer transcoder features,
+\texttt{E} for embedding-space nodes).  The \textbf{link list}
+records directed influence edges between nodes; each edge has a scalar
+\texttt{weight} representing the linearised attribution of the source
+node's activation on the target node's logit contribution.
+The \textbf{metadata} block stores the prompt tokens, the node-retention
+threshold $N$, and the slug used to retrieve the graph.
+
+To identify the top features driving a given output token one reads the
+edges incoming to the target logit node, sorts by $|\texttt{weight}|$,
+and traces the highest-weight upstream nodes back through the graph.
+A node at layer $\ell$, token position $t$ with feature id $k$ and
+large incoming weight indicates that transcoder feature $(\ell, k)$
+encodes information that causally influences the prediction at that
+position.
+
+All attribution graphs produced in this work are publicly explorable
+through an interactive visualisation tool at
+\url{https://mechinterp-viz-94c364.uniofcam.dev/}.
+Figure~\ref{fig:attr-graph-viz} shows the attribution graph for the
+focus prompt, first with edges hidden to reveal the node layout, then
+with all edges rendered.  Nodes are arranged by layer (columns) and
+token position (rows); edge colour encodes sign (blue = positive,
+red = negative) and node size encodes influence magnitude.
+Interactive sliders filter by edge count and minimum influence threshold;
+clicking a node reveals its upstream and downstream neighbourhood.
+
+\begin{figure}[ht!]
+  \centering
+  \includegraphics[width=\textwidth]{../assets/add_attr_graph_no_edges}
+  \vspace{0.4em}
+  \includegraphics[width=\textwidth]{../assets/add_attr_graph_all_edges}
+  \caption{%
+    Attribution graph for the focus prompt \texttt{calc:~36+59=}
+    ($N{=}0.75$, 474 nodes, 3{,}265 edges).
+    \textit{Top:} node layout only, with edges hidden.
+    Rows correspond to token positions; columns to model layers L0--L35.
+    Node size encodes cumulative influence on the target logit.
+    \textit{Bottom:} the same graph with all edges rendered;
+    blue edges are positive attributions, red edges negative.
+    The dense connectivity at mid-to-late layers at the \texttt{=} token
+    position (bottom-right region) reflects the lookup features
+    identified in Section~\ref{subsec:operand-plots}.
+    An interactive version is available at
+    \url{https://mechinterp-viz-94c364.uniofcam.dev/}.
+  }
+  \label{fig:attr-graph-viz}
+\end{figure}
