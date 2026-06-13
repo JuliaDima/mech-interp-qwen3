@@ -18,9 +18,9 @@ import random
 from experiments.concept_localization.concept_pair import ConceptPair
 
 TEMPLATES: dict[str, tuple[str, str, str]] = {
-    "T0": ("Is {seq} a valid bracket string? Answer yes or no:", "yes", "no"),
-    "T1": ("Does the sequence {seq} has matched brackets? Answer yes or no:", "yes", "no"),
-    "T2": ("Is {seq} balanced? Answer yes or no:", "yes", "no"),
+    "T0": ("Is {seq} a valid bracket string? Answer yes or no: ", "yes", "no"),
+    "T1": ("Does the sequence {seq} has matched brackets? Answer yes or no: ", "yes", "no"),
+    "T2": ("Is {seq} balanced? Answer yes or no: ", "yes", "no"),
 }
 
 

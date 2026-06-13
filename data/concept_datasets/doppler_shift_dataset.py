@@ -40,9 +40,9 @@ _SOURCES = [
 ]
 
 TEMPLATES: dict[str, tuple[str, str, str]] = {
-    "T0": ("Given {src} {direction}, observed frequency exceeds emitted? Answer yes or no:", "yes", "no"),
-    "T1": ("Given {src} {direction}, measured pitch above emitted pitch? Answer yes or no:", "yes", "no"),
-    "T2": ("Given {src} {direction}, pitch measured higher than emitted? Answer yes or no:", "yes", "no"),
+    "T0": ("Given {src} {direction}, observed frequency exceeds emitted? Answer yes or no: ", "yes", "no"),
+    "T1": ("Given {src} {direction}, measured pitch above emitted pitch? Answer yes or no: ", "yes", "no"),
+    "T2": ("Given {src} {direction}, pitch measured higher than emitted? Answer yes or no: ", "yes", "no"),
     }
 
 # Approaching vs receding direction words per template

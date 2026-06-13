@@ -1,26 +1,28 @@
 \chapter{Concept Localisation via Contrastive Residual-Stream Analysis}
 \label{sec:concept_localisation}
 
-This chapter describes the contrastive localisation pipeline used to identify where
-arithmetic and symbolic concepts are represented inside Qwen3. The aim is not only
+This chapter describes the contrastive localisation experiments used to identify whether an LLM encodes abstract 
+scientific concepts as directions in the residual stream and where such concepts 
+are localised inside Qwen3. The aim is not only
 to find a layer at which a concept is linearly separable, but also to connect that
 separation to sparse transcoder features and to causal effects on the model's
-answer. The method therefore combines four views of the same object: residual-stream
-deltas, feature-decoder alignment, activation patterns over structured datasets,
+answer. The method therefore combines four views of analysing this localisation: residual-stream
+deltas, feature and residual-stream alignment, activation patterns over structured datasets,
 and intervention scores. This follows the broader use of activation-space directions as causal
-controls over scientific concepts, including recent work on steering physical behaviours in
-scientific foundation models~\citep{fear2025physics}.
+controls over scientific concepts, including recent work on steering behaviours in LLMs~\citep{panickssery2024steeringllama2contrastive, 
+zou2025representationengineeringtopdownapproach, meng2023locatingeditingfactualassociations} and scientific foundation
+ models \citep{fear2025physics}.
 
 \section{Contrastive Pair Construction}
 \label{sec:concept_pairs}
 
 Each concept is represented by a set of matched prompt pairs
 \((x_i^+, x_i^-)\). The positive prompt contains the target property and the
-negative prompt differs in the smallest controlled way that removes it. Matching is
-important since if the two prompts differed in many incidental details, the mean residual
-stream difference would mostly recover those nuisance changes rather than the
+negative prompt differs in the smallest controlled way that removes it. The templates of prompt pairs 
+are matched to avoid two prompts differing in many incidental details, in which case the mean residual
+stream difference would mostly recover those nuisance changes instead of the
 concept. The contrastive design attempts to hold syntax, length, operand scale, and
-answer format fixed while changing the mathematical property of interest.
+answer format fixed while changing the scientific property of interest.
 
 For the carry dataset, a positive example is an addition problem whose units digits
 cross a carry boundary, while the negative example is chosen so that no carry is

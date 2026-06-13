@@ -21,8 +21,8 @@ import random
 from experiments.concept_localization.concept_pair import ConceptPair
 
 TEMPLATES: dict[str, tuple[str, str | None, str | None]] = {
-    "T0": ("what is {a}+{b}? Answer:", None, None),  # prediction computed per pair
-    "T1": ("Does {a}+{b} have a carry? Answer yes or no:", "yes", "no"),
+    "T0": ("what is {a}+{b}? Answer: ", None, None),  # prediction computed per pair
+    "T1": ("Does {a}+{b} have a carry? Answer yes or no: ", "yes", "no"),
     "T2": ("calc: {a}+{b}= ", None, None),       # prediction computed per pair
 }
 

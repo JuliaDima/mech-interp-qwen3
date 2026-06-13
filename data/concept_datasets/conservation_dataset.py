@@ -13,9 +13,9 @@ import random
 from experiments.concept_localization.concept_pair import ConceptPair
 
 TEMPLATES: dict[str, tuple[str, str, str]] = {
-    "T0": ("Ball drop={h}, bounce={b}. valid? Answer yes or no:", "yes", "no"),
-    "T1": ("A ball dropped from {h}m rebounds to {b}m. Is this physical? Answer yes or no:", "yes", "no"),
-    "T2": ("Does bouncing to {b}m after dropping from {h}m conserve energy? Answer yes or no:", "yes", "no"),
+    "T0": ("Ball drop={h}, bounce={b}. valid? Answer yes or no: ", "yes", "no"),
+    "T1": ("A ball dropped from {h}m rebounds to {b}m. Is this physical? Answer yes or no: ", "yes", "no"),
+    "T2": ("Does bouncing to {b}m after dropping from {h}m conserve energy? Answer yes or no: ", "yes", "no"),
 }
 
 

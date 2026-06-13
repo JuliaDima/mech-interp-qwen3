@@ -19,9 +19,9 @@ from experiments.concept_localization.concept_pair import ConceptPair
 WAVELENGTHS = [10, 12, 14, 15, 16, 18, 20, 21, 24, 25]
 
 TEMPLATES: dict[str, tuple[str, str, str]] = {
-    "T0": ("Waves lambda={lam} path={d} interfere constructively? Answer yes or no:", "yes", "no"),
-    "T1": ("Is path difference {d} a multiple of wavelength {lam}? Answer yes or no:", "yes", "no"),
-    "T2": ("Wavelength {lam} and path diff {d} is constructive? Answer yes or no:", "yes", "no"),
+    "T0": ("Waves lambda={lam} path={d} interfere constructively? Answer yes or no: ", "yes", "no"),
+    "T1": ("Is path difference {d} a multiple of wavelength {lam}? Answer yes or no: ", "yes", "no"),
+    "T2": ("Wavelength {lam} and path diff {d} is constructive? Answer yes or no: ", "yes", "no"),
 }
 
 

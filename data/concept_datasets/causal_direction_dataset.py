@@ -80,9 +80,9 @@ _CAUSAL_FACTS: list[tuple[str, str]] = [
 ]
 
 TEMPLATES: dict[str, tuple[str, str, str]] = {
-    "T0": ("Does {A} lead to {B}? Answer yes or no:", "yes", "no"),
-    "T1": ("Does {A} cause {B}? Answer yes or no:", "yes", "no"),
-    "T2": ("Does {A} produce {B}? Answer yes or no:", "yes", "no"),
+    "T0": ("Does {A} lead to {B}? Answer yes or no: ", "yes", "no"),
+    "T1": ("Does {A} cause {B}? Answer yes or no: ", "yes", "no"),
+    "T2": ("Does {A} produce {B}? Answer yes or no: ", "yes", "no"),
 }
 
 

@@ -64,7 +64,8 @@ ALL_CONCEPTS=(
 
 # ── Defaults (override via env) ─────────────────────────────────────────────
 GIF_N="${GIF_N:-100}"
-ANCHOR_K="${ANCHOR_K:-6}"
+ANCHOR_CANDIDATES="${ANCHOR_CANDIDATES:-6}"   # pipeline jobs submitted (ranked by mean_cos)
+ANCHOR_K="${ANCHOR_K:-3}"                     # displayed anchors (top-k by combined score)
 ANCHOR_TIME="${ANCHOR_TIME:-01:30:00}"
 N_PAIRS="${N_PAIRS:-100}"
 NULL_K="${NULL_K:-50}"
@@ -143,6 +144,7 @@ for CONCEPT in "${CONCEPTS[@]}"; do
         scripts/sbatch_run.sh \
             python scripts/select_and_submit_anchors.py \
                 --concept "$CONCEPT" \
+                --candidates "$ANCHOR_CANDIDATES" \
                 --k "$ANCHOR_K" \
                 --template "$TEMPLATE" \
                 --anchor_time "$ANCHOR_TIME" \
@@ -153,11 +155,11 @@ for CONCEPT in "${CONCEPTS[@]}"; do
                 --pysr_niterations "$PYSR_NITER" \
                 $PYSR_FLAG)
     echo "  coordinator         → job ${COORD_JID}  (after ${GIF_JID})"
-    echo "  anchor_pipeline x${ANCHOR_K}  → submitted by coordinator after it runs"
+    echo "  anchor_pipeline x${ANCHOR_CANDIDATES} (display top ${ANCHOR_K})  → submitted by coordinator after it runs"
 done
 
 echo ""
 echo "========================================================"
-echo "Done. Each coordinator will submit ${ANCHOR_K} anchor_pipeline jobs"
+echo "Done. Each coordinator will submit ${ANCHOR_CANDIDATES} anchor_pipeline jobs (display top ${ANCHOR_K})"
 echo "once its concept's make_gif job completes."
 echo "========================================================"

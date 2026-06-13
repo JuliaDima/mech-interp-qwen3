@@ -58,13 +58,13 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--concept", default="carry",
                         help="Concept name — used to set default pattern, out_dir, and pos/neg labels")
-    parser.add_argument("--graphs_dir", default="graphs",
-                        help="Directory containing per-prompt graph subdirs")
+    parser.add_argument("--graphs_dir", default=None,
+                        help="Directory containing per-prompt graph subdirs "
+                             "(absolute path or relative to repo root; required)")
     parser.add_argument("--pattern", default=None,
                         help="Glob pattern to filter graph directories (default: {concept}_T0)")
-    parser.add_argument("--neg_tag", default="nocarry",
-                        help="String in dir name that marks a negative/control graph "
-                             "(default: 'nocarry'; for other concepts may be e.g. 'neg')")
+    parser.add_argument("--neg_tag", default="neg",
+                        help="String in dir name that marks a negative/control graph (default: 'neg')")
     parser.add_argument("--min_survival", type=float, default=0.05,
                         help="Minimum fraction of graphs a feature must appear in to be kept")
     parser.add_argument("--topk", type=int, default=100,
@@ -72,8 +72,12 @@ def main() -> None:
     parser.add_argument("--out_dir", default=None)
     args = parser.parse_args()
 
+    if not args.graphs_dir:
+        print("ERROR: --graphs_dir is required (path to directory containing per-prompt graph subdirs)")
+        sys.exit(1)
     pattern = args.pattern or f"{args.concept}_T0"
-    graphs_dir = _REPO_ROOT / args.graphs_dir
+    raw = Path(args.graphs_dir)
+    graphs_dir = raw if raw.is_absolute() else _REPO_ROOT / raw
     graph_dirs = sorted(d for d in graphs_dir.iterdir()
                         if d.is_dir() and pattern in d.name)
 
