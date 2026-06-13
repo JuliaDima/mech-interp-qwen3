@@ -24,7 +24,6 @@ This project provides an independent mechanistic interpretability pipeline speci
    accuracy_sweep
    accuracy_sweep_performance
    robustness_experiment
-   stitching_experiment
    knowledge_editing
 
 Features

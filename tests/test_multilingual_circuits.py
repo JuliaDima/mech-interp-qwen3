@@ -18,10 +18,13 @@ from experiments.multilingual_circuits.run import (
     ANTONYM_TOKENS,
     COLD_TOKENS,
     SYNONYM_TOKENS,
+    _build_swap_hooks,
     _find_divergence_pos,
+    _find_differing_positions,
     find_exclusive_features,
     intervention_sweep,
     _resolve_ids,
+    _resolve_next_token_ids,
 )
 from mechinterp_qwen3.attribution_model import AttributionModel
 from mechinterp_qwen3.transcoder.single_layer_transcoder import SingleLayerTranscoder, TranscoderSet
@@ -142,6 +145,29 @@ def test_resolve_ids_preserves_order():
     assert ids == [3, 1, 2]
 
 
+def test_resolve_next_token_ids_uses_prompt_context():
+    """Tracked next-token ids must match the prompt continuation, not standalone text."""
+    tok = MagicMock()
+    vocab = {
+        'The opposite of "small" is "': [10, 20, 30],
+        'The opposite of "small" is "large': [10, 20, 30, 100],
+        " large": [200],
+        "large": [100],
+    }
+
+    def _call(text, *, add_special_tokens=True, return_tensors=None, **kw):
+        result = MagicMock()
+        result.input_ids = vocab[text]
+        return result
+
+    tok.side_effect = _call
+    tok.__call__ = _call
+
+    prompt = 'The opposite of "small" is "'
+    assert _resolve_ids(tok, [" large"]) == [200]
+    assert _resolve_next_token_ids(tok, prompt, ["large"]) == [100]
+
+
 # ---------------------------------------------------------------------------
 # _find_divergence_pos
 # ---------------------------------------------------------------------------
@@ -176,6 +202,15 @@ def test_divergence_pos_prefix_match_shorter_b():
     a = [1, 2, 3, 4]
     b = [1, 2, 3]
     assert _find_divergence_pos(a, b) == 2
+
+
+def test_differing_positions_returns_full_operand_span():
+    """Multi-subtoken operands should edit every differing subtoken."""
+    assert _find_differing_positions([1, 2, 3, 4], [1, 9, 8, 4]) == [1, 2]
+
+
+def test_differing_positions_handles_length_mismatch():
+    assert _find_differing_positions([1, 2, 3], [1, 2, 3, 4]) == [3]
 
 
 # ---------------------------------------------------------------------------
@@ -315,30 +350,107 @@ def test_intervention_sweep_reproducible(tiny_model):
         assert r1[tid] == r2[tid]
 
 
-def test_intervention_sweep_injection_changes_output(tiny_model):
-    """Injecting a feature at alpha > 0 produces different probabilities than alpha = 0."""
-    torch.manual_seed(42)
+def test_swap_hook_injection_adds_feature_delta(tiny_model):
+    """Injecting a feature should add only the decoded feature delta to MLP output."""
+    layer = 0
+    tc = tiny_model.transcoders[layer]
+    tc.W_enc.data.zero_()
+    tc.b_enc.data.zero_()
+    tc.W_dec.data.zero_()
+    tc.W_dec.data[0, 0] = 1.0
+    tc.b_dec.data.zero_()
+    tc.W_skip = None
+
+    mlp_in = torch.zeros(1, 2, tiny_model.cfg.d_model)
+    mlp_out = torch.zeros_like(mlp_in)
+
+    (_, capture), (_, swap) = _build_swap_hooks(
+        tiny_model, layer, suppress_ids=[], inject_ids=[0], inject_vals=[10.0],
+        alpha=2.0, target_pos=-1,
+    )
+
+    capture(mlp_in, None)
+    out = swap(mlp_out, None)
+
+    assert out[0, 0, 0].item() == pytest.approx(0.0)
+    assert out[0, -1, 0].item() == pytest.approx(20.0)
+
+
+def test_swap_hook_applies_to_multiple_positions(tiny_model):
+    """A span edit should touch every requested position and leave others unchanged."""
+    layer = 0
+    tc = tiny_model.transcoders[layer]
+    tc.W_enc.data.zero_()
+    tc.b_enc.data.zero_()
+    tc.W_dec.data.zero_()
+    tc.W_dec.data[0, 0] = 1.0
+    tc.b_dec.data.zero_()
+    tc.W_skip = None
+
+    mlp_in = torch.zeros(1, 4, tiny_model.cfg.d_model)
+    mlp_out = torch.zeros_like(mlp_in)
+
+    (_, capture), (_, swap) = _build_swap_hooks(
+        tiny_model, layer, suppress_ids=[], inject_ids=[0], inject_vals=[3.0],
+        alpha=1.0, target_pos=[1, 2],
+    )
+
+    capture(mlp_in, None)
+    out = swap(mlp_out, None)
+
+    assert out[0, 0, 0].item() == pytest.approx(0.0)
+    assert out[0, 1, 0].item() == pytest.approx(3.0)
+    assert out[0, 2, 0].item() == pytest.approx(3.0)
+    assert out[0, 3, 0].item() == pytest.approx(0.0)
+
+
+def test_intervention_sweep_alpha_zero_is_noop(tiny_model):
+    """Alpha zero should report the unmodified baseline, not ablated source features."""
+    torch.manual_seed(123)
     tokens = torch.randint(0, 100, (6,))
     track = [5, 6, 7]
-
-    # Inject feature 0 in layer 0 with a large value.
-    inject_by_layer = {0: [0]}
-    inject_vals_by_layer = {0: [50.0]}
 
     r_noop = intervention_sweep(
         tiny_model, tokens, {}, {}, {},
         alphas=[0.0], track_token_ids=track,
     )
-    r_inject = intervention_sweep(
-        tiny_model, tokens, {}, inject_by_layer, inject_vals_by_layer,
-        alphas=[5.0], track_token_ids=track,
+    r_alpha_zero = intervention_sweep(
+        tiny_model, tokens,
+        suppress_by_layer={0: list(range(64))},
+        inject_by_layer={0: [0]},
+        inject_vals_by_layer={0: [50.0]},
+        alphas=[0.0],
+        track_token_ids=track,
     )
 
-    changed = any(
-        abs(r_inject[tid][0] - r_noop[tid][0]) > 1e-6
-        for tid in track
+    assert r_alpha_zero == r_noop
+
+
+def test_swap_hook_suppression_is_continuous(tiny_model):
+    """Nonzero alpha should attenuate source features gradually, not hard-zero them."""
+    layer = 0
+    tc = tiny_model.transcoders[layer]
+    tc.W_enc.data.zero_()
+    tc.b_enc.data.zero_()
+    tc.b_enc.data[0] = 10.0
+    tc.W_dec.data.zero_()
+    tc.W_dec.data[0, 0] = 1.0
+    tc.b_dec.data.zero_()
+    tc.W_skip = None
+
+    mlp_in = torch.zeros(1, 2, tiny_model.cfg.d_model)
+    mlp_out = torch.zeros_like(mlp_in)
+
+    (_, capture), (_, swap) = _build_swap_hooks(
+        tiny_model, layer, suppress_ids=[0], inject_ids=[], inject_vals=[],
+        alpha=0.25, target_pos=-1,
     )
-    assert changed, "A large injection should change at least one tracked token probability"
+
+    capture(mlp_in, None)
+    out = swap(mlp_out, None)
+
+    assert out[0, 0, 0].item() == pytest.approx(0.0)
+    assert out[0, -1, 0].item() == pytest.approx(-2.5)
 
 
 # ---------------------------------------------------------------------------
