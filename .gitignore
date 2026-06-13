@@ -56,3 +56,5 @@ experiments/concept_localization/count_active_features.py
 experiments/concept_localization/plot_sparsity_per_layer.py
 experiments/concept_localization/run_bias_skip_diagnostic.py
 scripts/print_carry_t0_pairs.py
+experiments/addition/dataset_generation/regen_positional_cascade.py
+experiments/multilingual_circuits/multilingual_circuits.md

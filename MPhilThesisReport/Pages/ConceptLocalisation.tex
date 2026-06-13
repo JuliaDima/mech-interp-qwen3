@@ -59,6 +59,50 @@ property that changes within a pair.}
 \label{tab:concept_pairs}
 \end{table}
 
+\textit{Transcoder sparsity.}
+
+\begin{figure}[ht!]
+  \centering
+  \includegraphics[width=0.92\textwidth]{../runs/addition/sparsity_per_layer_T0.png}
+  \caption{Mean active transcoder features per token position for carry and 
+  no-carry prompts under template \texttt{T0}. 
+  Dashed red lines mark the carry-feature layers used in the addition diagnostics.}
+  \label{fig:carry-sparsity-per-layer}
+\end{figure}
+
+\begin{table}[ht!]
+  \centering
+  \small
+  \begin{tabular}{@{}rrrrr@{}}
+    \toprule
+    Layer & Mean active/pos & Max active/pos & Active total & Fraction active \\
+    \midrule
+    13 & 41.3 & 154 & 537 & 0.0003 \\
+    14 & 260.3 & 3006 & 3384 & 0.0016 \\
+    16 & 2291.5 & 29409 & 29789 & 0.0140 \\
+    21 & 139.5 & 1239 & 1814 & 0.0009 \\
+    \bottomrule
+  \end{tabular}
+  \caption{Single-prompt active-feature counts for \texttt{calc: 209+531=}.}
+  \label{tab:carry-active-feature-counts}
+\end{table}
+
+\begin{table}[ht!]
+  \centering
+  \small
+  \begin{tabular}{@{}lrrrr@{}}
+    \toprule
+    Condition & Accuracy & $P(\mathrm{correct})$ & Pos. acc. & Neg. acc. \\
+    \midrule
+    Raw model & 0.03 & 0.0539 & 0.00 & 0.06 \\
+    Full transcoder & 0.31 & 0.1891 & 0.32 & 0.30 \\
+    Bias+skip only & 0.15 & 0.0994 & 0.16 & 0.14 \\
+    \bottomrule
+  \end{tabular}
+  \caption{Bias/skip diagnostic on the addition carry set at layers 13, 14, 16, and 21, with 50 examples per class.}
+  \label{tab:carry-bias-skip-diagnostic}
+\end{table}
+
 \section{Layer-Wise Concept Deltas}
 \label{sec:concept_delta}
 
@@ -457,37 +501,37 @@ formula with similar \(R^2\). The Fourier approximation and symbolic fit are the
 complementary: Fourier describes periodic structure, while symbolic regression gives
 a compact arithmetic predicate when one exists.
 
-\section{Template Robustness}
-\label{sec:template_consistency}
+% \section{Template Robustness}
+% \label{sec:template_consistency}
 
-Template robustness tests whether a direction is tied to the model's computation or
-to the surface form of a prompt. For each template \(T\), deltas are computed
-separately:
-\begin{equation}
-\delta_l^{(T)}
-=
-\mathbb{E}_{x\in\mathcal{D}^{(T)}_+}[h_{l,t_T^*}(x)]
--
-\mathbb{E}_{x\in\mathcal{D}^{(T)}_-}[h_{l,t_T^*}(x)].
-\label{eq:template_delta}
-\end{equation}
-The anchor \(t_T^*\) is template-specific. This is essential: token positions that
-share the same integer index across templates need not have the same semantic role.
-Consequently, single-anchor sweeps and causal plots are run within one template,
-usually \texttt{T0}. Cross-template comparisons are saved separately and compare
-semantically corresponding anchors, not raw token indices.
+% Template robustness tests whether a direction is tied to the model's computation or
+% to the surface form of a prompt. For each template \(T\), deltas are computed
+% separately:
+% \begin{equation}
+% \delta_l^{(T)}
+% =
+% \mathbb{E}_{x\in\mathcal{D}^{(T)}_+}[h_{l,t_T^*}(x)]
+% -
+% \mathbb{E}_{x\in\mathcal{D}^{(T)}_-}[h_{l,t_T^*}(x)].
+% \label{eq:template_delta}
+% \end{equation}
+% The anchor \(t_T^*\) is template-specific. This is essential: token positions that
+% share the same integer index across templates need not have the same semantic role.
+% Consequently, single-anchor sweeps and causal plots are run within one template,
+% usually \texttt{T0}. Cross-template comparisons are saved separately and compare
+% semantically corresponding anchors, not raw token indices.
 
-The cross-template alignment at a layer is
-\begin{equation}
-\operatorname{align}_l(T,T')
-=
-\frac{\delta_l^{(T)}\cdot\delta_l^{(T')}}
-{\lVert\delta_l^{(T)}\rVert_2\,\lVert\delta_l^{(T')}\rVert_2+\varepsilon}.
-\label{eq:template_alignment}
-\end{equation}
-High alignment near the peak layers suggests that the same concept direction emerges
-under different phrasings. Low alignment, especially early in the network, indicates
-that template-specific tokenisation and syntax still dominate the representation.
+% The cross-template alignment at a layer is
+% \begin{equation}
+% \operatorname{align}_l(T,T')
+% =
+% \frac{\delta_l^{(T)}\cdot\delta_l^{(T')}}
+% {\lVert\delta_l^{(T)}\rVert_2\,\lVert\delta_l^{(T')}\rVert_2+\varepsilon}.
+% \label{eq:template_alignment}
+% \end{equation}
+% High alignment near the peak layers suggests that the same concept direction emerges
+% under different phrasings. Low alignment, especially early in the network, indicates
+% that template-specific tokenisation and syntax still dominate the representation.
 
 \section{Causal Validation and Null Hypothesis Testing}
 \label{sec:causal_validation}
