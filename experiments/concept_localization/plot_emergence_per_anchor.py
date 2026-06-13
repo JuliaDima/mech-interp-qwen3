@@ -3,15 +3,9 @@
 Provides two figures:
 
   emergence_per_anchor.pdf
-      For every token-position anchor, plots raw ||delta|| (left axis) and the
-      double-normalised curve (right axis).  Top-3 anchors by non-monotonicity
-      are highlighted in red.  Consecutive zero-signal anchors at the start of
-      the sequence are collapsed into a single summary subplot.
 
   anchor_layer_grid_<template>_top<k>.pdf
-      Side-by-side 5-row grid showing E_dec projection, delta trajectory, layer
-      cosine similarity, null comparison, and causal overlay for the top-K anchors
-      ranked by nm score.
+      
 
 Usage
 -----
@@ -169,12 +163,20 @@ def load_concept_anchor_data(concept: str) -> dict | None:
     by_nm    = sorted(active, key=lambda i: non_mono[i], reverse=True)
     nm_ranks = {idx: r + 1 for r, idx in enumerate(by_nm)}
 
+    raw_mean_cos = d.get("mean_cos")
+    mean_cos_map = {}
+    if raw_mean_cos is not None:
+        for i in active:
+            if i < len(raw_mean_cos):
+                mean_cos_map[i] = float(raw_mean_cos[i])
+
     return dict(
         norms_raw=norms_raw, act_normed=act_normed,
         layers=layers, labels=labels, labels_neg=labels_neg,
         template_key=template_key, template_str=template_str,
         prompt_annotated=prompt_annotated,
         active=active, non_mono=non_mono, nm_ranks=nm_ranks,
+        mean_cos=mean_cos_map,
         slots=_build_slots(norms_raw, labels),
     )
 
@@ -327,10 +329,11 @@ def _load_anchor_dir(anchor_dir: Path, template: str) -> dict | None:
 
 
 def discover_anchors(concept: str, template: str, top_k: int) -> list[dict]:
-    """Select and rank anchors via load_concept_anchor_data (same as emergence_per_anchor).
+    """Select top-k anchors by combined score (null+patching+grad).
 
-    Supplementary per-anchor data (E_dec, deltas for cosine, null, causal) is
-    loaded from anchor dirs when available; missing dirs leave those rows empty.
+    Stage 1 (pre-pipeline): make_gif ranks candidates by mean_cos and submits
+    --candidates jobs.  Stage 2 (here, post-pipeline): from those anchor dirs,
+    keep only those with a valid combined score and return the top-k.
     """
     data = load_concept_anchor_data(concept)
     if data is None:
@@ -340,39 +343,38 @@ def discover_anchors(concept: str, template: str, top_k: int) -> list[dict]:
     act_normed = data["act_normed"]
     layers     = [int(l) for l in data["layers"]]
     labels     = data["labels"]
-    non_mono   = data["non_mono"]
-    nm_ranks   = data["nm_ranks"]
 
-    by_nm    = sorted(data["active"], key=lambda i: non_mono[i], reverse=True)
-    top_idxs = set(by_nm[:top_k])
-
+    # ── candidate pool: only dirs that exist on disk ─────────────────────────
     template_dir = BASE / concept / f"{concept}_{template}"
     pos_to_dir: dict[int, Path] = {}
+    pos_to_init_rank: dict[int, int] = {}
     if template_dir.exists():
         for ad in template_dir.glob("anchor_rank*_pos*"):
             m = re.fullmatch(r"anchor_rank(\d+)_pos(\d+)", ad.name)
             if m:
-                pos_to_dir[int(m.group(2))] = ad
+                pos  = int(m.group(2))
+                rank = int(m.group(1))
+                pos_to_dir[pos]       = ad
+                pos_to_init_rank[pos] = rank
 
+    # ── build entries for all available anchor dirs ───────────────────────────
+    # combined_score = peak score when valid, 0.0 when null-failing (sorts to right)
     entries = []
-    for pos_idx in sorted(top_idxs):
-        token      = labels[pos_idx] if pos_idx < len(labels) else str(pos_idx)
-        anchor_dir = pos_to_dir.get(pos_idx)
-        supp       = _load_anchor_dir(anchor_dir, template) if anchor_dir else None
-        pr         = _load_peak_result(anchor_dir, template)
-        # Combined anchor score: best peak score when run data available, else nm
+    for pos_idx, anchor_dir in pos_to_dir.items():
+        if pos_idx >= norms_raw.shape[0]:
+            continue
+        pr   = _load_peak_result(anchor_dir, template)
+        supp = _load_anchor_dir(anchor_dir, template)
+        token = labels[pos_idx] if pos_idx < len(labels) else str(pos_idx)
         if pr is not None and pr.valid and pr.peak_scores:
             combined_score = float(pr.peak_scores[0])
-        elif pr is not None and not pr.valid:
-            combined_score = 0.0
         else:
-            combined_score = non_mono[pos_idx]  # fallback to nm
+            combined_score = 0.0   # null-failing or incomplete — shown but not highlighted
         entries.append({
             "pos":            pos_idx,
             "token":          token,
-            "rank":           nm_ranks[pos_idx],
-            "nm":             non_mono[pos_idx],
             "combined_score": combined_score,
+            "init_rank":      pos_to_init_rank.get(pos_idx, 0),
             "norms_raw":      norms_raw[pos_idx],
             "act_normed":     act_normed[pos_idx],
             "layers":         layers,
@@ -383,12 +385,14 @@ def discover_anchors(concept: str, template: str, top_k: int) -> list[dict]:
             "peak_result":    pr,
         })
 
-    # Assign combined ranks (1 = best) for highlighting
-    sorted_by_combined = sorted(entries, key=lambda e: e["combined_score"], reverse=True)
-    for crank, e in enumerate(sorted_by_combined, start=1):
+    # ── select top_k by combined score, assign ranks ─────────────────────────
+    sorted_all = sorted(entries, key=lambda e: e["combined_score"], reverse=True)
+    top = sorted_all[:top_k]
+    for crank, e in enumerate(top, start=1):
         e["combined_rank"] = crank
 
-    return entries
+    # Display columns in token-position order (left = earlier in prompt)
+    return sorted(top, key=lambda e: e["pos"])
 
 
 def _load_peak_result(anchor_dir: Path | None, template: str) -> PeakLayerResult | None:
@@ -590,7 +594,7 @@ def plot_anchor_layer_grid(
     fig, axes = plt.subplots(
         N_ROWS, K,
         figsize=(PANEL_W * K, PANEL_H * N_ROWS),
-        gridspec_kw={"hspace": 0.22, "wspace": 0.12},
+        gridspec_kw={"hspace": 0.22, "wspace": 0.35},
         squeeze=False,
     )
 
@@ -601,11 +605,10 @@ def plot_anchor_layer_grid(
         layers       = entry["layers"]
         norms_raw_i  = entry["norms_raw"]
         act_normed_i = entry["act_normed"]
-        rank         = entry["rank"]
-        combined_rank = entry.get("combined_rank", rank)
+        combined_rank = entry.get("combined_rank", col + 1)
         pr           = entry.get("peak_result")
         is_null      = pr is not None and not pr.valid
-        highlight    = combined_rank <= highlight_k
+        highlight    = combined_rank <= highlight_k and not is_null
         ticks        = list(range(min(layers), max(layers) + 1, 5))
         leftmost     = (col == 0)
         col_axes: list = []
@@ -668,16 +671,16 @@ def plot_anchor_layer_grid(
     fig.subplots_adjust(top=rect_top)
 
     for col, entry in enumerate(anchors):
-        rank      = entry["rank"]
+        combined_rank = entry.get("combined_rank", col + 1)
         pr        = entry.get("peak_result")
         is_null   = pr is not None and not pr.valid
-        highlight = (rank <= highlight_k) and not is_null
+        highlight = combined_rank <= highlight_k and not is_null
         hdr_color = ps.RED if highlight else (ps.GRAY if is_null else "black")
 
+        init_rank  = entry.get("init_rank", "?")
         col_header = (
-            f"pos {entry['pos']}  '{entry['token']}'  "
-            f"nm_rank={rank}  combined_rank={combined_rank}  "
-            f"score={entry['combined_score']:.2f}"
+            f"pos {entry['pos']} '{entry['token']}'  "
+            f"(init {init_rank} → rank {combined_rank})  score={entry['combined_score']:.2f}"
         )
         axes[0, col].annotate(
             col_header,
@@ -687,23 +690,6 @@ def plot_anchor_layer_grid(
             fontweight="bold" if highlight else "normal",
             color=hdr_color,
             annotation_clip=False,
-        )
-        # peak info inside the panel, top-left corner
-        if pr is not None and not pr.valid:
-            peak_str  = "⊘ null anchor"
-            pk_color  = ps.GRAY
-        elif pr is not None and pr.peak_layers:
-            atype    = "S" if pr.stable else "C"
-            peak_str = f"peaks: {', '.join(f'L{l}' for l in pr.peak_layers)}  [{atype}]"
-            pk_color  = ps.VIOLET
-        else:
-            peak_str = "no peaks"
-            pk_color = ps.GRAY
-        axes[0, col].text(
-            0.02, 0.97, peak_str,
-            transform=axes[0, col].transAxes,
-            fontsize=6, color=pk_color, va="top", ha="left",
-            bbox=dict(boxstyle="round,pad=0.15", fc="white", alpha=0.6, lw=0),
         )
 
     fig.text(

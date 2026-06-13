@@ -22,7 +22,7 @@ DENOMINATORS = [11, 13, 14, 17, 19, 21, 22, 23, 26, 29, 31, 34, 37, 38, 41, 43]
 TEMPLATES: dict[str, tuple[str, str, str]] = {
     "T0": ("Does geometric series with ratio {r} converge? Answer yes or no: ", "yes", "no"),
     "T1": ("Does the series with ratio {r} have a finite sum? Answer yes or no: ", "yes", "no"),
-    "T2": ("Is the geometric series with ratio {r} a convergent series? Answer yes or no:", "yes", "no"),
+    "T2": ("Is the geometric series with ratio {r} a convergent series? Answer yes or no: ", "yes", "no"),
 }
 
 

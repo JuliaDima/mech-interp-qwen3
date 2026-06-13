@@ -11,7 +11,7 @@
 # Examples:
 #   sbatch scripts/sbatch_run.sh miq generate-dataset --output_path results.jsonl
 #   sbatch scripts/sbatch_run.sh miq attribute -p "calc: 1+1= "
-#   sbatch scripts/sbatch_run.sh miq attribute -p "You are solving a simple comparison task. Two numbers are given: A and B. Answer with a single character: 'A' if A is larger, otherwise 'B'. A = 864, B = 394, Answer:"
+#   sbatch scripts/sbatch_run.sh miq attribute -p "You are solving a simple comparison task. Two numbers are given: A and B. Answer with a single character: 'A' if A is larger, otherwise 'B'. A = 864, B = 394, Answer: "
 #   sbatch scripts/sbatch_run.sh python experiments/addition/run.py --all
 #   sbatch --mail-user=[ACCOUNT] --mail-type=BEGIN scripts/sbatch_run.sh command args...
 
@@ -54,7 +54,14 @@ export PYTHONPATH="${PYTHONPATH:-}:${REPO_ROOT}/src:${REPO_ROOT}"
 export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}:/home/eid23/miniforge3/envs/p28_py311_env/lib"
 export OMP_NUM_THREADS=16
 export PYTHONUNBUFFERED=1
+
+# Source project env: sets HF_HOME → shared RDS cache, disables Xet, etc.
+# This overrides the node-local /local/$USER/hf set in ~/.bashrc.
+set +u
+source "${REPO_ROOT}/scripts/miq-env.sh"
+set -u
 export HF_HUB_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
 
 mkdir -p logs
 

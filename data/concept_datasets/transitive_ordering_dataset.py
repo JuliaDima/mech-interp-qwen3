@@ -14,9 +14,9 @@ import random
 from experiments.concept_localization.concept_pair import ConceptPair
 
 TEMPLATES: dict[str, tuple[str, str, str]] = {
-    "T0": ("Is {a}>{b}>{c}? Answer yes or no:", "yes", "no"),
-    "T1": ("{a} is greater than {b} which is greater than {c}? Answer yes or no:", "yes", "no"),
-    "T2": ("Is {a}>{b}>{c}? Answer yes or no:", "yes", "no"),
+    "T0": ("Is {a}>{b}>{c}? Answer yes or no: ", "yes", "no"),
+    "T1": ("{a} is greater than {b} which is greater than {c}? Answer yes or no: ", "yes", "no"),
+    "T2": ("Is {a}>{b}>{c}? Answer yes or no: ", "yes", "no"),
 }
 
 _SCALES = [

@@ -255,6 +255,7 @@ def make_emergence_gif(
     n_frames = delimiter_pos + 1
     norms_raw = np.zeros((n_frames, n_layers))
     act_norms_raw = np.zeros((n_frames, n_layers))
+    mean_cos = np.zeros(n_frames)   # mean pairwise cosine across layers, per anchor pos
     for pos in range(n_frames):
         log.info(
             "Extracting deltas at position %d/%d (%r)...",
@@ -266,12 +267,22 @@ def make_emergence_gif(
             anchor_mode=str(pos),
         )
         ld = results["all"]
+        vecs = []
         for li, l in enumerate(layers):
             if l in ld.delta:
-                raw = ld.delta[l].norm().item()
+                v = ld.delta[l].float()
+                raw = v.norm().item()
                 norms_raw[pos, li] = raw
                 scale = ld.mean_act_norm.get(l, 1.0) if ld.mean_act_norm else 1.0
                 act_norms_raw[pos, li] = raw / scale if scale > 0 else raw
+                if raw > 1e-8:
+                    vecs.append(torch.nn.functional.normalize(v.unsqueeze(0), dim=-1))
+        if len(vecs) >= 2:
+            mat = torch.cat(vecs, dim=0)          # (L, d)
+            cos_mat = mat @ mat.T                  # (L, L)
+            n = cos_mat.shape[0]
+            idx = torch.triu_indices(n, n, offset=1)
+            mean_cos[pos] = cos_mat[idx[0], idx[1]].mean().item()
 
     row_max = norms_raw.max(axis=1, keepdims=True).clip(min=1e-8)
     norms = norms_raw / row_max
@@ -300,6 +311,7 @@ def make_emergence_gif(
     norms_data = {
         "norms_raw": norms_raw,        # (n_frames, n_layers) — raw ‖δ_l‖ per anchor pos
         "act_norms_raw": act_norms_raw,
+        "mean_cos": mean_cos,          # (n_frames,) — mean pairwise cosine across layers
         "delimiter_pos": delimiter_pos,
         "n_pairs": len(pairs),
         "layers": layers,

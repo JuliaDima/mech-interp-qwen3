@@ -61,9 +61,9 @@ _POS: list[int] = [n for n in range(100, 1000) if _terminates(n)]
 _NEG: list[int] = _build_neg()
 
 TEMPLATES: dict[str, tuple[str, str, str]] = {
-    "T0": ("Does 1/{n} have a terminating decimal? Answer yes or no:", "yes", "no"),
-    "T1": ("1 divided by {n} has a finite decimal? Answer yes or no:", "yes", "no"),
-    "T2": ("Does 1/{n} terminate? Answer yes or no:", "yes", "no"),
+    "T0": ("Does 1/{n} have a terminating decimal? Answer yes or no: ", "yes", "no"),
+    "T1": ("1 divided by {n} has a finite decimal? Answer yes or no: ", "yes", "no"),
+    "T2": ("Does 1/{n} terminate? Answer yes or no: ", "yes", "no"),
 }
 
 

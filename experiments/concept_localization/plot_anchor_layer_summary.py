@@ -122,18 +122,14 @@ def _plot_delta_trajectory(
                             color=ps.MAUVE, alpha=0.40,
                             label="excess above null+1SD")
 
-    try:
-        from pathlib import Path as _Path
-        _anchor_dir = _Path(results.get("config", {}).get("anchor_dir", ""))
-        _pr = select_peak_layers(_anchor_dir) if _anchor_dir.exists() else None
-    except Exception:
-        _pr = None
-
+    # peak_result is injected by plot_anchor_layer_summary() below
+    _pr = getattr(ax, "_peak_result", None)
     if _pr is not None and _pr.valid and _pr.peak_layers:
         for _rank, _pl in enumerate(_pr.peak_layers):
             ax.axvline(_pl, color=ps.VIOLET, lw=1.1 if _rank == 0 else 0.7, ls=":", alpha=0.85)
-            ax.text(_pl + 0.3, ax.get_ylim()[1] * 0.92 - _rank * 0.10,
-                    f"L{_pl}", fontsize=6, color=ps.VIOLET, alpha=0.85)
+            ax.text(_pl + 0.3, 0.92 - _rank * 0.10, f"L{_pl}",
+                    fontsize=6, color=ps.VIOLET, alpha=0.85,
+                    transform=ax.get_xaxis_transform())
     else:
         peak_layer = int(results.get("sharpness", {}).get("peak_layer", layers[int(np.argmax(raw))]))
         ax.axvline(peak_layer, color=ps.VIOLET, lw=0.9, ls=":", alpha=0.8)
@@ -238,6 +234,12 @@ def plot_anchor_layer_summary(anchor_dir: Path, template: str = "T0", out_path: 
     null = _load_json(anchor_dir / "null" / "null_permutation.json")
     out_path = out_path or (anchor_dir / f"anchor_layer_summary_{template}.png")
 
+    # Compute peak layers via combined score
+    try:
+        _pr = select_peak_layers(anchor_dir, template=template)
+    except Exception:
+        _pr = None
+
     ps.apply()
     fig, axes = plt.subplots(
         5,
@@ -248,6 +250,7 @@ def plot_anchor_layer_summary(anchor_dir: Path, template: str = "T0", out_path: 
     )
 
     _plot_feature_projection(axes[0], results, layers, int(results.get("config", {}).get("top_k", 15)))
+    axes[1]._peak_result = _pr  # injected for _plot_delta_trajectory
     _plot_delta_trajectory(axes[1], deltas, results, layers, null=null)
     _plot_layer_cosine(axes[2], deltas, layers)
     _plot_null(axes[3], null, layers)

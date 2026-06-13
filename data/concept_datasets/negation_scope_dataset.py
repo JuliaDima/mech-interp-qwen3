@@ -13,7 +13,7 @@ import random
 from experiments.concept_localization.concept_pair import ConceptPair
 
 TEMPLATES: dict[str, tuple[str, str, str]] = {
-    "T0": ("{m} is not greater than {n}? Answer only with yes or no:", "yes", "no"),
+    "T0": ("{m} is not greater than {n}? Answer only with yes or no: ", "yes", "no"),
     "T1": ("{m} does not exceed {n}? Answer only with yes or no: ", "yes", "no"),
     "T2": ("Is {m} at most {n}? Answer only with yes or no: ", "yes", "no"),
 }

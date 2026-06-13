@@ -16,9 +16,9 @@ import random
 from experiments.concept_localization.concept_pair import ConceptPair
 
 TEMPLATES: dict[str, tuple[str, str, str]] = {
-    "T0": ("Triangle with sides {a},{b},{c} is valid? Answer yes or no:", "yes", "no"),
-    "T1": ("Can {a}, {b}, {c} be sides of a triangle? Answer yes or no:", "yes", "no"),
-    "T2": ("Does {a}+{b}>{c}? Answer yes or no:", "yes", "no"),
+    "T0": ("Triangle with sides {a},{b},{c} is valid? Answer yes or no: ", "yes", "no"),
+    "T1": ("Can {a}, {b}, {c} be sides of a triangle? Answer yes or no: ", "yes", "no"),
+    "T2": ("Does {a}+{b}>{c}? Answer yes or no: ", "yes", "no"),
 }
 
 

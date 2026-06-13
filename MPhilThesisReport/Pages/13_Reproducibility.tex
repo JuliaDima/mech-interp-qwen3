@@ -1,7 +1,7 @@
 \chapter{Reproducibility}
 \label{sec:repro}
 
-\section{Reproducing the Addition Arithmetic Circuit}
+\section{Addition Arithmetic Circuits in Qwen}
 
 \citet{lindsey2025biology} showed that Claude~3.5 Haiku, when presented
 with prompts of the form \texttt{calc:~$a$+$b$=}, does not implement a
@@ -9,7 +9,7 @@ symbolic carry algorithm but instead activates a family of sparse
 \textit{lookup table} features whose firing concentrates on the cells of
 the operand space satisfying $a \bmod 10 = d_1$ and $b \bmod 10 = d_2$
 for a specific digit pair $(d_1, d_2)$.  These features encode the ones
-digit of $d_1 + d_2$ and route this information directly to the output.
+digit of $d_1$, $d_2$, or $d_1 + d_2$ and route this information directly to the output.
 The present reproduction analyises whether the same mechanistic signature
 appears in Qwen3-4B, trained independently on a different corpus and with
 a different tokeniser, and whether the attribution methodology transfers to a 
@@ -17,7 +17,7 @@ model for which it was not originally calibrated.  The
 analysis adopts the transcoder formalism and notation of
 Section~\ref{sec:interp-methods}.
 
-\subsection{Operand Plots and Lookup Feature Identification}
+\subsection{Lookup Features}
 \label{subsec:operand-plots}
 
 For a prompt $\texttt{calc:~}a\texttt{+}b\texttt{=~}$, let $T$ be the
@@ -33,7 +33,8 @@ $(\ell, k)$ is
 \end{equation}
 
 obtained by scanning over the full $100 \times 100$ integer-pair grid.
-The geometry of $M_{\ell,k}$ encodes the feature's sensitivity in an interpretable form.  A feature that tracks the raw sum $a + b$
+The geometry of $M_{\ell,k}$ encodes the feature's sensitivity in an interpretable form.  
+A feature that tracks the raw sum $a + b$
 produces diagonal stripes of constant activation; one that tracks a
 single operand produces horizontal or vertical bands; modular sensitivity
 to the ones digit of either operand produces a period-10 repeating
@@ -313,7 +314,7 @@ TODO: Conclusions...
 
 \clearpage
 % ============================================================
-\section{Reproducing the Multilingual Circuit}
+\section{Multilingual Circuits in Qwen}
 % ============================================================
 
 \citet{lindsey2025biology} showed that antonym completion in Claude~3.5
