@@ -126,6 +126,18 @@ def main() -> None:
         "--out_dir", str(out_dir),
     ])
 
+    # ── Stage 1b: edec activation plot ───────────────────────────────────
+    log.info("=== Stage 1b: edec activation plot ===")
+    try:
+        _run([
+            sys.executable, "-m", "experiments.concept_localization.plot_edec_activations",
+            "--anchor_dir", str(out_dir),
+            "--concept", args.concept,
+            "--direction", "pos", "neg",
+        ])
+    except subprocess.CalledProcessError as e:
+        log.warning("edec activation plot failed (non-fatal): %s", e)
+
     # ── Stage 2: null permutation (reuse deltas.pt from stage 1) ─────────
     log.info("=== Stage 2: null permutation ===")
     deltas_path = out_dir / "deltas.pt"
@@ -152,11 +164,34 @@ def main() -> None:
 
     # ── Stage 3: transcoder sweep at peak ±2 layers ───────────────────────
     log.info("=== Stage 3: transcoder sweep ===")
-    results = json.loads((out_dir / "results.json").read_text())
-    peak_layer = results["sharpness"]["peak_layer"]
-    layers = list(range(max(0, peak_layer - 2), min(_N_LAYERS, peak_layer + 3)))
+    from experiments.concept_localization.peak_layers import select_peak_layers
+    try:
+        pr = select_peak_layers(out_dir, template=args.template)
+    except FileNotFoundError as e:
+        # null_permutation.json or deltas.pt missing — stage 2 must have failed
+        log.error("Required file missing for peak layer selection: %s", e)
+        raise
+    if pr.valid and pr.peak_layers:
+        peak_layers_raw = pr.peak_layers
+        log.info("Peak layers (combined score): %s  scores=%s  stable=%s",
+                 peak_layers_raw, [f"{s:.3f}" for s in pr.peak_scores], pr.stable)
+    else:
+        # Null anchor (real signal never exceeds null+1SD) or no causal window peak.
+        # Fall back to trajectory argmax so the sweep still runs and produces output.
+        results = json.loads((out_dir / "results.json").read_text())
+        peak_layers_raw = [results["sharpness"]["peak_layer"]]
+        log.warning(
+            "select_peak_layers: valid=%s peak_layers=%s — null anchor or no causal peak; "
+            "falling back to trajectory argmax L%d",
+            pr.valid, pr.peak_layers, peak_layers_raw[0],
+        )
+
+    layer_set: set[int] = set()
+    for pl in peak_layers_raw:
+        layer_set.update(range(max(0, pl - 2), min(_N_LAYERS, pl + 3)))
+    layers = sorted(layer_set)
     layers_str = ",".join(str(l) for l in layers)
-    log.info("Peak layer=%d → sweeping layers %s", peak_layer, layers_str)
+    log.info("Peak layers=%s → sweeping layers %s", peak_layers_raw, layers_str)
 
     sweep_dir = out_dir / "sweep"
     sweep_dir.mkdir(parents=True, exist_ok=True)

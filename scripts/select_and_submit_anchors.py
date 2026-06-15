@@ -1,7 +1,9 @@
-"""Coordinator: select top-k anchors from emergence.npy, submit per-anchor jobs.
+"""Coordinator: select candidate anchors from emergence.npy, submit per-anchor jobs.
 
-Reads emergence.npy for a concept, ranks anchors by early-weighted abruptness
-via top_k_anchors(), then submits one SLURM job per anchor via sbatch.
+Submits --candidates pipeline jobs (default 2×--k) ranked by non-monotonicity (NM)
+score — the only signal available before the pipeline runs.  After all jobs
+complete, discover_anchors() re-selects the best --k by combined score
+(null-excess + patching + grad), so the final plot shows the truly best anchors.
 
 Intended to run as a lightweight job after make_gif completes, with
   sbatch --dependency=afterok:{gif_jid} scripts/sbatch_run.sh python scripts/select_and_submit_anchors.py ...
@@ -26,9 +28,8 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from experiments.concept_localization.plot_anchor_analysis import (
-    load_emergence,
-    top_k_anchors,
+from experiments.concept_localization.plot_emergence_per_anchor import (
+    load_concept_anchor_data,
 )
 
 logging.basicConfig(
@@ -58,8 +59,10 @@ def main() -> None:
     )
     parser.add_argument("--concept", required=True,
                         help="Concept name (must have emergence.npy)")
-    parser.add_argument("--k", type=int, default=4,
-                        help="Number of top anchors to select")
+    parser.add_argument("--k", type=int, default=3,
+                        help="Number of top anchors to display (combined-score re-rank after pipeline)")
+    parser.add_argument("--candidates", type=int, default=6,
+                        help="Candidate anchors to run pipeline on (ranked by mean_cos)")
     parser.add_argument("--anchor_time", default="01:00:00",
                         help="SLURM --time for each anchor pipeline job")
     parser.add_argument("--template", default="T0",
@@ -85,8 +88,10 @@ def main() -> None:
                         help="Print sbatch commands without submitting")
     args = parser.parse_args()
 
-    em = load_emergence(args.concept)
-    if em is None:
+    n_candidates = args.candidates
+
+    data = load_concept_anchor_data(args.concept)
+    if data is None:
         log.error(
             "emergence.npy not found for concept '%s'. "
             "Run make_gif first.",
@@ -94,21 +99,38 @@ def main() -> None:
         )
         sys.exit(1)
 
-    anchors = top_k_anchors(em, args.concept, k=args.k)
-    if not anchors:
-        log.error("top_k_anchors returned empty list for '%s'.", args.concept)
+    non_mono = data["non_mono"]
+    mean_cos = data.get("mean_cos", {})
+    labels   = data.get("labels", [])
+    active   = data["active"]
+
+    if not mean_cos:
+        log.error(
+            "mean_cos not found in emergence.npy for concept '%s'. "
+            "Re-run make_gif to regenerate emergence.npy with mean_cos.",
+            args.concept,
+        )
+        sys.exit(1)
+
+    candidates = sorted(active, key=lambda i: mean_cos.get(i, 0.0), reverse=True)[:n_candidates]
+
+    if not candidates:
+        log.error("No active anchors found for '%s'.", args.concept)
         sys.exit(1)
 
     log.info(
-        "Concept '%s': selected %d/%d anchors",
-        args.concept, len(anchors), args.k,
+        "Concept '%s': submitting %d candidate anchor jobs ranked by mean_cos "
+        "(will display top %d by combined score)",
+        args.concept, len(candidates), args.k,
     )
-    for rank, (anchor_idx, _, label) in enumerate(anchors, start=1):
-        log.info("  Rank %d: pos=%d token=%r", rank, anchor_idx, label)
+    for rank, pos_idx in enumerate(candidates, start=1):
+        label = labels[pos_idx] if pos_idx < len(labels) else str(pos_idx)
+        log.info("  Candidate %d: pos=%d token=%r  mean_cos=%.3f", rank, pos_idx, label, mean_cos.get(pos_idx, 0.0))
 
     submitted: list[tuple[int, int, str, str]] = []
 
-    for rank, (anchor_idx, _, label) in enumerate(anchors, start=1):
+    for rank, anchor_idx in enumerate(candidates, start=1):
+        label = labels[anchor_idx] if anchor_idx < len(labels) else str(anchor_idx)
         job_name = f"anchor_{args.concept}_r{rank}"
         cmd = [
             "sbatch", "--parsable",

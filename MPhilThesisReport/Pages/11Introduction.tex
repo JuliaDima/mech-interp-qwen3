@@ -70,7 +70,7 @@ layer writes into a shared representation that accumulates across layers.
 Mechanistic analysis replaces each MLP sublayer $\mathrm{MLP}^{(\ell)}$ with a pretrained
 \textit{transcoder} $\mathcal{T}_\ell$, a sparse encoder--decoder layer whose weights are trained separately 
 to reconstruct the MLP output while expressing it as a sparse combination of \(K\) learned feature directions~\citep{bricken2023monosemanticity, cunningham2023sparse}.  
-For the input $\mathbf{x} \in \mathbb{R}^d$ to the MLP sublayer at layer $\ell$, the transcoder computes
+For the input $\mathbf{x} \in \mathbb{R}^d$ and where $\mathbf{W}_\mathrm{enc}^{(\ell)} \in \mathbb{R}^{d \times K}$  to the MLP sublayer at layer $\ell$, the transcoder computes
 pre-activations
 \begin{equation}
   z_{\ell,k}(\mathbf{x})
@@ -87,7 +87,7 @@ and the reconstructed MLP output is
     + \mathbf{b}_\mathrm{dec}^{(\ell)},
   \label{eq:recon}
 \end{equation}
-where $\mathbf{W}_\mathrm{dec}^{(\ell)} \in \mathbb{R}^{d \times K}$ and
+where $\mathbf{W}_\mathrm{dec}^{(\ell)} \in \mathbb{R}^{K \times d}$ and
 $\mathbf{a}_\ell(\mathbf{x})$ is the vector of all feature activations at layer $\ell$.
 Features are indexed throughout by the double subscript $(\ell, k)$, with $\ell$ specifying
 the layer and $k$ the index within that layer's dictionary.  Sparsity implies that at most a

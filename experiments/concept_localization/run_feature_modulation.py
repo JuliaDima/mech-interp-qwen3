@@ -33,12 +33,13 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import random
+import pickle
 import re
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+import numpy as np
 import torch
 from tqdm import tqdm
 
@@ -53,7 +54,7 @@ from experiments.concept_localization.run_concept import (
     _load_concept,
 )
 from mechinterp_qwen3.attribution_model import AttributionModel
-from mechinterp_qwen3.interventions import inhibit_features
+from mechinterp_qwen3.interventions import ablate_feature_directions, inhibit_features
 from mechinterp_qwen3.utils.hf_utils import load_transcoder_from_hub
 from mechinterp_qwen3.utils.model_utils import get_default_device, parse_dtype
 from mechinterp_qwen3.utils.token_utils import tokenize_qwen_input
@@ -111,6 +112,30 @@ def parse_feature_name(name: str) -> FeatureSpec:
     return FeatureSpec(name=name, layer=nums[0], feature_id=nums[1])
 
 
+@torch.no_grad()
+def _show_examples(model, pairs: list, n: int = 2, max_new_tokens: int = 50) -> None:
+    """Print greedy-decoded outputs for the first n pairs (pos + neg each)."""
+    tok = model.tokenizer
+    device = model.cfg.device
+    for pair in pairs[:n]:
+        for label, prompt, expected in [
+            ("pos", pair.prompt_pos, pair.predict_pos or pair.label_pos),
+            ("neg", pair.prompt_neg, pair.predict_neg or pair.label_neg),
+        ]:
+            ids = tokenize_qwen_input(
+                tok(prompt, add_special_tokens=False).input_ids, tok, device
+            ).unsqueeze(0)
+            out_ids = model.generate(
+                ids, max_new_tokens=max_new_tokens,
+                do_sample=False, prepend_bos=False, verbose=False,
+            )
+            new_tokens = out_ids[0, ids.shape[1]:]
+            raw = tok.decode(new_tokens, skip_special_tokens=True)
+            got = raw.strip().split()[0] if raw.strip() else ""
+            marker = "✓" if got.rstrip(".,!?").lower() == expected.strip().lower() else "✗"
+            print(f"  [{label}] {marker} expect={expected!r:8s}  got={got!r:8s}  -> {raw[:80]!r}")
+
+
 def _dedupe_preserving_order(names: list[str]) -> list[str]:
     seen: set[str] = set()
     out: list[str] = []
@@ -131,20 +156,92 @@ def load_feature_names(args: argparse.Namespace) -> list[str]:
         text = path.read_text().strip()
         if path.suffix == ".json":
             data = json.loads(text)
-            if not isinstance(data, list):
-                raise ValueError("--features_file JSON must contain a list")
-            names.extend(str(x) for x in data)
+            if isinstance(data, list):
+                names.extend(str(x) for x in data)
+            elif isinstance(data, dict) and ("pos" in data or "neg" in data):
+                # edec_features.json format: {"pos": [...], "neg": [...]}
+                direction = getattr(args, "features_direction", "pos")
+                rows = data.get(direction, [])
+                names.extend(r["feature"] for r in rows)
+            else:
+                raise ValueError(
+                    "--features_file JSON must be a list or edec_features.json dict with 'pos'/'neg' keys"
+                )
         else:
             names.extend(line.strip() for line in text.splitlines() if line.strip())
     return _dedupe_preserving_order(names)
 
 
-def select_pairs(pairs: list, sample_per_class: int, seed: int) -> list:
-    if len(pairs) < sample_per_class:
-        raise ValueError(
-            f"Need at least {sample_per_class} pairs, found {len(pairs)}"
-        )
-    return random.Random(seed).sample(pairs, sample_per_class)
+
+def _filter_active_prompts(
+    feature_keys: list[str],
+    npz,
+    examples: list[dict],
+) -> list[dict]:
+    """Return individual prompts where any feature in feature_keys has activation > 0.
+
+    Filters at the prompt level (pos/neg independently), not the pair level.
+    Returns a flat list of {"prompt", "target", "split", "pair_idx"} dicts.
+    Targets are predict_pos/predict_neg — the true expected answers (e.g. str(a+b) for addition),
+    not label_pos/label_neg which are binary concept labels (e.g. "carry"/"no_carry").
+    """
+    # Track which (pair_idx, side) has any feature firing. side: 0=pos, 1=neg.
+    active_sides: set[tuple[int, int]] = set()
+    missing: list[str] = []
+    for key in feature_keys:
+        if key not in npz.files:
+            missing.append(key)
+            continue
+        acts = npz[key]  # shape (2*n_pairs,): interleaved [pos_0, neg_0, pos_1, neg_1, ...]
+        for ex in examples:
+            i = ex["pair_idx"]
+            if acts[2 * i] > 0:
+                active_sides.add((i, 0))
+            if acts[2 * i + 1] > 0:
+                active_sides.add((i, 1))
+
+    if missing:
+        log.warning("Features not in sweep_activations.npz (skipped for filter): %s", missing)
+
+    prompts: list[dict] = []
+    for ex in examples:
+        i = ex["pair_idx"]
+        if (i, 0) in active_sides:
+            prompts.append({
+                "prompt": ex["prompt_pos"],
+                "target": ex["predict_pos"],
+                "split": "pos",
+                "pair_idx": i,
+            })
+        if (i, 1) in active_sides:
+            prompts.append({
+                "prompt": ex["prompt_neg"],
+                "target": ex["predict_neg"],
+                "split": "neg",
+                "pair_idx": i,
+            })
+
+    n_pos = sum(1 for p in prompts if p["split"] == "pos")
+    n_neg = sum(1 for p in prompts if p["split"] == "neg")
+    log.info("Active prompts: %d pos + %d neg = %d total", n_pos, n_neg, len(prompts))
+    return prompts
+
+
+def _pairs_to_prompts(pairs: list) -> list[dict]:
+    """Flatten ConceptPair list into individual prompt dicts for evaluate()."""
+    prompts = []
+    for pair in pairs:
+        prompts.append({
+            "prompt": pair.prompt_pos,
+            "target": pair.predict_pos,
+            "split": "pos",
+        })
+        prompts.append({
+            "prompt": pair.prompt_neg,
+            "target": pair.predict_neg,
+            "split": "neg",
+        })
+    return prompts
 
 
 def _split_metrics(rows: list[dict], split: str) -> SplitMetrics:
@@ -175,17 +272,21 @@ def _metrics(rows: list[dict], skipped: int) -> EvalMetrics:
 @torch.no_grad()
 def evaluate(
     model,
-    pairs: list,
+    prompts: list[dict],
     feature_map: dict[int, list[int]] | None = None,
     alpha: float = 0.0,
     batch_size: int = 8,
     desc: str | None = None,
+    subtract_mode: bool = False,
 ) -> EvalMetrics:
-    """Teacher-forced full-answer accuracy.
+    """Teacher-forced full-answer accuracy over a flat list of prompt dicts.
 
-    feature_map=None       → plain model (no transcoder)
-    feature_map={L: []}    → transcoder reconstruction at L, no features scaled
-    feature_map={L: [fid]} → transcoder at L, feature fid scaled by alpha
+    Each prompt dict: {"prompt": str, "target": str, "split": "pos"|"neg"}.
+
+    feature_map=None                        → plain model (no intervention)
+    feature_map={L: [fid]}, subtract_mode  → subtract act_f * W_dec[f] from real MLP output
+    feature_map={L: [fid]}                 → transcoder reconstruction at L, feature fid scaled by alpha
+    feature_map={L: []}                    → transcoder reconstruction at L, no features scaled
     """
     rows: list[dict] = []
     skipped = 0
@@ -204,21 +305,15 @@ def evaluate(
             desc = "+".join(parts) or "tc-baseline"
 
     examples_by_len: dict[int, list] = {}
-    for pair in pairs:
-        pred_pos = pair.predict_pos if pair.predict_pos else pair.label_pos
-        pred_neg = pair.predict_neg if pair.predict_neg else pair.label_neg
-        for split, prompt, answer_str in [
-            ("pos", pair.prompt_pos, pred_pos),
-            ("neg", pair.prompt_neg, pred_neg),
-        ]:
-            prompt_ids = model.tokenizer(prompt, add_special_tokens=False).input_ids
-            answer_ids = model.tokenizer(answer_str, add_special_tokens=False).input_ids
-            if not answer_ids:
-                skipped += 1
-                continue
-            examples_by_len.setdefault(len(prompt_ids) + len(answer_ids), []).append(
-                (split, prompt_ids, answer_ids)
-            )
+    for p in prompts:
+        prompt_ids = model.tokenizer(p["prompt"], add_special_tokens=False).input_ids
+        answer_ids = model.tokenizer(p["target"], add_special_tokens=False).input_ids
+        if not answer_ids:
+            skipped += 1
+            continue
+        examples_by_len.setdefault(len(prompt_ids) + len(answer_ids), []).append(
+            (p["split"], prompt_ids, answer_ids)
+        )
 
     total = sum(len(v) for v in examples_by_len.values())
     with tqdm(total=total, desc=desc) as pbar:
@@ -236,77 +331,58 @@ def evaluate(
                 )
                 if feature_map is None:
                     logits = model(tokens)
+                elif subtract_mode:
+                    logits = ablate_feature_directions(model, tokens, feature_map)
                 else:
                     logits = inhibit_features(model, tokens, feature_map, alpha=alpha)
 
                 for i, (split, prompt_ids, answer_ids) in enumerate(batch):
                     n = len(prompt_ids)
                     correct_prob = torch.softmax(logits[i, n], dim=-1)[answer_ids[0]].item()
+                    pred_first = int(logits[i, n].argmax())
                     all_correct = all(
                         int(logits[i, n + j].argmax()) == tok_id
                         for j, tok_id in enumerate(answer_ids)
                     )
-                    rows.append({"split": split, "correct": all_correct, "correct_prob": correct_prob})
+                    rows.append({"split": split, "correct": all_correct, "correct_prob": correct_prob, "pred_first": pred_first})
                 pbar.update(len(batch))
 
-    return _metrics(rows, skipped)
+    return _metrics(rows, skipped), rows
 
 
-def build_cascade_map(
-    start_layer: int,
-    n_layers: int,
-    feature_ids_by_layer: dict[int, list[int]] | None = None,
-) -> dict[int, list[int]]:
-    """Transcoder at every layer from start_layer to end; features scaled only at specified layers."""
-    m: dict[int, list[int]] = {L: [] for L in range(start_layer, n_layers)}
-    if feature_ids_by_layer:
-        for layer, fids in feature_ids_by_layer.items():
-            if layer in m:
-                m[layer] = list(fids)
-    return m
-
-
-def diff_metrics(baseline: EvalMetrics, modulated: EvalMetrics) -> dict:
+def diff_metrics(
+    baseline: EvalMetrics, modulated: EvalMetrics,
+    base_rows: list[dict], mod_rows: list[dict],
+) -> dict:
     out = {"baseline": asdict(baseline), "modulated": asdict(modulated), "change": {}}
     for split in ("all", "pos", "neg"):
         base = getattr(baseline, split)
         mod = getattr(modulated, split)
+        br = base_rows if split == "all" else [r for r in base_rows if r["split"] == split]
+        mr = mod_rows if split == "all" else [r for r in mod_rows if r["split"] == split]
+        improved_frac = (
+            sum(1 for b, m in zip(br, mr) if m["correct_prob"] > b["correct_prob"]) / len(br)
+            if br else 0.0
+        )
+        rel_changes = [
+            (m["correct_prob"] - b["correct_prob"]) / b["correct_prob"] * 100.0
+            for b, m in zip(br, mr) if b["correct_prob"] > 1e-12
+        ]
+        mean_rel_p_change = sum(rel_changes) / len(rel_changes) if rel_changes else float("nan")
+        tok_change_rate = (
+            sum(1 for b, m in zip(br, mr) if m.get("pred_first") != b.get("pred_first")) / len(br)
+            if br else 0.0
+        )
         out["change"][split] = {
             "accuracy": mod.accuracy - base.accuracy,
             "mean_correct_prob": mod.mean_correct_prob - base.mean_correct_prob,
+            "improved_frac": improved_frac,
+            "mean_rel_p_change": mean_rel_p_change,
+            "tok_change_rate": tok_change_rate,
         }
     return out
 
 
-def _mean_std(values: list[float]) -> dict[str, float]:
-    if not values:
-        return {"mean": 0.0, "std": 0.0}
-    mean = sum(values) / len(values)
-    if len(values) == 1:
-        return {"mean": mean, "std": 0.0}
-    var = sum((v - mean) ** 2 for v in values) / (len(values) - 1)
-    return {"mean": mean, "std": var**0.5}
-
-
-def summarize_runs(metric_runs: list[dict]) -> dict:
-    summary: dict = {"repeats": len(metric_runs)}
-    for section in ("baseline", "modulated"):
-        summary[section] = {}
-        for split in ("all", "pos", "neg"):
-            rows = [run[section][split] for run in metric_runs]
-            summary[section][split] = {
-                "n": int(round(sum(row["n"] for row in rows) / max(1, len(rows)))),
-                "accuracy": _mean_std([row["accuracy"] for row in rows]),
-                "mean_correct_prob": _mean_std([row["mean_correct_prob"] for row in rows]),
-            }
-    summary["change"] = {}
-    for split in ("all", "pos", "neg"):
-        rows = [run["change"][split] for run in metric_runs]
-        summary["change"][split] = {
-            "accuracy": _mean_std([row["accuracy"] for row in rows]),
-            "mean_correct_prob": _mean_std([row["mean_correct_prob"] for row in rows]),
-        }
-    return summary
 
 
 # ---------------------------------------------------------------------------
@@ -328,28 +404,25 @@ def print_modulation_report(results: dict) -> None:
     mode = "ablation" if alpha == 0.0 else ("amplification" if alpha > 1.0 else f"alpha={alpha}")
     print(f"\n=== Feature modulation report ({mode}) ===")
     print(
-        "feature,split,n,repeats,"
-        "baseline_acc_mean,baseline_acc_std,"
-        "modulated_acc_mean,modulated_acc_std,"
-        "delta_acc_mean,delta_acc_std,"
-        "baseline_p_mean,baseline_p_std,"
-        "modulated_p_mean,modulated_p_std,"
-        "delta_p_mean,delta_p_std"
+        "feature,split,n,"
+        "baseline_acc,modulated_acc,delta_acc,"
+        "baseline_p,modulated_p,delta_p,"
+        "rel_delta_p_pct,improved_frac,tok_change_rate"
     )
     for row in results["features"]:
-        summary = row["summary"]
+        m = row["metrics"]
         for split in ("all", "pos", "neg"):
-            base = summary["baseline"][split]
-            mod = summary["modulated"][split]
-            chg = summary["change"][split]
+            base = m["baseline"][split]
+            mod  = m["modulated"][split]
+            chg  = m["change"][split]
+            rel  = chg.get("mean_rel_p_change", float("nan"))
+            tok  = chg.get("tok_change_rate", float("nan"))
             print(
-                f"{row['feature']},{split},{base['n']},{summary['repeats']},"
-                f"{base['accuracy']['mean']:.4f},{base['accuracy']['std']:.4f},"
-                f"{mod['accuracy']['mean']:.4f},{mod['accuracy']['std']:.4f},"
-                f"{chg['accuracy']['mean']:+.4f},{chg['accuracy']['std']:.4f},"
-                f"{base['mean_correct_prob']['mean']:.6f},{base['mean_correct_prob']['std']:.6f},"
-                f"{mod['mean_correct_prob']['mean']:.6f},{mod['mean_correct_prob']['std']:.6f},"
-                f"{chg['mean_correct_prob']['mean']:+.6f},{chg['mean_correct_prob']['std']:.6f}"
+                f"{row['feature']},{split},{base['n']},"
+                f"{base['accuracy']:.4f},{mod['accuracy']:.4f},{chg['accuracy']:+.4f},"
+                f"{base['mean_correct_prob']:.6f},{mod['mean_correct_prob']:.6f},"
+                f"{chg['mean_correct_prob']:+.6f},"
+                f"{rel:+.2f},{chg['improved_frac']:.4f},{tok:.4f}"
             )
 
 
@@ -363,7 +436,7 @@ def plot_results(results: dict, out_dir: Path) -> list[Path]:
 
     rows = sorted(
         results["features"],
-        key=lambda row: row["summary"]["change"]["all"]["accuracy"]["mean"],
+        key=lambda row: row["metrics"]["change"]["all"]["accuracy"],
     )
     if not rows:
         return []
@@ -386,11 +459,9 @@ def plot_results(results: dict, out_dir: Path) -> list[Path]:
     ]:
         ax.axvline(0.0, color=ps.GRAY, lw=1.0, ls="--", alpha=0.8)
         for split in ("all", "pos", "neg"):
-            xs = [row["summary"]["change"][split][metric]["mean"] for row in rows]
-            xerr = [row["summary"]["change"][split][metric]["std"] for row in rows]
+            xs = [row["metrics"]["change"][split][metric] for row in rows]
             ys = [v + offsets[split] for v in y]
-            ax.errorbar(xs, ys, xerr=xerr, fmt="o", ms=4.5, capsize=2.5, elinewidth=1.0,
-                        color=colors[split], label=split, alpha=0.95)
+            ax.plot(xs, ys, "o", ms=4.5, color=colors[split], label=split, alpha=0.95)
         ax.set_title(title, fontsize=11, pad=6)
         ax.set_xlabel(xlabel, fontsize=9)
         ax.grid(axis="x", color="#E0E0E0", lw=0.5)
@@ -405,13 +476,12 @@ def plot_results(results: dict, out_dir: Path) -> list[Path]:
 
     config = results.get("config", {})
     fig.suptitle(
-        f"{config.get('concept', 'concept')} feature modulation ({mode}, "
-        f"n={config.get('sample_per_class', '?')}/split, repeats={config.get('repeats', 1)})",
+        f"{config.get('concept', 'concept')} feature modulation ({mode})",
         fontsize=12, fontweight="bold", y=0.995,
     )
     fig.tight_layout(rect=(0, 0, 1, 0.965))
 
-    paths = [out_dir / "feature_modulation_summary.png", out_dir / "feature_modulation_summary.pdf"]
+    paths = [out_dir / "feature_modulation_summary.pdf"]
     for path in paths:
         fig.savefig(path)
     plt.close(fig)
@@ -431,13 +501,12 @@ def main() -> None:
         help="Features to modulate, e.g. L13_F56616 L16_F34883. "
              "Omit to run eval-only mode (report baseline accuracy and exit).",
     )
-    parser.add_argument("--features_file", default=None, help="Text or JSON list of feature names")
+    parser.add_argument("--features_file", default=None, help="Text, JSON list, or edec_features.json dict")
+    parser.add_argument("--features_direction", default="pos", choices=["pos", "neg"],
+                        help="Which direction to load from edec_features.json ('pos'=positive, 'neg'=negative)")
     parser.add_argument("--model", default=_MODEL)
     parser.add_argument("--transcoder_set", default=_TRANSCODER_SET)
     parser.add_argument("--dtype", default="bfloat16")
-    parser.add_argument("--n", type=int, default=100, help="Pairs per template to generate")
-    parser.add_argument("--sample_per_class", type=int, default=50)
-    parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--template", default="T0",
@@ -449,22 +518,34 @@ def main() -> None:
     parser.add_argument("--joint", action="store_true",
                         help="Modulate all features simultaneously")
     parser.add_argument(
-        "--cascade", action="store_true",
-        help="Run transcoder at all layers from min(feature layers) to end. "
-             "Baseline and modulated both use this cascade, so downstream layers "
-             "always see transcoder representations rather than raw MLP outputs.",
+        "--sweep_dir", default=None, type=Path,
+        help="Path to sweep dir containing sweep_activations.npz and sweep_examples.pkl. "
+             "Required in modulation mode: each feature is evaluated only on prompts where it fires.",
     )
+    parser.add_argument(
+        "--subtract", action="store_true", default=True,
+        help="Subtract act_f * W_dec[f] from the real MLP output instead of using "
+             "transcoder reconstruction. Baseline is the raw model; no reconstruction "
+             "error is introduced. Pass --no-subtract to use the old transcoder-reconstruction mode.",
+    )
+    parser.add_argument("--no-subtract", dest="subtract", action="store_false")
     parser.add_argument("--out_dir", default=None)
     args = parser.parse_args()
 
     feature_names = load_feature_names(args)
     eval_only = not feature_names
 
-    log.info("Generating %d pairs/template for concept '%s'", args.n, args.concept)
-    all_pairs = _load_concept(args.concept, args.n, args.seed)
-    if args.template and args.template.lower() != "none":
-        all_pairs = [p for p in all_pairs if p.template == args.template]
-        log.info("Filtered to template '%s': %d pairs", args.template, len(all_pairs))
+    if not eval_only and args.sweep_dir is None:
+        parser.error("--sweep_dir is required in modulation mode")
+
+    if eval_only:
+        log.info("Generating pairs for concept '%s'", args.concept)
+        all_pairs = _load_concept(args.concept, 200, args.seed)
+        if args.template and args.template.lower() != "none":
+            all_pairs = [p for p in all_pairs if p.template == args.template]
+        log.info("Loaded %d pairs for concept '%s' template '%s'", len(all_pairs), args.concept, args.template)
+    else:
+        log.info("sweep_dir=%s — each feature evaluated only on prompts where it fires", args.sweep_dir)
 
     device = get_default_device()
     dtype = parse_dtype(args.dtype)
@@ -477,24 +558,25 @@ def main() -> None:
     )
     model.eval()
 
-    repeats = max(1, args.repeats)
-    pairs = select_pairs(all_pairs, args.sample_per_class, args.seed)
-
     # --- eval-only mode ---
     if eval_only:
         log.info("No features specified — running eval-only mode")
-        raw = evaluate(model, pairs, feature_map=None,
-                       batch_size=args.batch_size, desc="raw-model")
+        print("\n--- sample outputs (raw model) ---")
+        _show_examples(model, all_pairs, n=2, max_new_tokens=50)
+        print()
+        raw, _ = evaluate(model, _pairs_to_prompts(all_pairs), feature_map=None,
+                          batch_size=args.batch_size, desc="raw-model")
         print_eval_report(raw)
 
+        tmpl_suffix = f"_{args.template}" if args.template and args.template.lower() != "none" else ""
         out_dir = Path(args.out_dir or f"runs/concept_localization/{args.concept}/eval_only")
         out_dir.mkdir(parents=True, exist_ok=True)
-        out_path = out_dir / "concept_accuracy.json"
+        out_path = out_dir / f"concept_accuracy{tmpl_suffix}.json"
         out_path.write_text(json.dumps({
             "config": {
                 "concept": args.concept,
                 "template": args.template,
-                "sample_per_class": args.sample_per_class,
+
                 "seed": args.seed,
             },
             "raw_model": {split: asdict(getattr(raw, split)) for split in ("all", "pos", "neg")},
@@ -524,90 +606,88 @@ def main() -> None:
     )
     log.info("Mode: %s | features: %s", mode_str, [f.key for f in features])
 
+    # Load sweep files once — shared across all features
+    sweep_npz = np.load(args.sweep_dir / "sweep_activations.npz")
+    with open(args.sweep_dir / "sweep_examples.pkl", "rb") as fh:
+        sweep_examples = pickle.load(fh)
+
     if args.joint:
         joint_feature_map: dict[int, list[int]] = {}
         for f in features:
             joint_feature_map.setdefault(f.layer, []).append(f.feature_id)
         joint_key = "+".join(f.key for f in features)
-        min_layer = min(f.layer for f in features)
         log.info("Joint modulation of %d features: %s", len(features), joint_key)
 
-        if args.cascade:
-            log.info("Cascade mode: transcoder at layers %d–%d", min_layer, model.cfg.n_layers - 1)
-            joint_baseline_map = build_cascade_map(min_layer, model.cfg.n_layers)
-            joint_modulated_map = build_cascade_map(min_layer, model.cfg.n_layers, joint_feature_map)
+        feature_keys_joint = [f.key for f in features]
+        prompts_r = _filter_active_prompts(feature_keys_joint, sweep_npz, sweep_examples)
+        if not prompts_r:
+            raise ValueError("No prompts where any joint feature fires — check sweep_dir")
+        log.info("Joint: %d active prompts (any feature fires)", len(prompts_r))
+
+        if args.subtract:
+            baseline, base_rows = evaluate(model, prompts_r, feature_map=None,
+                                           batch_size=args.batch_size, desc="joint-baseline")
+            modulated, mod_rows = evaluate(model, prompts_r, feature_map=joint_feature_map,
+                                           batch_size=args.batch_size, desc="joint-modulated",
+                                           subtract_mode=True)
         else:
             joint_baseline_map = {l: [] for l in joint_feature_map}
-            joint_modulated_map = joint_feature_map
+            baseline, base_rows = evaluate(model, prompts_r, feature_map=joint_baseline_map,
+                                           batch_size=args.batch_size, desc="joint-baseline")
+            modulated, mod_rows = evaluate(model, prompts_r, feature_map=joint_feature_map,
+                                           alpha=alpha, batch_size=args.batch_size, desc="joint-modulated")
 
-        joint_row: dict = {"feature": joint_key, "features": [f.key for f in features], "runs": []}
-
-        for repeat_idx in range(repeats):
-            sample_seed = args.seed + repeat_idx
-            pairs_r = select_pairs(all_pairs, args.sample_per_class, sample_seed)
-            baseline = evaluate(model, pairs_r, feature_map=joint_baseline_map,
-                                batch_size=args.batch_size, desc="joint-baseline")
-            modulated = evaluate(model, pairs_r, feature_map=joint_modulated_map,
-                                 alpha=alpha, batch_size=args.batch_size, desc="joint-modulated")
-            joint_row["runs"].append({"sample_seed": sample_seed,
-                                      "metrics": diff_metrics(baseline, modulated)})
-
-        joint_row["summary"] = summarize_runs([r["metrics"] for r in joint_row["runs"]])
-        rows = [joint_row]
+        rows = [{"feature": joint_key, "features": [f.key for f in features],
+                 "metrics": diff_metrics(baseline, modulated, base_rows, mod_rows)}]
 
     else:
-        rows = [
-            {
+        rows = []
+        for feature in features:
+            prompts_r = _filter_active_prompts([feature.key], sweep_npz, sweep_examples)
+            if not prompts_r:
+                log.warning("Feature %s fires on no prompts — skipping", feature.key)
+                continue
+            log.info("Feature %s: %d active prompts (%d pos, %d neg)",
+                     feature.key, len(prompts_r),
+                     sum(1 for p in prompts_r if p["split"] == "pos"),
+                     sum(1 for p in prompts_r if p["split"] == "neg"))
+
+            # Baseline
+            if args.subtract:
+                baseline, base_rows = evaluate(
+                    model, prompts_r, feature_map=None,
+                    batch_size=args.batch_size, desc=f"{feature.key}_base",
+                )
+            else:
+                baseline, base_rows = evaluate(
+                    model, prompts_r, feature_map={feature.layer: []},
+                    batch_size=args.batch_size, desc=f"{feature.key}_base",
+                )
+
+            # Modulated
+            modulated_map = {feature.layer: [feature.feature_id]}
+            if args.subtract:
+                modulated, mod_rows = evaluate(
+                    model, prompts_r, feature_map=modulated_map,
+                    batch_size=args.batch_size, subtract_mode=True,
+                )
+            else:
+                modulated, mod_rows = evaluate(
+                    model, prompts_r, feature_map=modulated_map,
+                    alpha=alpha, batch_size=args.batch_size,
+                )
+
+            rows.append({
                 "feature": feature.key,
                 "input_name": feature.name,
                 "layer": feature.layer,
                 "feature_id": feature.feature_id,
-                "runs": [],
-            }
-            for feature in features
-        ]
-
-        for repeat_idx in range(repeats):
-            sample_seed = args.seed + repeat_idx
-            pairs_r = select_pairs(all_pairs, args.sample_per_class, sample_seed)
-            log.info("Repeat %d/%d seed=%d", repeat_idx + 1, repeats, sample_seed)
-
-            layer_baselines: dict[int, EvalMetrics] = {}
-            for feature in features:
-                if feature.layer not in layer_baselines:
-                    if args.cascade:
-                        baseline_map = build_cascade_map(feature.layer, model.cfg.n_layers)
-                    else:
-                        baseline_map = {feature.layer: []}
-                    layer_baselines[feature.layer] = evaluate(
-                        model, pairs_r, feature_map=baseline_map,
-                        batch_size=args.batch_size, desc=f"L{feature.layer}_tc-baseline",
-                    )
-            for feature, row in zip(features, rows, strict=False):
-                baseline = layer_baselines[feature.layer]
-                if args.cascade:
-                    modulated_map = build_cascade_map(
-                        feature.layer, model.cfg.n_layers,
-                        {feature.layer: [feature.feature_id]},
-                    )
-                else:
-                    modulated_map = {feature.layer: [feature.feature_id]}
-                modulated = evaluate(
-                    model, pairs_r,
-                    feature_map=modulated_map,
-                    alpha=alpha, batch_size=args.batch_size,
-                )
-                row["runs"].append({"sample_seed": sample_seed,
-                                    "metrics": diff_metrics(baseline, modulated)})
-
-        for row in rows:
-            row["summary"] = summarize_runs([run["metrics"] for run in row["runs"]])
-            if repeats == 1:
-                row["metrics"] = row["runs"][0]["metrics"]
+                "metrics": diff_metrics(baseline, modulated, base_rows, mod_rows),
+            })
 
     alpha_tag = f"alpha{alpha}".replace(".", "p").replace("-", "neg")
-    cascade_tag = "_cascade" if args.cascade else ""
-    default_out = f"runs/concept_localization/{args.concept}/modulation_{alpha_tag}{cascade_tag}"
+    subtract_tag = "_subtract" if args.subtract else ""
+    default_out = f"runs/concept_localization/{args.concept}/modulation_{alpha_tag}{subtract_tag}"
     out_dir = Path(args.out_dir or default_out)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -617,18 +697,13 @@ def main() -> None:
             "model": args.model,
             "transcoder_set": args.transcoder_set,
             "dtype": args.dtype,
-            "n_per_template": args.n,
-            "sample_per_class": args.sample_per_class,
-            "repeats": repeats,
-            "sample_seeds": [args.seed + i for i in range(repeats)],
             "batch_size": args.batch_size,
-            "seed": args.seed,
             "template": args.template,
             "alpha": alpha,
             "joint": args.joint,
-            "cascade": args.cascade,
-            "cascade_min_layer": min(f.layer for f in features) if args.cascade else None,
+            "subtract": args.subtract,
             "features_file": args.features_file,
+            "sweep_dir": str(args.sweep_dir),
         },
         "features": rows,
     }

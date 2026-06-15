@@ -328,43 +328,6 @@ def plot_causal_overlay(
             fig.savefig(out_path)
         plt.close(fig)
 
-
-def plot_causal_overlay_grid(
-    entries: list[tuple[str, dict, dict[int, float], dict[int, float]]],
-    out_path: Path,
-    ncols: int = 3,
-) -> None:
-    """Combined grid of causal overlay subplots, one per concept.
-
-    entries: list of (concept_name, causal_results, delta_norms, mean_act_norms)
-    mean_act_norms may be an empty dict for old runs (falls back to raw norms).
-    """
-    n = len(entries)
-    nrows = (n + ncols - 1) // ncols
-
-    ps.apply()
-    fig, axes = plt.subplots(nrows, ncols, figsize=(11 * ncols, 4.5 * nrows))
-    axes_flat = list(axes.flatten()) if n > 1 else [axes]
-
-    for i, entry in enumerate(entries):
-        concept, causal_results, delta_norms = entry[0], entry[1], entry[2]
-        mean_act_norms = entry[3] if len(entry) > 3 else {}
-        plot_causal_overlay(
-            causal_results,
-            delta_norms,
-            concept=concept,
-            ax=axes_flat[i],
-            mean_act_norms=mean_act_norms or None,
-        )
-
-    for j in range(n, len(axes_flat)):
-        axes_flat[j].set_visible(False)
-
-    fig.tight_layout()
-    fig.savefig(out_path, dpi=150)
-    plt.close(fig)
-
-
 def assemble_png_grid(
     entries: list[tuple[str, Path]],
     out_path: Path,
@@ -745,6 +708,73 @@ def plot_feature_heatmap_grid(
         f"{concept} — feature activations at anchor {anchor_label}  " f"(x={xlabel}, y={ylabel})",
         fontsize=10,
         y=1.01,
+    )
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+
+def plot_edec_mean_activations(
+    edec_data: dict,
+    out_path: Path,
+    direction: str = "pos",
+    ncols: int = 5,
+    concept: str = "",
+) -> None:
+    """Grid of mean activations (pos vs neg) for features in edec_features.json.
+
+    Reads mean_pos/mean_neg/std_pos/std_neg directly from the JSON rows (embedded
+    by save_edec_features when pairs are provided). Raises if activation stats are absent.
+    """
+    score_mode = edec_data.get("config", {}).get("score_mode", "dec+enc")
+    rows = edec_data.get(direction, [])
+    rows = [r for r in rows if "mean_pos" in r]
+    if not rows:
+        raise ValueError(
+            f"No activation stats in edec_data['{direction}']. "
+            "Re-run analyze.py with --concept to embed mean/std."
+        )
+
+    n = len(rows)
+    nrows = math.ceil(n / ncols)
+    ps.apply()
+    fig, axes = plt.subplots(nrows, ncols, figsize=(ncols * 2.4, nrows * 2.8), squeeze=False)
+
+    for idx, meta in enumerate(rows):
+        ax = axes[idx // ncols][idx % ncols]
+        mean_pos = meta["mean_pos"]
+        mean_neg = meta["mean_neg"]
+        std_pos  = meta.get("std_pos", 0.0)
+        std_neg  = meta.get("std_neg", 0.0)
+
+        ax.bar([0, 1], [mean_pos, mean_neg],
+               yerr=[std_pos, std_neg],
+               color=[ps.VIOLET, ps.NAVY],
+               width=0.6, capsize=3, error_kw={"linewidth": 0.8})
+        ax.set_xticks([0, 1])
+        ax.set_xticklabels(["pos", "neg"], fontsize=7)
+        ax.axhline(0, color=ps.GRAY, linewidth=0.5)
+        ax.tick_params(axis="y", labelsize=6)
+        for sp in ax.spines.values():
+            sp.set_color(ps.GRAY)
+
+        if score_mode == "dec":
+            score_str = f"dec={meta['dec_cos']:+.3f}"
+        elif score_mode == "enc":
+            score_str = f"enc={meta['enc_cos']:+.3f}"
+        else:
+            score_str = f"d={meta['dec_cos']:+.2f} e={meta['enc_cos']:+.2f}"
+        layer, fid = meta["layer"], meta["feature_id"]
+        ax.set_title(rf"$L^{{{layer}}}_{{{fid}}}$" + f"\n{score_str}", fontsize=7)
+
+    for idx in range(n, nrows * ncols):
+        axes[idx // ncols][idx % ncols].set_visible(False)
+
+    direction_label = "most positive" if direction == "pos" else "most negative"
+    fig.suptitle(
+        f"{concept} — mean feature activations ({direction_label}, score_mode={score_mode})\n"
+        "violet=pos concept  navy=neg concept  bars=mean±std",
+        fontsize=10,
     )
     fig.tight_layout()
     fig.savefig(out_path, dpi=150, bbox_inches="tight")

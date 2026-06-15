@@ -48,7 +48,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from experiments.concept_localization.analyze import (
     compute_sharpness,
-    project_onto_E_dec_model,
+    save_edec_features,
 )
 from experiments.concept_localization.causal_analysis import run_causal_analysis
 from experiments.concept_localization.extract_deltas_generic import (
@@ -223,6 +223,11 @@ def main() -> None:
     )
     parser.add_argument(
         "--skip_features", action="store_true", help="Skip transcoder feature projection (faster)"
+    )
+    parser.add_argument(
+        "--feature_score_mode", default="dec+enc", choices=["dec", "enc", "dec+enc"],
+        help="Ranking mode for top-k feature projection: dec=decoder cosine, "
+             "enc=encoder cosine, (default) dec+enc=sum of both normalised cosine similarities",
     )
     parser.add_argument(
         "--template",
@@ -406,10 +411,17 @@ def _run_single(args, base_subdir: str | None = None) -> None:
             log.info("Causal analysis done (n_pairs=%d)", causal["all"].n_pairs)
 
         # ── 6. Feature projection ─────────────────────────────────────────────
-        projections: dict = {}
         if not args.skip_features:
             log.info("Projecting delta onto transcoder decoder directions (E_dec)…")
-            projections = project_onto_E_dec_model(model, ld.delta, top_k=args.top_k)
+            save_edec_features(
+                model, ld.delta,
+                out_path=out_dir / "edec_features.json",
+                top_k=args.top_k,
+                score_mode=args.feature_score_mode,
+                pairs=pairs,
+                anchor_mode=anchor_mode,
+                anchor_factory=anchor_factory,
+            )
 
         mean_act_norms = {l: v for l, v in ld.mean_act_norm.items()} if ld.mean_act_norm else {}
         delta_norms_raw = {l: ld.delta[l].norm().item() for l in layers if l in ld.delta}
@@ -450,15 +462,6 @@ def _run_single(args, base_subdir: str | None = None) -> None:
             },
             "template_consistency": consistency,
             "mean_act_norm": {str(l): round(v, 4) for l, v in mean_act_norms.items()},
-            "top_features_by_layer": {
-                str(layer): [
-                    {"feature_id": m.feature_id,
-                     "projection": round(m.projection, 4),
-                     "cos_sim": round(m.cos_sim, 4)}
-                    for m in matches
-                ]
-                for layer, matches in projections.items()
-            },
             "causal": (
                 {
                     key: {
