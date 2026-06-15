@@ -5,6 +5,7 @@ stages:
 unit-test-job:
   stage: test
   before_script:
+    - unset LD_PRELOAD
     - python -V
     - python -m pip install -U pip
     - python -m pip install -e ".[test]"
@@ -25,6 +26,7 @@ unit-test-job:
 lint-job:
   stage: test
   before_script:
+    - unset LD_PRELOAD
     - python -V
     - python -m pip install -U pip
     - python -m pip install ruff
