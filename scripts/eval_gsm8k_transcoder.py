@@ -154,7 +154,7 @@ def evaluate(model, hf_model, hf_tokenizer, examples: list[dict],
         if is_correct:
             correct += 1
 
-        results.append({"idx": global_i, "pred": pred, "gold": gold, "correct": is_correct})
+        results.append({"idx": global_i, "pred": pred, "gold": gold, "correct": is_correct, "output": output})
 
         # Save after every example so a killed job can resume
         if out_path:
