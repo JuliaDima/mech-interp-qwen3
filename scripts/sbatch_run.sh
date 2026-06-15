@@ -46,20 +46,20 @@ module load rhel8/default-amp || true
 set +u
 source ~/.bashrc
 set -u
-VENV_PATH="${MIQ_VENV:-${REPO_ROOT}/.venv}"
-if [ ! -f "${VENV_PATH}/bin/activate" ]; then
-  echo "Python virtual environment not found at ${VENV_PATH}" >&2
-  echo "Create it with: /usr/bin/python3.11 -m venv .venv && source .venv/bin/activate && python -m pip install -e .[test,dev]" >&2
+CONDA_ENV="${MIQ_CONDA_ENV:-p28_py311_env}"
+CONDA_ROOT="${MIQ_CONDA_ROOT:-${HOME}/miniforge3}"
+if [ ! -f "${CONDA_ROOT}/etc/profile.d/conda.sh" ]; then
+  echo "conda not found at ${CONDA_ROOT}" >&2
+  echo "Install miniforge3 to ${CONDA_ROOT} first." >&2
   exit 2
 fi
-source "${VENV_PATH}/bin/activate"
-export PATH="${VENV_PATH}/bin:${PATH}"
+source "${CONDA_ROOT}/etc/profile.d/conda.sh"
+conda activate "${CONDA_ENV}"
 hash -r 2>/dev/null || true
 
 set -euo pipefail
 
 export PYTHONPATH="${PYTHONPATH:-}:${REPO_ROOT}/src:${REPO_ROOT}"
-export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}:${VENV_PATH}/lib:${VENV_PATH}/lib64"
 export OMP_NUM_THREADS=16
 export PYTHONUNBUFFERED=1
 

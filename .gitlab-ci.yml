@@ -2,15 +2,19 @@ stages:
   - test
   - pages
 
+.conda_setup: &conda_setup
+  - unset LD_PRELOAD
+  - source "${HOME}/miniforge3/etc/profile.d/conda.sh"
+  - conda activate p28_py311_env
+  - python --version
+
 unit-test-job:
   stage: test
   before_script:
-    - unset LD_PRELOAD
-    - python3 -V
-    - python3 -m pip install -U pip
-    - python3 -m pip install -e ".[test]"
+    - *conda_setup
+    - pip install -e ".[test]"
   script:
-    - python3 -m pytest tests/ -v --cov=src/mechinterp_qwen3 --cov-report=term --cov-report=html --cov-report=xml
+    - python -m pytest tests/ -v --cov=src/mechinterp_qwen3 --cov-report=term --cov-report=html --cov-report=xml
   coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
   artifacts:
     when: always
@@ -26,10 +30,8 @@ unit-test-job:
 lint-job:
   stage: test
   before_script:
-    - unset LD_PRELOAD
-    - python3 -V
-    - python3 -m pip install -U pip
-    - python3 -m pip install ruff
+    - *conda_setup
+    - pip install ruff
   script:
     - echo "Running linting checks..."
     - ruff check src/ tests/ --output-format=gitlab
@@ -40,10 +42,8 @@ lint-job:
 pages:
   stage: pages
   before_script:
-    - unset LD_PRELOAD
-    - python3 -V
-    - python3 -m pip install -U pip
-    - python3 -m pip install -e ".[docs]" linkify-it-py
+    - *conda_setup
+    - pip install -e ".[docs]" linkify-it-py
   script:
     - sphinx-build -b html docs/ public/
   artifacts:
