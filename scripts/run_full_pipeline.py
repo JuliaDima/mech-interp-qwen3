@@ -38,10 +38,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from experiments.concept_localization.plot_anchor_analysis import (
-    load_emergence,
-    top_k_anchors,
-)
+from experiments.concept_localization.plot_emergence_per_anchor import load_concept_anchor_data
 
 logging.basicConfig(
     level=logging.INFO,
@@ -141,25 +138,38 @@ def main() -> None:
         "--concept", args.concept,
     ])
 
-    # ── Select top-k anchors ──────────────────────────────────────────────────
+    # ── Select top-k anchors by mean_cos (direction stability) ───────────────
+    # Mirrors select_and_submit_anchors.py: rank active positions by mean pairwise
+    # cosine similarity of delta vectors across layers. This puts stable-direction
+    # operand positions (e.g. carry digit tokens) first, which abruptness misses.
 
-    em = load_emergence(args.concept)
-    if em is None:
+    data = load_concept_anchor_data(args.concept)
+    if data is None:
         log.error("emergence.npy not found for '%s' — cannot continue.", args.concept)
         sys.exit(1)
 
-    anchors = top_k_anchors(em, args.concept, k=args.k)
-    if not anchors:
-        log.error("No active anchors found for '%s'.", args.concept)
+    mean_cos = data.get("mean_cos", {})
+    if not mean_cos:
+        log.error("mean_cos missing from emergence.npy for '%s' — re-run make_gif.", args.concept)
         sys.exit(1)
 
-    log.info("Selected %d anchors for '%s':", len(anchors), args.concept)
-    for rank, (idx, _, label) in enumerate(anchors, start=1):
-        log.info("  Rank %d: pos=%d token=%r", rank, idx, label)
+    active  = data["active"]
+    labels  = data.get("labels", [])
+    ranked  = sorted(active, key=lambda i: mean_cos.get(i, 0.0), reverse=True)
+    selected = ranked[: args.k]
+
+    anchors = [
+        (pos, labels[pos] if pos < len(labels) else str(pos))
+        for pos in selected
+    ]
+
+    log.info("Selected %d anchors for '%s' (by mean_cos):", len(anchors), args.concept)
+    for rank, (idx, label) in enumerate(anchors, start=1):
+        log.info("  Rank %d: pos=%d token=%r  mean_cos=%.3f", rank, idx, label, mean_cos.get(idx, 0.0))
 
     # ── Phase B: per-anchor pipeline ──────────────────────────────────────────
 
-    for rank, (anchor_pos, _, label) in enumerate(anchors, start=1):
+    for rank, (anchor_pos, label) in enumerate(anchors, start=1):
         log.info("=" * 60)
         log.info("Phase B — anchor rank=%d pos=%d token=%r", rank, anchor_pos, label)
         log.info("=" * 60)

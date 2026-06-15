@@ -162,6 +162,88 @@ def make_capture_hook(
 # ---------------------------------------------------------------------------
 
 
+def make_subtract_hook(
+    model: AttributionModel,
+    layer: int,
+    feature_ids: list[int],
+) -> tuple[str, Callable]:
+    """Build a hook that subtracts each feature's decoder direction from the real MLP output.
+
+    Unlike make_inhibit_hook, this keeps the real MLP output intact and only removes
+    the attributed feature contribution: ``mlp_out -= act_f * W_dec[f]`` for each f.
+    Reconstruction error is never introduced. An empty feature_ids list is a no-op.
+
+    Args:
+        model: AttributionModel instance
+        layer: Layer at which to apply the subtraction
+        feature_ids: Feature indices whose directions to subtract
+
+    Returns:
+        (hook_name, hook_fn) ready to pass to run_with_hooks
+    """
+    transcoder = model.transcoders[layer]  # type: ignore[index]
+
+    def _hook(mlp_out: torch.Tensor, hook) -> torch.Tensor:
+        h_in = _hook._last_mlp_in  # type: ignore[attr-defined]
+        if h_in is None or not feature_ids:
+            return mlp_out
+
+        with torch.no_grad():
+            W_enc = transcoder.W_enc
+            b_enc = transcoder.b_enc
+            W_dec = transcoder.W_dec
+
+            pre = F.linear(h_in.to(W_enc.dtype), W_enc, b_enc)
+            acts = transcoder.activation_function(pre)  # (batch, n_pos, d_tc)
+
+            out = mlp_out.to(W_dec.dtype)
+            for fid in feature_ids:
+                out = out - acts[..., fid : fid + 1] * W_dec[fid]
+        return out.to(mlp_out.dtype)
+
+    _hook._last_mlp_in = None  # type: ignore[attr-defined]
+    hook_name = f"blocks.{layer}.{model.original_feature_output_hook}"
+    return hook_name, _hook
+
+
+@torch.no_grad()
+def ablate_feature_directions(
+    model: AttributionModel,
+    tokens: torch.Tensor,
+    feature_ids_by_layer: dict[int, list[int]],
+) -> torch.Tensor:
+    """Subtract each feature's decoder direction from the real MLP output.
+
+    Preserves the raw MLP output for all layers; only removes the attributed
+    contribution of each listed feature (``act_f * W_dec[f]``). Layers with an
+    empty feature list are left untouched. The empty-dict case is identical to a
+    plain forward pass — no reconstruction error is ever introduced.
+
+    Args:
+        model: AttributionModel instance
+        tokens: Token IDs, shape (1, n_pos) or (n_pos,)
+        feature_ids_by_layer: Mapping {layer_idx: [feature_indices]} to subtract
+
+    Returns:
+        Output logits, shape (1, n_pos, d_vocab)
+    """
+    if tokens.ndim == 1:
+        tokens = tokens.unsqueeze(0)
+
+    hooks: list[tuple[str, Callable]] = []
+    for layer, feat_ids in feature_ids_by_layer.items():
+        if not feat_ids:
+            continue
+        sub_name, sub_fn = make_subtract_hook(model, layer, feat_ids)
+        cap_name, cap_fn = make_capture_hook(model, layer, sub_fn)
+        hooks.append((cap_name, cap_fn))
+        hooks.append((sub_name, sub_fn))
+
+    if not hooks:
+        return model(tokens)
+    return model.run_with_hooks(tokens, fwd_hooks=hooks)
+
+
 @torch.no_grad()
 def run_with_transcoder_reconstruction(
     model: AttributionModel,

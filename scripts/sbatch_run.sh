@@ -46,12 +46,20 @@ module load rhel8/default-amp || true
 set +u
 source ~/.bashrc
 set -u
-conda activate p28_py311_env || true
+VENV_PATH="${MIQ_VENV:-${REPO_ROOT}/.venv}"
+if [ ! -f "${VENV_PATH}/bin/activate" ]; then
+  echo "Python virtual environment not found at ${VENV_PATH}" >&2
+  echo "Create it with: /usr/bin/python3.11 -m venv .venv && source .venv/bin/activate && python -m pip install -e .[test,dev]" >&2
+  exit 2
+fi
+source "${VENV_PATH}/bin/activate"
+export PATH="${VENV_PATH}/bin:${PATH}"
+hash -r 2>/dev/null || true
 
 set -euo pipefail
 
 export PYTHONPATH="${PYTHONPATH:-}:${REPO_ROOT}/src:${REPO_ROOT}"
-export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}:/home/eid23/miniforge3/envs/p28_py311_env/lib"
+export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}:${VENV_PATH}/lib:${VENV_PATH}/lib64"
 export OMP_NUM_THREADS=16
 export PYTHONUNBUFFERED=1
 
@@ -60,6 +68,9 @@ export PYTHONUNBUFFERED=1
 set +u
 source "${REPO_ROOT}/scripts/miq-env.sh"
 set -u
+# Unset legacy cache vars that .bashrc may set to node-local paths;
+# miq-env.sh already sets HF_HOME to the shared RDS cache.
+unset TRANSFORMERS_CACHE HF_HUB_CACHE || true
 export HF_HUB_OFFLINE=1
 export TRANSFORMERS_OFFLINE=1
 

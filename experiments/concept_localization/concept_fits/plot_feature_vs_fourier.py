@@ -299,6 +299,80 @@ def _compile_tex(tex_path: Path) -> Path | None:
     return tex_path.with_suffix(".pdf")
 
 
+# ── Force-extract: run model on dataset and build grids for specific features ─
+
+def _force_extract_grids(
+    keys: list[str],
+    concept: str = "carry",
+    n_pairs: int = 500,
+    seed: int = 42,
+    anchor_mode: str = "delimiter",
+) -> dict[str, np.ndarray]:
+    """Load model + transcoders, run concept dataset, return {key: 10×10 grid}."""
+    import importlib
+    import torch
+    from mechinterp_qwen3.utils.hf_utils import load_transcoder_from_hub
+    from mechinterp_qwen3.attribution_model import AttributionModel
+    from mechinterp_qwen3.utils.model_utils import get_default_device, parse_dtype
+    sys.path.insert(0, str(_REPO_ROOT / "scripts" / "sweeps"))
+    from sweep_utils import apply_transcoder_all
+    from run_concept_sweep import _load_concept, _build_inputs, _acts_to_grid
+
+    _MODEL         = "Qwen/Qwen3-4B"
+    _TRANSCODER_SET = "mwhanna/qwen3-4b-transcoders"
+
+    # parse requested (layer, feat_id) pairs
+    targets: dict[str, tuple[int, int]] = {}
+    for k in keys:
+        m = re.fullmatch(r"L(\d+)_F(\d+)", k)
+        if m:
+            targets[k] = (int(m.group(1)), int(m.group(2)))
+    if not targets:
+        return {}
+
+    needed_layers = sorted({l for l, _ in targets.values()})
+    print(f"  [force_extract] loading model for layers {needed_layers} ...")
+
+    device = get_default_device()
+    dtype  = parse_dtype("bfloat16")
+    tc_set, _ = load_transcoder_from_hub(_TRANSCODER_SET, dtype=dtype,
+                                         lazy_encoder=True, lazy_decoder=True)
+    model = AttributionModel.from_pretrained_and_transcoders(
+        _MODEL, tc_set, dtype=dtype, device=device)
+    model.eval()
+
+    pairs = _load_concept(concept, n_pairs, seed)
+    inputs, _pos_mask, _prompts = _build_inputs(model, pairs, anchor_mode,
+                                                anchor_factory=None,
+                                                max_pairs=n_pairs)
+    print(f"  [force_extract] {len(inputs)} inputs, extracting {len(targets)} features ...")
+
+    from experiments.concept_localization.analyze import collect_layer_residuals
+    H = collect_layer_residuals(model, inputs, needed_layers)
+
+    grids: dict[str, np.ndarray] = {}
+    for layer in needed_layers:
+        if layer not in H:
+            continue
+        acts_np = apply_transcoder_all(model, layer, H[layer])  # (N, n_feats)
+        layer_pairs = [(k, fid) for k, (l, fid) in targets.items() if l == layer]
+        for key, feat_id in layer_pairs:
+            if feat_id >= acts_np.shape[1]:
+                print(f"  [force_extract] {key}: feat_id {feat_id} out of range")
+                continue
+            raw = _acts_to_grid(acts_np[:, feat_id], pairs[:len(inputs) // 2])
+            lo, hi = np.nanmin(raw), np.nanmax(raw)
+            if hi - lo > 1e-12:
+                raw = (raw - lo) / (hi - lo)
+            else:
+                raw = np.zeros_like(raw)
+            grids[key] = np.nan_to_num(raw, nan=0.0)
+            print(f"  [force_extract] {key}: extracted grid, range [{lo:.4f}, {hi:.4f}]")
+
+    del model, H
+    return grids
+
+
 # ── Fallback grid loader from all_feature_grids ──────────────────────────────
 
 def _build_grid_from_all_feature_grids(sweep_dir: Path, key: str) -> np.ndarray | None:
@@ -351,6 +425,13 @@ def main() -> None:
     parser.add_argument("--fourier_r2_target", type=float, default=0.95)
     parser.add_argument("--anchor", default=None,
                         help="Filter sweep candidates by directory name substring")
+    parser.add_argument("--force_extract", action="store_true",
+                        help="If grid data is not found in sweep npz files, load the model "
+                             "and extract activations directly from the concept dataset")
+    parser.add_argument("--concept", default="carry",
+                        help="Concept name for --force_extract (default: carry)")
+    parser.add_argument("--n_pairs", type=int, default=100,
+                        help="Number of pairs to use for --force_extract")
     args = parser.parse_args()
 
     raw_keys = json.loads(Path(args.features_json).read_text())
@@ -371,6 +452,20 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     print(f"Output → {out_dir}")
 
+    # Pre-extract all missing keys in a single model load if --force_extract
+    forced_grids: dict[str, np.ndarray] = {}
+    if args.force_extract:
+        missing = []
+        for key in keys:
+            g = _build_grid_from_sweep(args.sweep_dir, key, anchor=args.anchor)
+            if g is None:
+                g = _build_grid_from_all_feature_grids(Path(args.sweep_dir), key)
+            if g is None:
+                missing.append(key)
+        if missing:
+            forced_grids = _force_extract_grids(
+                missing, concept=args.concept, n_pairs=args.n_pairs)
+
     N = 10
     for key in keys:
         print(f"\n{key}")
@@ -379,9 +474,13 @@ def main() -> None:
             grid = _build_grid_from_all_feature_grids(Path(args.sweep_dir), key)
             if grid is not None:
                 print(f"  [fallback] loaded from all_feature_grids (NaN cells filled with 0)")
-            else:
-                print(f"  [skip] no grid data found")
-                continue
+        if grid is None:
+            grid = forced_grids.get(key)
+            if grid is not None:
+                print(f"  [force_extract] using on-the-fly extracted grid")
+        if grid is None:
+            print(f"  [skip] no grid data found")
+            continue
 
         k_used, r2_val, modes, mu, _C, fourier_approx = find_min_k(
             grid, r2_target=args.fourier_r2_target, k_max=args.fourier_K,
@@ -417,8 +516,8 @@ _INTRO_TEX = r"""
 The label $L^x_Y$ identifies transcoder feature $Y$ at transformer layer $x$.
 
 \paragraph{Model.}
-All activations are extracted from Qwen2.5-3B-Instruct, a decoder-only transformer
-with 36 layers and a hidden dimension of 2048.
+All activations are extracted from Qwen3-4B, a decoder-only transformer
+with 36 layers and a hidden dimension of 2560.
 
 \paragraph{Transcoders.}
 Sparse autoencoders trained on each MLP sublayer are drawn from the

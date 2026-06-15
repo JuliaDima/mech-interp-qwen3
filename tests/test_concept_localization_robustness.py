@@ -623,7 +623,7 @@ class TestComputeTemplateConsistency:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 12. project_onto_features
+# 12. project_onto_E_dec_model (enc mode — replaces removed project_onto_features)
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -636,52 +636,52 @@ class TestProjectOntoFeatures:
         return model
 
     def test_returns_top_k_matches(self):
-        from experiments.concept_localization.analyze import project_onto_features
+        from experiments.concept_localization.analyze import project_onto_E_dec_model
 
         model = self._model_with_tc(n_features=32, d_model=8)
         ld = LayerDeltas(delta={0: torch.randn(8)})
-        result = project_onto_features(model, ld, top_k=10)
+        result = project_onto_E_dec_model(model, ld.delta, top_k=10, score_mode="enc")
         assert len(result[0]) == 10
 
     def test_top_k_capped_at_feature_count(self):
-        from experiments.concept_localization.analyze import project_onto_features
+        from experiments.concept_localization.analyze import project_onto_E_dec_model
 
         model = self._model_with_tc(n_features=5, d_model=8)
         ld = LayerDeltas(delta={0: torch.randn(8)})
-        result = project_onto_features(model, ld, top_k=100)
+        result = project_onto_E_dec_model(model, ld.delta, top_k=100, score_mode="enc")
         assert len(result[0]) == 5
 
     def test_zero_norm_delta_layer_skipped(self):
-        from experiments.concept_localization.analyze import project_onto_features
+        from experiments.concept_localization.analyze import project_onto_E_dec_model
 
         model = self._model_with_tc()
         ld = LayerDeltas(delta={0: torch.zeros(8)})
-        result = project_onto_features(model, ld, top_k=5)
+        result = project_onto_E_dec_model(model, ld.delta, top_k=5, score_mode="enc")
         assert 0 not in result
 
     def test_missing_w_enc_layer_skipped(self):
-        from experiments.concept_localization.analyze import project_onto_features
+        from experiments.concept_localization.analyze import project_onto_E_dec_model
 
         model = MagicMock()
         model.transcoders = {0: SimpleNamespace()}  # no W_enc
         ld = LayerDeltas(delta={0: torch.randn(8)})
-        assert 0 not in project_onto_features(model, ld, top_k=5)
+        assert 0 not in project_onto_E_dec_model(model, ld.delta, top_k=5, score_mode="enc")
 
     def test_feature_ids_within_valid_range(self):
-        from experiments.concept_localization.analyze import project_onto_features
+        from experiments.concept_localization.analyze import project_onto_E_dec_model
 
         n_features = 20
         model = self._model_with_tc(n_features=n_features)
         ld = LayerDeltas(delta={0: torch.randn(8)})
-        for fm in project_onto_features(model, ld, top_k=10)[0]:
+        for fm in project_onto_E_dec_model(model, ld.delta, top_k=10, score_mode="enc")[0]:
             assert 0 <= fm.feature_id < n_features
 
     def test_cos_sim_in_minus_one_to_one(self):
-        from experiments.concept_localization.analyze import project_onto_features
+        from experiments.concept_localization.analyze import project_onto_E_dec_model
 
         model = self._model_with_tc()
         ld = LayerDeltas(delta={0: torch.randn(8)})
-        for fm in project_onto_features(model, ld, top_k=16)[0]:
+        for fm in project_onto_E_dec_model(model, ld.delta, top_k=16, score_mode="enc")[0]:
             assert -1.0 - 1e-5 <= fm.cos_sim <= 1.0 + 1e-5
 
 
