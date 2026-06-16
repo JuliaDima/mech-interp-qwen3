@@ -102,8 +102,6 @@ _PARITY_FORMULA_LATEX = (
 )
 
 
-# ── LaTeX helpers (adapted from fit_pysr_sweep.py) ────────────────────────────
-
 def _fmt_num(x: float, digits: int = 3) -> str:
     s = f"{x:.{digits}f}".rstrip("0").rstrip(".")
     return s or "0"

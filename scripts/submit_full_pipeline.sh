@@ -8,7 +8,7 @@
 #
 # Each anchor_pipeline job (GPU, 60 min) then runs:
 #   run_concept + null permutation + transcoder sweep + cluster analysis
-#   (+ PySR if PYSR=1) sequentially.
+#   sequentially.
 #
 # After all of a concept's anchor jobs complete, the coordinator submits one
 # final peak-feature plot job (plot_sweep_peak_features.py) that aggregates
@@ -33,9 +33,6 @@
 #   CLUSTER_TOP_K=100      top-k features for cluster analysis(default: 100)
 #   N_CLUSTERS=6           number of feature clusters         (default: 6)
 #   TEMPLATE=T0            template for per-anchor analyses   (default: T0)
-#   PYSR=0                 set to 1 to run PySR (carry=grid, others=generic; slow)
-#   PYSR_NITER=40          PySR iterations per feature        (default: 40)
-
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -72,9 +69,6 @@ NULL_K="${NULL_K:-50}"
 CLUSTER_TOP_K="${CLUSTER_TOP_K:-100}"
 N_CLUSTERS="${N_CLUSTERS:-6}"
 TEMPLATE="${TEMPLATE:-T0}"
-PYSR="${PYSR:-0}"
-PYSR_NITER="${PYSR_NITER:-40}"
-
 # ── Arg parsing ─────────────────────────────────────────────────────────────
 DRY_RUN=false
 CONCEPTS=()
@@ -113,7 +107,6 @@ echo "Submitting full pipeline for ${#CONCEPTS[@]} concept(s)"
 echo "  GIF_N=${GIF_N}  ANCHOR_K=${ANCHOR_K}  ANCHOR_TIME=${ANCHOR_TIME}"
 echo "  N_PAIRS=${N_PAIRS}  NULL_K=${NULL_K}"
 echo "  CLUSTER_TOP_K=${CLUSTER_TOP_K}  N_CLUSTERS=${N_CLUSTERS}  TEMPLATE=${TEMPLATE}"
-echo "  PYSR=${PYSR}  PYSR_NITER=${PYSR_NITER}"
 $DRY_RUN && echo "  *** DRY RUN — no jobs submitted ***"
 echo "========================================================"
 
@@ -134,9 +127,6 @@ for CONCEPT in "${CONCEPTS[@]}"; do
 
     # ── 2. coordinator: select anchors + submit per-anchor jobs ────────────
     #    Runs after make_gif, reads emergence.npy, submits anchor_pipeline jobs.
-    PYSR_FLAG=""
-    [[ "$PYSR" == "1" ]] && PYSR_FLAG="--pysr"
-
     COORD_JID=$(submit \
         --job-name="coord_${CONCEPT}" \
         --time=00:10:00 \
@@ -151,9 +141,7 @@ for CONCEPT in "${CONCEPTS[@]}"; do
                 --n "$N_PAIRS" \
                 --null_k "$NULL_K" \
                 --cluster_top_k "$CLUSTER_TOP_K" \
-                --n_clusters "$N_CLUSTERS" \
-                --pysr_niterations "$PYSR_NITER" \
-                $PYSR_FLAG)
+                --n_clusters "$N_CLUSTERS")
     echo "  coordinator         → job ${COORD_JID}  (after ${GIF_JID})"
     echo "  anchor_pipeline x${ANCHOR_CANDIDATES} (display top ${ANCHOR_K})  → submitted by coordinator after it runs"
 done

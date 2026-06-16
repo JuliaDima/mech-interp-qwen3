@@ -196,16 +196,11 @@ def _draw_anchor_subplot(ax, layers, norms_raw_i, act_normed_i, title, highlight
     ax2.spines["right"].set_visible(True)
     ax2.spines["right"].set_edgecolor(ps.TEAL)
     ax2.set_ylabel("double-norm", fontsize=7, color=ps.TEAL)
+    ax2.grid(False)
 
     title_kw = dict(fontsize=9, pad=4)
     if highlight:
         title_kw.update(color=ps.RED, fontweight="bold")
-        for spine in ax.spines.values():
-            spine.set_edgecolor(ps.RED)
-            spine.set_linewidth(1.8)
-        for spine in ax2.spines.values():
-            spine.set_edgecolor(ps.RED)
-            spine.set_linewidth(1.8)
     ax.set_title(title, **title_kw)
     return l1, l3
 
@@ -263,6 +258,7 @@ def plot_emergence_per_anchor(concept: str) -> Path | None:
             ax2.spines["right"].set_visible(True)
             ax2.spines["right"].set_edgecolor(ps.TEAL)
             ax2.set_ylabel("double-norm", fontsize=7, color=ps.TEAL)
+            ax2.grid(False)
         else:
             _, idx = slot
             label  = repr(labels[idx]) if idx < len(labels) else str(idx)
@@ -290,6 +286,10 @@ def plot_emergence_per_anchor(concept: str) -> Path | None:
              transform=fig.transFigure)
     fig.text(0.5, 0.938, f"prompt:  {prompt_annotated}  — bracketed tokens are variables",
              ha="center", va="top", fontsize=8, color=ps.NAVY, transform=fig.transFigure)
+
+    for ax in fig.get_axes():
+        for sp in ax.spines.values():
+            sp.set_visible(False)
 
     out = BASE / concept / "emergence_per_anchor.pdf"
     fig.savefig(out, bbox_inches="tight")
@@ -422,6 +422,7 @@ def _draw_feature_projection(ax, results: dict, layers: list[int],
             cb = plt.colorbar(sc, ax=ax, pad=0.02, fraction=0.06)
             cb.set_label("E_dec cos", fontsize=6)
             cb.ax.tick_params(labelsize=5, length=0)
+            cb.outline.set_visible(False)
     else:
         ax.text(0.5, 0.5, "no data", ha="center", va="center",
                 transform=ax.transAxes, fontsize=7)
@@ -447,6 +448,7 @@ def _draw_delta_trajectory(ax, norms_raw_i: np.ndarray, act_normed_i: np.ndarray
     ax2.spines["right"].set_visible(True)
     ax2.spines["right"].set_edgecolor(ps.TEAL)
     ax2.set_ylim(bottom=0)
+    ax2.grid(False)
 
     # Null-excess overlay: fill under the norm curve, capped at how far above
     # null mean + 1 SD the real signal is (same scale as norms_normed).
@@ -507,37 +509,64 @@ def _draw_layer_cosine(ax, deltas: dict[int, torch.Tensor],
         cb = plt.colorbar(im, ax=ax, pad=0.02, fraction=0.06)
         cb.set_label("cos", fontsize=6)
         cb.ax.tick_params(labelsize=5, length=0)
+        cb.outline.set_visible(False)
     ax.set_ylabel("layer", fontsize=7)
     return []
+
+
+_NULL_BAND = "#aec7e8"
+_NULL_LINE = "#4a90d9"
+_GREEN     = "#2ca02c"
+_RED_LINE  = "#d62728"
 
 
 def _draw_null(ax, null: dict | None, layers: list[int], show_legend: bool = False) -> list:
     if not null:
         ax.text(0.5, 0.5, "no null", ha="center", va="center",
                 transform=ax.transAxes, fontsize=7, color=ps.GRAY)
-        ax.set_ylabel("norm", fontsize=7)
+        ax.set_ylabel(r"$\tilde{\rho}_l$", fontsize=7)
         return []
-    nlayers = [int(x) for x in null.get("layers", layers)]
-    real  = np.asarray(null.get("real_norms", []), dtype=float)
-    nulls = np.asarray(null.get("null_norms", []), dtype=float)
+    nlayers = np.asarray([int(x) for x in null.get("layers", layers)], dtype=float)
+    real    = np.asarray(null.get("real_norms", []), dtype=float)
+    nulls   = np.asarray(null.get("null_norms", []), dtype=float)
     if real.size == 0 or nulls.size == 0:
         ax.text(0.5, 0.5, "incomplete", ha="center", va="center",
                 transform=ax.transAxes, fontsize=7)
         return []
-    K    = nulls.shape[0]
-    mean = nulls.mean(axis=0)
-    std  = nulls.std(axis=0)
-    ax.fill_between(nlayers, mean - std, mean + std, color=ps.GRAY, alpha=0.20,
-                    label=f"null mean ± 1 SD  ({K} shuffles)")
-    ax.plot(nlayers, np.percentile(nulls, 95, axis=0), color=ps.GRAY, lw=0.9, ls=":",
-            label="null 95th percentile")
-    ax.plot(nlayers, mean, color=ps.GRAY, lw=1.1)
-    ax.plot(nlayers, real, color=ps.VIOLET, lw=1.8,
-            label=r"real $\|\delta_i\|/\max\|\delta_i\|$")
-    ax.set_ylim(bottom=0)
-    ax.set_ylabel("norm", fontsize=7)
+    mean    = nulls.mean(axis=0)
+    std     = nulls.std(axis=0)
+    null_hi = mean + std
+    null_lo = np.maximum(mean - std, 0.0)
+
+    ax.fill_between(nlayers, null_lo, null_hi, color=_NULL_BAND, alpha=0.65, zorder=1)
+    ax.plot(nlayers, mean, color=_NULL_LINE, lw=0.9, ls="--", zorder=2)
+
+    from matplotlib.collections import LineCollection
+    pts  = np.array([nlayers, real]).T.reshape(-1, 1, 2)
+    segs = np.concatenate([pts[:-1], pts[1:]], axis=1)
+    seg_colors = [
+        _GREEN if (real[i] > null_hi[i] or real[i + 1] > null_hi[i + 1])
+        else _RED_LINE
+        for i in range(len(nlayers) - 1)
+    ]
+    lc = LineCollection(segs, colors=seg_colors, linewidths=1.8, zorder=4)
+    ax.add_collection(lc)
+    ax.autoscale_view()
+
+    ymax = max(real.max(), null_hi.max()) * 1.08
+    ax.set_ylim(0, ymax)
+    ax.set_ylabel(r"$\tilde{\rho}_l$", fontsize=7)
+    ax.grid(False)
+
     if show_legend:
-        ax.legend(fontsize=5, loc="upper right", framealpha=0.7)
+        import matplotlib.patches as mpatches
+        handles = [
+            mpatches.Patch(color=_NULL_BAND, alpha=0.65, label=r"null $\mu\pm1\sigma$"),
+            plt.Line2D([0], [0], color=_NULL_LINE, lw=0.9, ls="--", label="null mean"),
+            plt.Line2D([0], [0], color=_GREEN,    lw=1.8, label=r"above null $+1\sigma$"),
+            plt.Line2D([0], [0], color=_RED_LINE, lw=1.8, label=r"below null $+1\sigma$"),
+        ]
+        ax.legend(handles=handles, fontsize=5, frameon=False, loc="upper right")
     return []
 
 
@@ -567,10 +596,7 @@ def _draw_causal(ax, results: dict, deltas: dict[int, torch.Tensor],
 
 
 def _apply_highlight(all_axes: list) -> None:
-    for ax in all_axes:
-        for spine in ax.spines.values():
-            spine.set_edgecolor(ps.RED)
-            spine.set_linewidth(1.8)
+    pass  # highlight is indicated by column header text colour only
 
 
 def plot_anchor_layer_grid(
@@ -657,7 +683,7 @@ def plot_anchor_layer_grid(
             ax.set_xticks(ticks)
             ax.tick_params(axis="x", labelsize=6, labelbottom=True)
             ax.tick_params(axis="y", labelsize=6, labelleft=True, labelright=False)
-            ax.grid(axis="x", color=ps.GRAY, alpha=0.18, lw=0.5)
+            ax.grid(False)
 
     fig_h    = PANEL_H * N_ROWS
     y1       = 0.995
@@ -710,6 +736,10 @@ def plot_anchor_layer_grid(
                "  ".join(f"pos {e['pos']} '{e['token']}'" for e in anchors))
     fig.text(0.5, y3, y3_text, ha="center", va="top", fontsize=8, color=ps.NAVY,
              transform=fig.transFigure)
+
+    for ax in fig.get_axes():
+        for sp in ax.spines.values():
+            sp.set_visible(False)
 
     if out_path is None:
         out_path = BASE / concept / f"anchor_layer_grid_{template}_top{top_k}.pdf"

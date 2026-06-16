@@ -46,10 +46,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from experiments.concept_localization.analyze import (
-    compute_sharpness,
-    save_edec_features,
-)
+from experiments.concept_localization.analyze import compute_sharpness
 from experiments.concept_localization.causal_analysis import run_causal_analysis
 from experiments.concept_localization.extract_deltas_generic import (
     extract_layer_deltas_generic,
@@ -412,6 +409,8 @@ def _run_single(args, base_subdir: str | None = None) -> None:
 
         # ── 6. Feature projection ─────────────────────────────────────────────
         if not args.skip_features:
+            from experiments.concept_localization.analyze import save_edec_features
+
             log.info("Projecting delta onto transcoder decoder directions (E_dec)…")
             save_edec_features(
                 model, ld.delta,

@@ -48,13 +48,15 @@ source ~/.bashrc
 set -u
 CONDA_ENV="${MIQ_CONDA_ENV:-p28_py311_env}"
 CONDA_ROOT="${MIQ_CONDA_ROOT:-${HOME}/miniforge3}"
-if [ ! -f "${CONDA_ROOT}/etc/profile.d/conda.sh" ]; then
-  echo "conda not found at ${CONDA_ROOT}" >&2
-  echo "Install miniforge3 to ${CONDA_ROOT} first." >&2
+CONDA_ENV_BIN="${CONDA_ROOT}/envs/${CONDA_ENV}/bin"
+if [ ! -d "${CONDA_ENV_BIN}" ]; then
+  echo "conda env not found at ${CONDA_ENV_BIN}" >&2
+  echo "Create it with: conda create -n ${CONDA_ENV} python=3.11 -y" >&2
   exit 2
 fi
-source "${CONDA_ROOT}/etc/profile.d/conda.sh"
-conda activate "${CONDA_ENV}"
+# Prepend the env's bin so python/pip resolve to the right env,
+# even in non-interactive shells where conda activate may not fully work.
+export PATH="${CONDA_ENV_BIN}:${PATH}"
 hash -r 2>/dev/null || true
 
 set -euo pipefail

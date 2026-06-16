@@ -2,10 +2,13 @@ stages:
   - test
   - pages
 
+variables:
+  CONDA_ROOT: "$HOME/miniforge3"
+  CONDA_ENV: "p28_py311_env"
+
 .conda_setup: &conda_setup
-  - unset LD_PRELOAD
-  - source "${HOME}/miniforge3/etc/profile.d/conda.sh"
-  - conda activate p28_py311_env
+  - unset LD_PRELOAD || true
+  - export PATH="${CONDA_ROOT}/envs/${CONDA_ENV}/bin:${PATH}"
   - python --version
 
 unit-test-job:
