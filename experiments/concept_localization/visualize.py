@@ -651,17 +651,19 @@ def plot_feature_heatmap_grid(
     out_path: Path,
     concept: str,
     anchor_label: str,
-    xlabel: str = "ones(a)",
-    ylabel: str = "ones(b)",
+    xlabel: str = "a",
+    ylabel: str = "b",
     ncols: int = 5,
+    cmap: str = "Purples",
 ) -> None:
     """Grid of 2-D heatmaps over swept input digits, one panel per feature.
 
     matrices: (layer, feat_id) → (n_x, n_y) activation array.
     Axes correspond to the swept digit values (e.g. 0–9 for ones digits).
+    Title shows dec and enc cosine similarity when both are available on FeatureMatch.
     """
-    proj_lookup: dict[tuple[int, int], float] = {
-        (m.layer, m.feature_id): m.projection for matches in projections.values() for m in matches
+    match_lookup: dict[tuple[int, int], FeatureMatch] = {
+        (m.layer, m.feature_id): m for matches in projections.values() for m in matches
     }
 
     items = list(matrices.items())
@@ -672,6 +674,8 @@ def plot_feature_heatmap_grid(
     nrows = math.ceil(n / ncols)
     cell = 3.2
     ps.apply()
+    _cmap = plt.get_cmap(cmap).copy()
+    _cmap.set_bad("white")
     fig, axes = plt.subplots(
         nrows,
         ncols,
@@ -679,27 +683,45 @@ def plot_feature_heatmap_grid(
         squeeze=False,
     )
 
+    DIGITS = np.arange(10)
+
     for idx, ((layer, feat_id), mat) in enumerate(items):
         ax = axes[idx // ncols][idx % ncols]
-        proj = proj_lookup.get((layer, feat_id), float("nan"))
+        m = match_lookup.get((layer, feat_id))
         n_x, n_y = mat.shape
 
-        im = ax.imshow(
-            mat.T,
-            origin="lower",
-            aspect="auto",
-            cmap="Blues",
+        masked = np.ma.masked_invalid(mat.T)
+        pcm = ax.pcolormesh(
+            DIGITS[:n_x], DIGITS[:n_y], masked,
+            cmap=_cmap,
             vmin=0,
-            vmax=float(mat.max()) or 1.0,
-            extent=[-0.5, n_x - 0.5, -0.5, n_y - 0.5],
+            vmax=float(np.nanmax(mat)) if not np.all(np.isnan(mat)) else 1.0,
+            shading="nearest",
+            linewidth=0.3,
+            edgecolors="#cccccc",
         )
-        ax.set_title(f"L{layer:02d} F{feat_id:06d}  proj={proj:.2f}", fontsize=8, pad=3)
+
+        # Title: feature label + scores
+        import re as _re
+        key_m = _re.match(r"(\d+)$", str(feat_id))
+        layer_s, fid_s = str(layer), str(feat_id)
+        title = rf"$L^{{{layer_s}}}_{{{fid_s}}}$"
+        if m is not None:
+            dec = m.cos_sim
+            enc = m.enc_cos_sim
+            if enc != 0.0:
+                title += f"\ndec={dec:+.3f}  enc={enc:+.3f}"
+            else:
+                title += f"  cs={dec:+.2f}"
+        ax.set_title(title, fontsize=8, pad=3)
         ax.set_xlabel(xlabel, fontsize=7, labelpad=2)
         ax.set_ylabel(ylabel, fontsize=7, labelpad=2)
         ax.set_xticks(range(n_x))
         ax.set_yticks(range(n_y))
         ax.tick_params(labelsize=5)
-        fig.colorbar(im, ax=ax, shrink=0.8, pad=0.02)
+        for sp in ax.spines.values():
+            sp.set_visible(False)
+        fig.colorbar(pcm, ax=ax, shrink=0.8, pad=0.02)
 
     for idx in range(n, nrows * ncols):
         axes[idx // ncols][idx % ncols].set_visible(False)
@@ -723,8 +745,8 @@ def plot_edec_mean_activations(
 ) -> None:
     """Grid of mean activations (pos vs neg) for features in edec_features.json.
 
-    Reads mean_pos/mean_neg/std_pos/std_neg directly from the JSON rows (embedded
-    by save_edec_features when pairs are provided). Raises if activation stats are absent.
+    Reads mean_pos/mean_neg/std_pos/std_neg directly from the JSON rows. 
+    Raises if activation stats are absent.
     """
     score_mode = edec_data.get("config", {}).get("score_mode", "dec+enc")
     rows = edec_data.get(direction, [])

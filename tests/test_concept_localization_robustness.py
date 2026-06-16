@@ -24,7 +24,6 @@ from experiments.concept_localization.extract_deltas_generic import (
     resolve_anchor_token,
 )
 from mechinterp_qwen3.utils.token_utils import tokenize_qwen_input
-from scripts.sweeps.sweep_utils import cluster_top_features, score_and_rank
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Shared helpers
@@ -391,79 +390,7 @@ class TestDeltaAggregation:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 6. Carry anchor factory — position correctness
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 7. score_and_rank: ordering, masks, uniqueness
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-class TestScoreAndRank:
-    def test_returns_exactly_top_k_features(self):
-        rng = np.random.default_rng(0)
-        acts = rng.random((100, 256)).astype(np.float32)
-        pos_mask = np.array([True] * 50 + [False] * 50)
-        assert len(score_and_rank(acts, pos_mask, top_k=20)) == 20
-
-    def test_sorted_by_jaccard_times_abs_score_descending(self):
-        rng = np.random.default_rng(1)
-        acts = rng.random((60, 100)).astype(np.float32)
-        pos_mask = np.array([True] * 30 + [False] * 30)
-        ranked = score_and_rank(acts, pos_mask, top_k=50)
-        combined = [abs(s) * j for _, s, j in ranked]
-        assert combined == sorted(combined, reverse=True)
-
-    def test_positive_score_feature_uses_pos_jaccard(self):
-        # Feature 0 fires on all pos only → score > 0, jaccard = intersection(active, pos) / union
-        n = 40
-        acts = np.zeros((n, 2), dtype=np.float32)
-        acts[: n // 2, 0] = 1.0  # feature 0: fires on all pos
-        acts[n // 2 :, 1] = 1.0  # feature 1: fires on all neg
-        pos_mask = np.array([True] * (n // 2) + [False] * (n // 2))
-
-        ranked = score_and_rank(acts, pos_mask, top_k=2)
-        feat_by_id = {f: (s, j) for f, s, j in ranked}
-
-        # Feature 0: score > 0, jaccard with pos = 1.0
-        assert feat_by_id[0][0] > 0
-        assert abs(feat_by_id[0][1] - 1.0) < 1e-5
-
-    def test_negative_score_feature_uses_neg_jaccard(self):
-        # Feature 0 fires on all neg only → score < 0, jaccard uses neg mask
-        n = 40
-        acts = np.zeros((n, 1), dtype=np.float32)
-        acts[n // 2 :, 0] = 1.0
-        pos_mask = np.array([True] * (n // 2) + [False] * (n // 2))
-
-        ranked = score_and_rank(acts, pos_mask, top_k=1)
-        _, score, jaccard = ranked[0]
-        assert score < 0
-        assert abs(jaccard - 1.0) < 1e-5  # fires on all neg examples
-
-    def test_feature_ids_are_unique(self):
-        rng = np.random.default_rng(2)
-        acts = rng.random((50, 128)).astype(np.float32)
-        pos_mask = np.array([True] * 25 + [False] * 25)
-        feat_ids = [f for f, _, _ in score_and_rank(acts, pos_mask, top_k=50)]
-        assert len(feat_ids) == len(set(feat_ids)), "Duplicate feature IDs in ranking"
-
-    def test_jaccard_values_in_unit_interval(self):
-        rng = np.random.default_rng(3)
-        acts = (rng.random((60, 80)) > 0.5).astype(np.float32)
-        pos_mask = np.array([True] * 30 + [False] * 30)
-        for _, _, jac in score_and_rank(acts, pos_mask, top_k=80):
-            assert 0.0 <= jac <= 1.0 + 1e-6
-
-    def test_top_k_capped_at_feature_count(self):
-        acts = np.ones((10, 5), dtype=np.float32)
-        pos_mask = np.array([True] * 5 + [False] * 5)
-        assert len(score_and_rank(acts, pos_mask, top_k=1000)) == 5
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 9. collect_layer_residuals: shapes, zero-fill, anchor offset
+# 6. collect_layer_residuals: shapes, zero-fill, anchor offset
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -754,29 +681,3 @@ class TestDatasetGeneration:
 
         for p in generate_gcd_pairs(n_per_template=5):
             assert {"a_pos", "a_neg"}.issubset(p.meta.keys())
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 14. cluster_top_features: smoke tests
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-class TestClusterTopFeatures:
-    def test_output_types_and_cluster_id_range(self):
-        rng = np.random.default_rng(0)
-        acts = rng.random((100, 200)).astype(np.float32)
-        pos_mask = np.array([True] * 50 + [False] * 50)
-        result = cluster_top_features(acts, pos_mask, top_frac=0.15, n_clusters=5)
-        assert len(result) > 0
-        for feat_id, score, cluster_id in result:
-            assert isinstance(feat_id, int)
-            assert isinstance(score, float)
-            assert 0 <= cluster_id < 5
-
-    def test_sorted_by_cluster_id_first(self):
-        rng = np.random.default_rng(1)
-        acts = rng.random((80, 100)).astype(np.float32)
-        pos_mask = np.array([True] * 40 + [False] * 40)
-        result = cluster_top_features(acts, pos_mask, top_frac=0.2, n_clusters=3)
-        cluster_ids = [c for _, _, c in result]
-        assert cluster_ids == sorted(cluster_ids)

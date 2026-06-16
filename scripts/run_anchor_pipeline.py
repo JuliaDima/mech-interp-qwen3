@@ -1,15 +1,10 @@
-"""Full per-anchor pipeline: run_concept → null → sweep → cluster analysis → (PySR).
+"""Full per-anchor pipeline: run_concept → null → residual cache.
 
 Stages
 ------
 Stage 1  run_concept        — delta extraction, causal analysis, cross_layer_sim, feature projection.
 Stage 2  null permutation   — within-class permutation test, reusing deltas.pt.
-Stage 3  sweep              — Jaccard×|score| transcoder feature ranking at peak layers.
-Stage 4  cluster analysis   — cosine clustering + PCA/Fourier plots per cluster.
-Stage 5  PySR (--pysr)      — symbolic regression per cluster + top-k E_dec features (carry=grid, others=generic).
-
-The cross-anchor peak-feature plot (plot_sweep_peak_features.py) is submitted once
-by the coordinator after all anchor jobs finish, since it aggregates every anchor.
+Stage 3  residual cache     — raw residual streams for the dataset at all layers.
 
 Output directory layout
 -----------------------
@@ -17,27 +12,18 @@ runs/concept_localization/{concept}/anchor_rank{R}_pos{P}/
     results.json, deltas.pt, anchor_layer_summary_T0.png
     null/null_permutation.{json,png}
     sweep/
-        sweep_ranked.json, sweep_activations.npz, sweep_examples.pkl
-        top_features_peak_layers.png
-        cluster_analysis_T0/
-            cluster_features.json
-            cluster_NN_{pca,top3}.png
-            cosine_similarity.png
-            pysr_*/  (if --pysr)
+        sweep_residuals.npz, sweep_dataset_examples.pkl
 
 Usage
 -----
-    python scripts/run_anchor_pipeline.py \\
+    python scripts/run_anchor_pipeline.py \
         --concept carry --anchor_pos 7 --anchor_rank 1
 
-    python scripts/run_anchor_pipeline.py \\
-        --concept carry --anchor_pos 7 --anchor_rank 1 --pysr
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import subprocess
 import sys
@@ -78,24 +64,13 @@ def main() -> None:
                         help="Pairs per template for run_concept and null")
     parser.add_argument("--top_k", type=int, default=15,
                         help="Top-k features for directional projection in run_concept")
-    parser.add_argument("--sweep_top_k", type=int, default=200,
-                        help="Top-k features per layer for the transcoder sweep")
     parser.add_argument("--causal_pairs", type=int, default=50,
                         help="Max pairs for causal patching analysis")
     parser.add_argument("--null_k", type=int, default=20,
                         help="Number of null permutations")
-    parser.add_argument("--cluster_top_k", type=int, default=100,
-                        help="Top-k features fed into cluster analysis")
-    parser.add_argument("--n_clusters", type=int, default=6,
-                        help="Number of feature clusters")
-    parser.add_argument("--pysr", action="store_true",
-                        help="Run PySR per cluster + top-k E_dec features (carry=grid, others=generic; slow)")
-    parser.add_argument("--pysr_niterations", type=int, default=40,
-                        help="PySR iterations per feature")
-    parser.add_argument("--edec_top_k", type=int, default=15,
-                        help="Top-k E_dec-aligned features for the extra PySR pass")
-    parser.add_argument("--r2_threshold", type=float, default=0.5,
-                        help="Only plot PySR fits whose R² exceeds this")
+    parser.add_argument("--feature_score_modes", nargs="+", default=["dec+enc", "dec"],
+                        choices=["dec", "enc", "dec+enc"],
+                        help="Edec score modes for delta_feature_projections (each gets its own subdir)")
     args = parser.parse_args()
 
     out_dir = (
@@ -123,10 +98,11 @@ def main() -> None:
         "--causal",
         "--causal_pairs", str(args.causal_pairs),
         "--top_k", str(args.top_k),
+        "--skip_features",
         "--out_dir", str(out_dir),
     ])
 
-    # ── Stage 1b: edec activation plot ───────────────────────────────────
+    # ── Stage 1b: edec activation bar plot (quick, no activity filter) ───
     log.info("=== Stage 1b: edec activation plot ===")
     try:
         _run([
@@ -137,6 +113,20 @@ def main() -> None:
         ])
     except subprocess.CalledProcessError as e:
         log.warning("edec activation plot failed (non-fatal): %s", e)
+
+    # ── Stage 1c: activity-filtered delta projections + grid plots ────────
+    log.info("=== Stage 1c: delta_feature_projections ===")
+    try:
+        _run([
+            sys.executable, "-m",
+            "experiments.concept_localization.delta_feature_projections",
+            "--anchor_dir", str(out_dir),
+            "--concept", args.concept,
+            "--top_k", str(args.top_k),
+            "--score_mode", *args.feature_score_modes,
+        ])
+    except subprocess.CalledProcessError as e:
+        log.warning("delta_feature_projections failed (non-fatal): %s", e)
 
     # ── Stage 2: null permutation (reuse deltas.pt from stage 1) ─────────
     log.info("=== Stage 2: null permutation ===")
@@ -162,36 +152,10 @@ def main() -> None:
         "--out", str(out_dir / f"anchor_layer_summary_{args.template}.png"),
     ])
 
-    # ── Stage 3: transcoder sweep at peak ±2 layers ───────────────────────
-    log.info("=== Stage 3: transcoder sweep ===")
-    from experiments.concept_localization.peak_layers import select_peak_layers
-    try:
-        pr = select_peak_layers(out_dir, template=args.template)
-    except FileNotFoundError as e:
-        # null_permutation.json or deltas.pt missing — stage 2 must have failed
-        log.error("Required file missing for peak layer selection: %s", e)
-        raise
-    if pr.valid and pr.peak_layers:
-        peak_layers_raw = pr.peak_layers
-        log.info("Peak layers (combined score): %s  scores=%s  stable=%s",
-                 peak_layers_raw, [f"{s:.3f}" for s in pr.peak_scores], pr.stable)
-    else:
-        # Null anchor (real signal never exceeds null+1SD) or no causal window peak.
-        # Fall back to trajectory argmax so the sweep still runs and produces output.
-        results = json.loads((out_dir / "results.json").read_text())
-        peak_layers_raw = [results["sharpness"]["peak_layer"]]
-        log.warning(
-            "select_peak_layers: valid=%s peak_layers=%s — null anchor or no causal peak; "
-            "falling back to trajectory argmax L%d",
-            pr.valid, pr.peak_layers, peak_layers_raw[0],
-        )
-
-    layer_set: set[int] = set()
-    for pl in peak_layers_raw:
-        layer_set.update(range(max(0, pl - 2), min(_N_LAYERS, pl + 3)))
-    layers = sorted(layer_set)
-    layers_str = ",".join(str(l) for l in layers)
-    log.info("Peak layers=%s → sweeping layers %s", peak_layers_raw, layers_str)
+    # ── Stage 3: residual cache at all layers ─────────────────────────────
+    log.info("=== Stage 3: all-layer residual cache ===")
+    layers_str = ",".join(str(l) for l in range(_N_LAYERS))
+    log.info("Caching residuals for all layers: %s", layers_str)
 
     sweep_dir = out_dir / "sweep"
     sweep_dir.mkdir(parents=True, exist_ok=True)
@@ -201,65 +165,12 @@ def main() -> None:
         "--concept", args.concept,
         "--layers", layers_str,
         "--anchor", str(args.anchor_pos),
-        "--top_k", str(args.sweep_top_k),
         "--out_dir", str(sweep_dir),
     ]
     # Per-anchor sweeps must use one template because anchor positions are
     # template-specific. Multi-template comparison plots live at the concept root.
     sweep_cmd += ["--template", args.template]
     _run(sweep_cmd)
-
-    # ── Stage 4: cluster analysis ─────────────────────────────────────────
-    log.info("=== Stage 4: cluster analysis ===")
-    _run([
-        sys.executable,
-        str(_REPO_ROOT / "scripts" / "sweeps" / "analyze_sweep_clusters.py"),
-        "--sweep_dir", str(sweep_dir),
-        "--top_k", str(args.cluster_top_k),
-        "--n_clusters", str(args.n_clusters),
-        "--template", args.template,
-    ])
-
-    # NOTE: the cross-anchor peak-feature plot (plot_sweep_peak_features.py)
-    # globs every anchor_rank*_pos* dir at once, so it is submitted once by the
-    # coordinator (select_and_submit_anchors.py) after all anchor jobs finish,
-    # rather than redundantly per anchor here.
-
-    # ── Stage 5: PySR per cluster + top-k E_dec features (optional) ──────
-    if args.pysr:
-        log.info("=== Stage 5: PySR ===")
-        cluster_json = sweep_dir / f"cluster_analysis_{args.template}" / "cluster_features.json"
-        if not cluster_json.exists():
-            log.warning("cluster_features.json not found at %s — skipping PySR", cluster_json)
-        else:
-            try:
-                _run([
-                    sys.executable,
-                    str(_REPO_ROOT / "scripts" / "sweeps" / "fit_pysr_sweep.py"),
-                    "--sweep_dir", str(sweep_dir),
-                    "--cluster_features_json", str(cluster_json),
-                    "--out_dir", str(cluster_json.parent),
-                    "--niterations", str(args.pysr_niterations),
-                    "--r2_threshold", str(args.r2_threshold),
-                ])
-            except subprocess.CalledProcessError as e:
-                log.warning("PySR (cluster) stage failed (non-fatal): %s", e)
-
-        # ── Stage 5b: PySR on top-k E_dec-aligned features ───────────────
-        log.info("=== Stage 5b: PySR on top-%d E_dec features ===", args.edec_top_k)
-        try:
-            _run([
-                sys.executable,
-                str(_REPO_ROOT / "scripts" / "sweeps" / "pysr_top_edec_features.py"),
-                "--anchor_dir", str(out_dir),
-                "--concept", args.concept,
-                "--top_k", str(args.edec_top_k),
-                "--niterations", str(args.pysr_niterations),
-                "--r2_threshold", str(args.r2_threshold),
-                "--template", args.template,
-            ])
-        except subprocess.CalledProcessError as e:
-            log.warning("PySR (E_dec) stage failed (non-fatal): %s", e)
 
     log.info("All stages complete. Results in %s", out_dir)
 

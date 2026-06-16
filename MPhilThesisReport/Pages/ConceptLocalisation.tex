@@ -18,11 +18,13 @@ zou2025representationengineeringtopdownapproach, meng2023locatingeditingfactuala
 
 Each concept is represented by a set of matched prompt pairs
 \((x_i^+, x_i^-)\). The positive prompt contains the target property and the
-negative prompt differs in the smallest controlled way that removes it. The templates of prompt pairs 
+negative prompt differs in the smallest controlled way that removes it. Prompt pairs
 are matched to avoid two prompts differing in many incidental details, in which case the mean residual
 stream difference would mostly recover those nuisance changes instead of the
 concept. The contrastive design attempts to hold syntax, length, operand scale, and
 answer format fixed while changing the scientific property of interest.
+For each concept the prompt template is chosen so that the raw model achieves at
+least 10\% accuracy, ensuring the model engages meaningfully with the task.
 
 For the carry dataset, a positive example is an addition problem whose units digits
 cross a carry boundary, while the negative example is chosen so that no carry is
@@ -34,76 +36,86 @@ required. For example, a pair may contrast
 where the exact operands are sampled from the dataset generator. For greatest common
 divisor and residue-class datasets, the positive and negative examples are instead
 grouped by modular or divisor-related labels. These datasets are useful because the
-concept is not tied to a single token string: it is a relation between numbers.
+concept is a relation between numbers not tied to a single prompt token string.
 
-The experiments use several surface templates. Template \texttt{T0} is the compact
-arithmetic form, such as \texttt{calc: a+b=}. Other templates use more verbal or
-question-like phrasing. Since anchor positions are not necessarily aligned across
-templates, per-anchor analyses are run within a single template. Cross-template
-plots are used only for comparisons at semantically matched anchors, such as the
-position corresponding to an operand digit. This avoids mixing residual-stream
-vectors from positions that do not play the same computational role.
+The three concepts and their prompt templates are summarised in
+Table~\ref{tab:concept_pairs}.
 
-\begin{table}[t]
+\begin{table}[ht]
 \centering
-\begin{tabular}{lll}
+\setlength{\tabcolsep}{4pt}
+\footnotesize
+\begin{tabular}{@{}l l l l r r r@{}}
 \toprule
-Concept & Positive contrast & Controlled negative contrast \\
+Concept & Template
+        & Positive
+        & Negative
+        & $N$
+        & Acc.
+        & $\bar{p}$ \\
 \midrule
-Carry & units digits require a carry & matched addition without carry \\
-Residue class & target congruence relation holds & different residue class \\
-GCD & target divisor relation holds & different gcd/divisor offset \\
+Carry
+  & \texttt{\scriptsize what is \{a\}+\{b\}? Answer:}
+  & $a_0{+}b_0\!\geq\!10$
+  & $a_0{+}b_0\!<\!10$
+  & 99 & 100\% & 0.92 \\[3pt]
+GCD
+  & \texttt{\scriptsize the gcd of \{a\} and 7 is:}
+  & $\gcd(a,7)=7$
+  & $\gcd(a,7)=1$
+  & 100 & 86\% & 0.50 \\[3pt]
+Res.\ class
+  & \texttt{\scriptsize calc: \{a\}\%7=}
+  & $a \equiv 1 \pmod{7}$
+  & $a \not\equiv 1 \pmod{7}$
+  & 100 & 12\% & 0.12 \\
 \bottomrule
 \end{tabular}
-\caption{Examples of the contrastive structure used in the localisation pipeline.
-The actual datasets contain many sampled pairs per template; the table records the
-property that changes within a pair.}
+\caption{Contrastive pair structure for the three concepts.
+  Operands are substituted at \texttt{\{a\}}/\texttt{\{b\}}.
+  $N$ is the number of contrastive pairs; each pair contributes one positive
+  and one negative prompt, evaluated independently ($2N$ prompts total).
+  Acc.\ is the fraction of prompts where the model's greedy next-token prediction
+  matches the correct answer string.
+  $\bar{p}$ is the mean softmax probability assigned to the correct first answer token.}
 \label{tab:concept_pairs}
 \end{table}
 
-\textit{Transcoder sparsity.}
+% \textit{Transcoder sparsity.}
 
-\begin{figure}[ht!]
-  \centering
-  \includegraphics[width=0.92\textwidth]{../runs/addition/sparsity_per_layer_T0.png}
-  \caption{Mean active transcoder features per token position for carry and 
-  no-carry prompts under template \texttt{T0}. 
-  Dashed red lines mark the carry-feature layers used in the addition diagnostics.}
-  \label{fig:carry-sparsity-per-layer}
-\end{figure}
 
-\begin{table}[ht!]
-  \centering
-  \small
-  \begin{tabular}{@{}rrrrr@{}}
-    \toprule
-    Layer & Mean active/pos & Max active/pos & Active total & Fraction active \\
-    \midrule
-    13 & 41.3 & 154 & 537 & 0.0003 \\
-    14 & 260.3 & 3006 & 3384 & 0.0016 \\
-    16 & 2291.5 & 29409 & 29789 & 0.0140 \\
-    21 & 139.5 & 1239 & 1814 & 0.0009 \\
-    \bottomrule
-  \end{tabular}
-  \caption{Single-prompt active-feature counts for \texttt{calc: 209+531=}.}
-  \label{tab:carry-active-feature-counts}
-\end{table}
+% \begin{table}[ht!]
+%   \centering
+%   \small
+%   \begin{tabular}{@{}rrrrr@{}}
+%     \toprule
+%     Layer & Mean active/pos & Max active/pos & Active total & Fraction active \\
+%     \midrule
+%     13 & 41.3 & 154 & 537 & 0.0003 \\
+%     14 & 260.3 & 3006 & 3384 & 0.0016 \\
+%     16 & 2291.5 & 29409 & 29789 & 0.0140 \\
+%     21 & 139.5 & 1239 & 1814 & 0.0009 \\
+%     \bottomrule
+%   \end{tabular}
+%   \caption{Single-prompt active-feature counts for \texttt{calc: 209+531=}.}
+%   \label{tab:carry-active-feature-counts}
+% \end{table}
 
-\begin{table}[ht!]
-  \centering
-  \small
-  \begin{tabular}{@{}lrrrr@{}}
-    \toprule
-    Condition & Accuracy & $P(\mathrm{correct})$ & Pos. acc. & Neg. acc. \\
-    \midrule
-    Raw model & 0.03 & 0.0539 & 0.00 & 0.06 \\
-    Full transcoder & 0.31 & 0.1891 & 0.32 & 0.30 \\
-    Bias+skip only & 0.15 & 0.0994 & 0.16 & 0.14 \\
-    \bottomrule
-  \end{tabular}
-  \caption{Bias/skip diagnostic on the addition carry set at layers 13, 14, 16, and 21, with 50 examples per class.}
-  \label{tab:carry-bias-skip-diagnostic}
-\end{table}
+% \begin{table}[ht!]
+%   \centering
+%   \small
+%   \begin{tabular}{@{}lrrrr@{}}
+%     \toprule
+%     Condition & Accuracy & $P(\mathrm{correct})$ & Pos. acc. & Neg. acc. \\
+%     \midrule
+%     Raw model & 0.03 & 0.0539 & 0.00 & 0.06 \\
+%     Full transcoder & 0.31 & 0.1891 & 0.32 & 0.30 \\
+%     Bias+skip only & 0.15 & 0.0994 & 0.16 & 0.14 \\
+%     \bottomrule
+%   \end{tabular}
+%   \caption{Bias/skip diagnostic on the addition carry set at layers 13, 14, 16, and 21, with 50 examples per class.}
+%   \label{tab:carry-bias-skip-diagnostic}
+% \end{table}
 
 \section{Layer-Wise Concept Deltas}
 \label{sec:concept_delta}
@@ -130,6 +142,18 @@ Equivalently, if \(\Delta h_{i,l}=h_{l,t^*}(x_i^+)-h_{l,t^*}(x_i^-)\), then
 not a single-example patch vector. It is an average direction over a distribution of
 matched contrasts.
 
+The trajectory $(\delta_l)_{l=0}^{L-1}$ traces how the concept representation
+emerges as the model processes the prompt. At the embedding layer, $\delta_0$
+reflects the direct difference in token embeddings at the anchor position; for
+prompts that differ only in concept-bearing tokens far from the anchor, this is
+often near zero. As the network accumulates contributions from successive attention
+and MLP blocks, $\delta_l$ grows and rotates until it reaches a maximum at some
+depth and then either stabilises or decays as the representation is transformed for
+downstream prediction. Figure~\ref{fig:anchor_layer_grid} shows this trajectory
+for the top-ranked carry anchors: the double-normalised norm row makes visible which
+positions acquire a concept signal first and how that signal evolves through the
+network.
+
 Under the linear representation hypothesis~\citep{park2023linear}, \(\delta_l\)
 approximates an axis along which the concept is encoded at depth \(l\), provided
 that the contrast is well controlled and the concept is approximately linearly
@@ -138,7 +162,7 @@ representation, not as proof that the model uses a single one-dimensional variab
 Several metrics are computed from \(\delta_l\) to test whether this summary is
 geometrically stable, feature-aligned, and causally relevant.
 
-\section{Delta Metrics and Anchor Selection}
+\section{Anchor Selection}
 \label{sec:delta_metrics}
 
 The most direct statistic is the norm trajectory
@@ -172,7 +196,8 @@ these experiments it is computed as a peak-to-average statistic,
 \label{eq:sharpness}
 \end{equation}
 High sharpness indicates that the concept appears in a narrow processing window.
-Low sharpness indicates either diffuse representation or weak separation. Anchors
+Low sharpness, however, indicates either diffuse representation, weak separation, or consistent separation
+from early to late layers. Anchors
 are selected by combining peak norm, sharpness, and downstream causal scores. This
 prevents the analysis from selecting an anchor merely because it has a large but
 uninformative residual-stream scale.
@@ -186,10 +211,62 @@ C_{l,m}
        {\lVert\delta_l\rVert_2\,\lVert\delta_m\rVert_2 + \varepsilon}.
 \label{eq:layer_cosine}
 \end{equation}
-Block structure in this heatmap indicates a processing phase in which the same
-concept direction persists. Rapid sign changes or isolated high-norm layers suggest
-that the model may be transforming the representation rather than maintaining a
-single stable code.
+Three qualitatively distinct patterns arise in practice and hold distinct
+interpretations. A \emph{uniform high-similarity block} ($C_{l,m}\approx 1$ for all
+$l,m$) means the concept direction is geometrically stable throughout the entire
+network at this anchor since the same axis is maintained across all processing stages.
+A \emph{multi-block structure} (high cosine within each of two contiguous layer
+ranges but low or negative between them) means the concept direction undergoes a
+sharp rotation at some transition layer $l^*$. The position performs two distinct
+computations in sequence, with the late-layer direction occupying a different
+subspace from the early-layer one. When the off-diagonal values are near zero the
+two subspaces are orthogonal, indicating unrelated sequential computations; when the
+off-diagonal values are negative the late-layer direction approximately negates the
+early-layer one, a signature of sign-inverting processing at $l^*$. A \emph{diffuse
+diagonal} (gradual decay of $C_{l,m}$ as $|l-m|$ increases without a sharp block
+boundary) indicates that the concept direction rotates continuously across layers,
+with no concentrated processing stage. These three patterns are complementary to the
+norm trajectory: a uniform block may have a smooth norm curve despite encoding the
+concept at every layer, while a two-block structure typically shows a norm transition
+near $l^*$. Figure~\ref{fig:cosim_patterns} illustrates each pattern with a concrete
+example.
+
+\citet{panickssery2024steeringllama2contrastive} report inter-layer cosine similarity
+for steering vectors extracted from contrastive pairs in Llama~2, finding that
+similarity decays smoothly with layer distance and that the rate of decay is slower
+in the latter half of the model. They interpret this as evidence of concept-direction
+convergence: once the relevant high-level information has been extracted, the
+direction stabilises and changes more slowly. The heatmaps they show correspond to
+what we term the diffuse diagonal regime. The residue class pattern in
+Figure~\ref{fig:cosim_patterns}(c) is of the same character: cosine similarity decays
+smoothly away from the diagonal with no sharp block boundary, and the concept
+direction rotates continuously without converging to a stable axis. Residue class
+partitions integers into seven equidistant classes, a multi-way distinction with
+inherently more degrees of freedom that does not reduce to a single stable binary
+direction. The uniform block and two-block patterns we observe for carry and GCD are
+not discussed in that work, reflecting that arithmetic concepts with sharper
+decision boundaries can produce more structured representational trajectories than
+the alignment behaviours they study.
+
+\begin{figure}[ht!]
+  \centering
+  \includegraphics[width=\textwidth]{../runs/concept_localization/cosim_patterns_abc.pdf}
+  \caption{Top row: normalised trajectories $\tilde{D}_l^{\mathrm{act}}$
+  (solid, \textcolor{green!60!black}{green} where above null~$+1\sigma$,
+  \textcolor{red}{red} otherwise) with the permutation null mean~$\pm\,1\,\text{SD}$
+  (shaded band, dashed mean),  Section~\ref{sec:null_permutation}.
+  Bottom row: inter-layer cosine similarity $C_{l,l'}$ for the same three concepts.
+  \textbf{(a)} Carry: the norm exceeds the null band across much of the network and
+  the direction is near-uniformly stable, meaning the same discriminative axis is
+  maintained from early to late layers.
+  \textbf{(b)} GCD: the null exceedance is concentrated around layers 5--9, which
+  coincides precisely with the block boundary in $C_{l,l'}$; the concept direction
+  rotates at the same depth where discriminative signal rises steeply.
+  \textbf{(c)} Residue class: the norm remains within the null band throughout, and
+  $C_{l,l'}$ shows only a diffuse diagonal with no block structure, indicating the
+  absence of a sharply rotating concept direction.}
+  \label{fig:cosim_patterns}
+\end{figure}
 
 Because the residual stream accumulates contributions from every preceding layer,
 the raw norm $D_l$ carries a monotone growth bias: later layers tend to have larger
@@ -239,6 +316,34 @@ analysis, since high non-monotonicity indicates that concept-specific computatio
 concentrated in a narrow depth window, without being diffusely distributed across
 the network.
 
+\subsection{Null Permutation Baseline}
+\label{sec:null_permutation}
+
+A contrastive pipeline can produce apparent directions even when labels are
+unrelated to the concept. The null test estimates this background level by permuting
+positive and negative labels within the same template and recomputing the delta
+metrics. Let \(\delta_l^{\pi}\) be the delta obtained under permutation \(\pi\). The
+null distribution for a statistic \(q_l\), such as \(\lVert\delta_l\rVert\) or a
+causal score, is
+\begin{equation}
+\left\{q_l(\delta^{\pi}) : \pi=1,\ldots,P\right\}.
+\label{eq:null_distribution}
+\end{equation}
+The observed statistic is compared with the null mean and quantiles. A layer whose
+observed score is well outside the null range is less likely to reflect generic
+prompt variability. The null is computed per template so that template-specific
+position structure is not mixed into the baseline.
+
+A conceptually important point is that a non-discriminatory anchor --- one whose
+observed statistic falls within the null band at every layer --- does not imply that
+no concept-relevant computation occurs at that position. In arithmetic tasks the
+model internally computes intermediate quantities (digit sums, carry margins,
+divisibility conditions) that may be prerequisites for the final answer without
+separating concept-positive from concept-negative examples in a globally consistent
+direction at the tested position. The null permutation test identifies positions
+where the concept is represented \emph{discriminatively} across matched pairs; it
+does not rule out conceptually relevant computation at positions below the null.
+
 \section{Feature-Space Interpretation}
 \label{sec:feature_projection}
 
@@ -261,6 +366,36 @@ The decoder cosine score is
 A high positive value means that when the feature writes to the residual stream, it
 writes in approximately the same direction as the contrastive concept delta. A high
 negative value means that the feature writes in the opposite direction.
+
+Analogously, the encoder direction $w_{l,f}^{\mathrm{enc}}$ is the direction in
+residual-stream space to which feature $f$'s detector is sensitive (row $f$ of
+$W_l^{\mathrm{enc}} \in \mathbb{R}^{d \times F_l}$). The encoder cosine score is
+\begin{equation}
+\operatorname{cos}_{l,f}^{\mathrm{enc}}
+=
+\frac{w_{l,f}^{\mathrm{enc}} \cdot \delta_l}
+     {\lVert w_{l,f}^{\mathrm{enc}}\rVert_2\,\lVert\delta_l\rVert_2 + \varepsilon}.
+\label{eq:encoder_cosine}
+\end{equation}
+A high value here means the feature is tuned to respond to inputs aligned with the
+concept direction, independent of how much it contributes to the output. In practical
+terms, encoder directions are the directions used to detect feature presence, while
+decoder directions are the directions used to write that feature back into the residual
+stream. The combined score
+\begin{equation}
+\sigma_{l,f}
+=
+\operatorname{cos}_{l,f}^{\mathrm{dec}}
++
+\operatorname{cos}_{l,f}^{\mathrm{enc}}
+\label{eq:combined_cos}
+\end{equation}
+requires alignment through both the input sensitivity and the output contribution.
+Features that score highly on both components are identified as concept-encoding
+candidates and ranked by $\sigma_{l,f}$. Features with zero activation on all
+dataset examples are excluded after the concept sweep regardless of their geometric
+score, since they cannot causally contribute to the concept computation.
+
 For a selected feature, the activation grid is formed by averaging feature activations
 over arithmetic variables. In the carry case the grid is
 \begin{equation}
@@ -277,26 +412,26 @@ of dataset examples on which a feature is active. Requiring nontrivial activity,
 example at least ten percent of examples, filters out features whose high cosine is
 dominated by one or two isolated cells.
 
-Two overlap metrics are useful when comparing activation grids. The centred cosine
-between two grids \(A\) and \(B\) is
-\begin{equation}
-\operatorname{gridcos}(A,B)
-=
-\frac{\langle A-\bar{A}, B-\bar{B}\rangle}
-       {\lVert A-\bar{A}\rVert_2\,\lVert B-\bar{B}\rVert_2+\varepsilon},
-\label{eq:grid_cosine}
-\end{equation}
-which ignores the mean activation level and measures pattern similarity. A Jaccard
-score is computed after thresholding each grid to its active cells:
-\begin{equation}
-J(A,B)=\frac{|\operatorname{supp}(A)\cap\operatorname{supp}(B)|}
-{|\operatorname{supp}(A)\cup\operatorname{supp}(B)|}.
-\label{eq:jaccard_grid}
-\end{equation}
-Cosine is sensitive to graded shape; Jaccard is sensitive to support overlap. The
-pipeline uses both because a smooth Fourier-like feature and a sharp detector can
-have similar support but different amplitudes, or similar amplitudes but different
-support.
+% Two overlap metrics are useful when comparing activation grids. The centred cosine
+% between two grids \(A\) and \(B\) is
+% \begin{equation}
+% \operatorname{gridcos}(A,B)
+% =
+% \frac{\langle A-\bar{A}, B-\bar{B}\rangle}
+%        {\lVert A-\bar{A}\rVert_2\,\lVert B-\bar{B}\rVert_2+\varepsilon},
+% \label{eq:grid_cosine}
+% \end{equation}
+% which ignores the mean activation level and measures pattern similarity. A Jaccard
+% score is computed after thresholding each grid to its active cells:
+% \begin{equation}
+% J(A,B)=\frac{|\operatorname{supp}(A)\cap\operatorname{supp}(B)|}
+% {|\operatorname{supp}(A)\cup\operatorname{supp}(B)|}.
+% \label{eq:jaccard_grid}
+% \end{equation}
+% Cosine is sensitive to graded shape; Jaccard is sensitive to support overlap. The
+% pipeline uses both because a smooth Fourier-like feature and a sharp detector can
+% have similar support but different amplitudes, or similar amplitudes but different
+% support.
 
 \subsection{Feature-Layer Duality and the Gram Matrix Connection}
 \label{sec:gram_connection}
@@ -482,7 +617,7 @@ requiring many modes is more localised and should be read as a detector rather t
 as a single smooth arithmetic coordinate.
 
 \section{Symbolic Fits to Feature Activations}
-\label{sec:pysr_feature_fits}
+\label{sec:feature_fits}
 
 For selected carry features, symbolic regression is used as a second description of
 the activation grid. The input variables are engineered arithmetic quantities such
@@ -495,7 +630,7 @@ The symbolic fit is evaluated with
 \begin{equation}
 R^2 = 1 - \frac{\sum_{a,b}\left(A_f(a,b)-\hat{A}_f(a,b)\right)^2}
 {\sum_{a,b}\left(A_f(a,b)-\bar{A}_f\right)^2}.
-\label{eq:pysr_r2}
+\label{eq:fits_2}
 \end{equation}
 Low-complexity expressions are preferred. If a feature is a simple carry boundary,
 a short expression involving \(|a+b-10|\) is more informative than a high-complexity
@@ -600,23 +735,82 @@ a high delta norm, but a high delta norm that occurs near a positive causal scor
 This alignment indicates that the representation is both separable and used by the
 model's answer computation.
 
-\subsection{Null Permutation Test}
-\label{sec:null_permutation}
+\section{Peak Layer Selection}
+\label{sec:peak_selection}
 
-A contrastive pipeline can produce apparent directions even when labels are
-unrelated to the concept. The null test estimates this background level by permuting
-positive and negative labels within the same template and recomputing the delta
-metrics. Let \(\delta_l^{\pi}\) be the delta obtained under permutation \(\pi\). The
-null distribution for a statistic \(q_l\), such as \(\lVert\delta_l\rVert\) or a
-causal score, is
+Given the double-normalised norm trajectory, the null permutation baseline, and the
+two causal scores, candidate peak layers are identified by combining four signals.
+Let $e_l = \max(0, D_l^{\mathrm{act}} - \mathrm{null}_l)$ be the null-excess at
+layer $l$. The combined score is
 \begin{equation}
-\left\{q_l(\delta^{\pi}) : \pi=1,\ldots,P\right\}.
-\label{eq:null_distribution}
+S_l
+=
+\tilde{D}_l^{\mathrm{act}}
++
+e_l
++
+S_l^{\mathrm{patch}}
++
+0.25\, S_l^{\mathrm{grad}},
+\label{eq:combined_peak_score}
 \end{equation}
-The observed statistic is compared with the null mean and quantiles. A layer whose
-observed score is well outside the null range is less likely to reflect generic
-prompt variability. The null is computed per template so that template-specific
-position structure is not mixed into the baseline.
+where each component is normalised by its own peak before summation. The
+gradient-dot-delta term is down-weighted because it shares gradient information with
+the norm trajectory and is a first-order approximation to a generally nonlinear
+effect. For anchors whose mean pairwise cosine across layers exceeds $0.5$ ---
+indicating a geometrically stable concept direction with low rotation --- the
+trajectory term $\tilde{D}_l^{\mathrm{act}}$ is excluded from the sum, since a
+stable direction produces a smooth norm trajectory that does not distinguish
+layer-specific processing. In that case only $e_l$, $S_l^{\mathrm{patch}}$, and
+$S_l^{\mathrm{grad}}$ contribute.
+
+Peaks are detected from $S_l$ using a prominence-constrained procedure with
+prominence threshold $0.08$ and minimum inter-peak distance
+$\max(3, \lfloor L/8 \rfloor)$ layers. The top-$k$ peaks by combined score are
+returned as candidate intervention layers for the concept sweep and feature
+modulation experiments.
+
+\section{Feature-Direction Interventions}
+\label{sec:interventions}
+
+Geometric alignment and causal patching motivate direct interventions on identified
+features. Both operations act on the raw MLP output without invoking transcoder
+reconstruction, avoiding accuracy degradation from reconstruction error.
+
+\subsection{Ablation}
+\label{sec:ablation}
+
+Ablation removes a feature's contribution from the real MLP output. For feature $f$
+with decoder direction $w_{l,f}^{\mathrm{dec}}$ at layer $l$, a pre-hook computes
+the transcoder activation $z_{l,f}(x) \geq 0$ by running the encoder on the MLP
+input, and a post-hook then subtracts
+\begin{equation}
+y_l(x) \leftarrow y_l(x) - (1-\alpha)\, z_{l,f}(x)\, w_{l,f}^{\mathrm{dec}},
+\label{eq:ablation}
+\end{equation}
+where $\alpha \in [0,1]$ controls the suppression fraction ($\alpha=0$ is full
+ablation; $\alpha=1$ is a no-op). The intervention is surgically restricted to the
+nominated feature's contribution; no other part of the MLP output is modified.
+
+\subsection{Injection}
+\label{sec:injection}
+
+Injection adds a fixed multiple of the decoder direction unconditionally at a
+specified token position, regardless of whether feature $f$ fires naturally:
+\begin{equation}
+y_l(x) \leftarrow y_l(x) + \delta_f\, w_{l,f}^{\mathrm{dec}}.
+\label{eq:injection}
+\end{equation}
+The injection magnitude $\delta_f$ is set to the mean natural activation
+$\bar{a}_f^+ = \mathbb{E}[z_{l,f}(x^+)]$ measured in the concept sweep. This
+matches the injected signal to the feature's typical output when it fires naturally.
+The operation does not require the encoder and introduces no reconstruction error.
+
+Ablation and injection are complementary causal probes. Ablation removes the
+feature's output from prompts where it fires and tests whether the model loses
+concept-relevant behaviour; injection adds it to prompts where it does not fire and
+tests whether the model gains that behaviour. Symmetric effects in both directions
+establish bidirectional causal relevance.
 
 \section{Interpreting the Full Per-Anchor Summary}
 \label{sec:anchor_summary}
@@ -635,8 +829,8 @@ robustness may be a surface-form artefact. The strongest evidence comes when the
 signals agree at the same anchor and nearby layers.
 
 Figure~\ref{fig:anchor_layer_grid} shows this summary for the six carry anchors with
-the highest non-monotonicity scores (Equation~\ref{eq:nonmonotonicity}) under
-template \texttt{T0}. Each column is one anchor; the five rows correspond, from top
+the highest non-monotonicity scores (Equation~\ref{eq:nonmonotonicity}).
+Each column is one anchor; the five rows correspond, from top
 to bottom, to the decoder cosine scatter, the delta-norm trajectory (raw and
 double-normalised), the inter-layer cosine heatmap, the null comparison, and the
 causal overlay. The grid makes the structural regularities across anchors immediately
@@ -648,8 +842,8 @@ Section~\ref{sec:gram_connection}.
 \begin{figure}[p]
 \centering
 \includegraphics[width=\textwidth]{../runs/concept_localization/carry/anchor_layer_grid_T0_top6}
-\caption{Per-anchor layer summary for the six highest-ranked carry anchors under
-template \texttt{T0}. Each column is one anchor token position. \textbf{Row 1:}
+\caption{Per-anchor layer summary for the six highest-ranked carry anchors.
+Each column is one anchor token position. \textbf{Row 1:}
 decoder cosine scatter --- $x$-axis is layer, $y$-axis is feature index, colour is
 $\operatorname{cos}_{l,f}^{\mathrm{dec}}$ (diverging scale). \textbf{Row 2:}
 delta-norm trajectory --- purple curve is $\tilde{D}_l = D_l / \max D_l$ (left
@@ -665,6 +859,168 @@ band and dotted line show the permutation null mean~$\pm$~1\,SD and 95th percent
 \section{Results}
 \label{sec:concept_results}
 
-The empirical results for each concept are reported using the metrics defined above.
-The main comparisons are between anchors, layers, and templates, with feature-level
-plots used to interpret the most aligned directions.
+\subsection{Carry in Multi-Digit Addition}
+\label{sec:carry_results}
+
+The carry concept for three-digit addition tests whether the sum of the units digits
+of two operands exceeds nine. Positive examples satisfy $(A \bmod 10) + (B \bmod 10)
+\geq 10$ and negative examples satisfy the strict inequality in the opposite
+direction. The model achieves 100\% teacher-forced accuracy on all carry-positive
+and carry-negative examples, indicating that carry computation is
+fully solved at this difficulty level.
+
+The concept direction peaks at the units digit of the second operand (raw position
+9, model position 10 after the sink token) and at layers 4 and 5, with secondary
+peaks at layers 19 and 22. The inter-layer cosine heatmap at this anchor shows a
+two-block structure with a transition near layers 4--5 and a stable high-cosine
+block thereafter, consistent with an early carry-detection stage followed by a
+stable carry representation that persists to the final layers.
+
+Feature projection via the combined score $\sigma_{l,f}$ identifies four concept-aligned
+features: \texttt{L4\_F126502}, \texttt{L5\_F121933}, \texttt{L19\_F23877}, and
+\texttt{L22\_F67294}
+(dec\,+\,enc scores $0.84$, $0.63$, $0.72$, $0.62$ respectively).
+The concept sweep confirms that these features fire on 23 of
+99 positive pairs at the units-digit anchor, and on fewer than 5 negative pairs,
+establishing high selectivity.
+Figure~\ref{fig:carry_features} shows the mean activation of each feature on
+carry-positive and carry-negative pairs, together with its decoder and encoder
+alignment scores.
+
+\subsubsection*{Ablation}
+
+Joint ablation of all four features at full suppression ($\alpha=0$) reduces
+positive-example accuracy from 100\% to 47.8\% on the 23 prompts where
+at least one feature fires, while leaving negative-example accuracy unchanged.
+Individual feature ablation has no measurable effect, indicating that the four
+features are functionally redundant: each alone is sufficient, and all must be
+removed simultaneously to degrade performance.
+As shown in Table~\ref{tab:carry_ablation}, the suppressed predictions
+shift by approximately $-8$ to $-10$ relative to the baseline, corresponding to the
+model predicting a sum without the expected carry increment — the units digit of the
+output rises by roughly 8 while the tens digit falls by one.
+In two examples involving hundreds-digit carries (\texttt{948+904} and
+\texttt{902+978}), ablation shifts the prediction by $-200$, suggesting that the
+same features also gate higher-order carry propagation.
+
+\subsubsection*{Injection}
+
+Injecting the four decoder directions at the \texttt{ones\_b} anchor position with
+fixed magnitude $\delta=5.0$ into 198 carry-negative prompts reduces prediction
+accuracy from 100\% to 22.2\%, with 154 of 198 predictions changing.
+Table~\ref{tab:carry_injection} shows representative examples: the predicted
+sum increases by $+7$ to $+8$, corresponding to the units digit of the output
+shifting from its correct value toward $9$ — the inverse of the ablation effect.
+The symmetry confirms that the decoder directions $w_{l,f}^{\mathrm{dec}}$ for
+these features causally encode the carry increment in the model's number
+representation.
+
+An important observation is that the carry features fire on only 23 of 99 positive
+pairs, yet the model achieves 100\% accuracy on all 99. The identified features
+therefore constitute one carry-computation pathway among several, and the model
+has additional redundant mechanisms not captured by the current feature projection.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.85\textwidth]{../runs/concept_localization/carry/carry_T0/anchor_rank2_pos9/carry_features_grid}
+  \caption{Mean transcoder activations of the four carry-aligned features at
+    the \texttt{ones\_b} anchor, binned over the $10{\times}10$ grid of
+    ones-digit combinations $({\rm ones}_a, {\rm ones}_b)$.
+    Each cell shows the mean activation across all sweep examples with that
+    digit pair.  The dashed diagonal marks the carry boundary
+    (${\rm ones}_a + {\rm ones}_b = 10$): cells above carry, cells below do not.
+    Panel titles give the feature identifier with its decoder cosine
+    ($\mathrm{dec}$), encoder cosine ($\mathrm{enc}$), and combined score.}
+  \label{fig:carry_features}
+\end{figure}
+
+\begin{table}[ht]
+\centering
+\caption{Representative prediction changes from carry interventions at the
+  \texttt{ones\_b} anchor.
+  \textbf{Ablation} (left): joint suppression of all four features
+  ($\alpha = 0$) on carry-positive examples.
+  \textbf{Injection} (right): adding decoder directions ($\delta = 5.0$) on
+  carry-negative examples.
+  Digits that differ from the baseline are shown in
+  \textcolor{red}{red}.}
+\label{tab:carry_intervention}
+\begin{minipage}[t]{0.47\textwidth}
+  \centering
+  \small
+  \textbf{Ablation} (carry-positive, $\alpha=0$)\\[4pt]
+  \begin{tabular}{@{}l r r r@{}}
+  \toprule
+  Prompt & Baseline & Ablated & $\Delta$ \\
+  \midrule
+  $289{+}201$ & $490$ & $4\textcolor{red}{8}\textcolor{red}{2}$ & $-8$ \\
+  $649{+}132$ & $781$ & $7\textcolor{red}{7}\textcolor{red}{0}$ & $-11$ \\
+  $669{+}411$ & $1080$ & $10\textcolor{red}{7}\textcolor{red}{2}$ & $-8$ \\
+  $111{+}729$ & $840$ & $8\textcolor{red}{3}0$ & $-10$ \\
+  \bottomrule
+  \end{tabular}
+  \label{tab:carry_ablation}
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.47\textwidth}
+  \centering
+  \small
+  \textbf{Injection} (carry-negative, $\delta=5.0$)\\[4pt]
+  \begin{tabular}{@{}l r r r@{}}
+  \toprule
+  Prompt & Baseline & Injected & $\Delta$ \\
+  \midrule
+  $200{+}531$ & $731$ & $73\textcolor{red}{9}$ & $+8$ \\
+  $280{+}201$ & $481$ & $48\textcolor{red}{9}$ & $+8$ \\
+  $640{+}132$ & $772$ & $77\textcolor{red}{9}$ & $+7$ \\
+  $280{+}502$ & $782$ & $78\textcolor{red}{9}$ & $+7$ \\
+  \bottomrule
+  \end{tabular}
+  \label{tab:carry_injection}
+\end{minipage}
+\end{table}
+
+\subsection{Greatest Common Divisor}
+\label{sec:gcd_results}
+
+The GCD concept distinguishes prompts where $\gcd(A, B) = 7$ from those where
+$\gcd(A, B) \neq 7$. Unlike carry, which is a local condition on individual digit
+values, GCD membership depends on joint divisibility by a prime, a global property
+of the operand pair. The analysis identifies several anchor positions that exceed the
+null permutation band, indicating that GCD membership is discriminatively encoded.
+
+% TODO: complete quantitative analysis: identify peak layers, extract features via
+%       combined score, verify firing rates in sweep, run ablation and injection.
+
+\subsection{Residue Class Membership}
+\label{sec:residue_results}
+
+The residue class concept distinguishes prompts where $A \bmod 7 = r$ (for a fixed
+residue $r$) from those where $A \bmod 7 \neq r$. In contrast to carry and GCD, the
+residue class analysis reveals no anchor positions that consistently exceed the null
+permutation band: the model does not appear to represent a clean binary concept
+direction separating residue-$r$ from all other residues.
+
+This null result is analytically meaningful. If the model's internal representation
+of $A \bmod 7$ is organised as a Fourier-structured circular embedding, where all
+seven residues correspond to distinct directions on a ring in activation space, then
+the contrastive direction between residue $r$ and the union of all other residues
+would be the difference between a single ring spoke and the mean of the remaining
+six. Such a direction need not be stable across layers or geometrically concentrated
+at any single anchor, because the ring distributes information across all residue
+values simultaneously rather than partitioning them into a binary split. The absence
+of a discriminatory null-exceeding anchor for residue class is therefore consistent
+with, though not sufficient to confirm, a Fourier-structured internal representation
+of modular arithmetic.
+
+% TODO: verify Fourier/modular structure of MLP features for residue class by
+%       sweeping feature activations over all A mod 7 values (0--6) and testing
+%       whether individual activations follow sinusoidal patterns as a function
+%       of the residue value. Compare with the Fourier basis decomposition used
+%       in the addition Fourier analysis (Section~\ref{sec:fourier_patterns}).
+% TODO: examine whether sweep peak features for residue class exhibit modular
+%       periodicity in their activation profiles (pending plot_sweep_peak_features
+%       analysis).
+% TODO: correlate the absence of a binary concept direction with positive evidence
+%       for a circular representation. Until this analysis is complete the null
+%       result is suggestive but not conclusive.

@@ -1,11 +1,8 @@
-"""Transcoder-feature modulation on a concept dataset.
+"""Feature-direction modulation on a concept dataset.
 
-Scales selected features by alpha and measures the effect on teacher-forced accuracy:
-  alpha = 0.0   → full ablation (feature zeroed)
-  alpha = 0.5   → partial suppression
-  alpha = 1.0   → no-op (sanity check; should give zero delta)
-  alpha > 1.0   → amplification
-  alpha < 0.0   → sign inversion / over-suppression
+All interventions operate on the raw model (no transcoder reconstruction):
+  ablation  → subtract act_f * W_dec[f] from the real MLP output
+  injection → add delta * W_dec[f] unconditionally at anchor_pos
 
 When no features are specified the script runs in eval-only mode: it reports
 raw-model concept accuracy on the chosen dataset and template, then exits.
@@ -15,17 +12,16 @@ Examples:
     python -m experiments.concept_localization.run_feature_modulation \\
         --concept carry
 
-    # Ablate (alpha=0)
+    # Ablate joint features (subtract their decoder directions from MLP output)
     python -m experiments.concept_localization.run_feature_modulation \\
-        --concept carry --features L13_F56616 L16_F34883 --alpha 0.0
+        --concept carry --joint --features L4_F126502 L19_F23877 \\
+        --sweep_dir runs/concept_localization/carry/carry_T0/anchor_rank2_pos9/sweep
 
-    # Amplify (alpha=2)
+    # Inject feature directions on wrong pos pairs
     python -m experiments.concept_localization.run_feature_modulation \\
-        --concept carry --features L13_F56616 L16_F34883 --alpha 2.0
-
-    # Joint modulation
-    python -m experiments.concept_localization.run_feature_modulation \\
-        --concept carry --joint --features L13_F56616 L16_F34883 --alpha 2.0
+        --concept carry --features L4_F126502 L19_F23877 \\
+        --inject_delta 5.0 --anchor_pos 10 \\
+        --sweep_dir runs/concept_localization/carry/carry_T0/anchor_rank2_pos9/sweep
 """
 
 from __future__ import annotations
@@ -54,7 +50,7 @@ from experiments.concept_localization.run_concept import (
     _load_concept,
 )
 from mechinterp_qwen3.attribution_model import AttributionModel
-from mechinterp_qwen3.interventions import ablate_feature_directions, inhibit_features
+from mechinterp_qwen3.interventions import ablate_feature_directions, inject_feature_directions
 from mechinterp_qwen3.utils.hf_utils import load_transcoder_from_hub
 from mechinterp_qwen3.utils.model_utils import get_default_device, parse_dtype
 from mechinterp_qwen3.utils.token_utils import tokenize_qwen_input
@@ -177,13 +173,14 @@ def _filter_active_prompts(
     feature_keys: list[str],
     npz,
     examples: list[dict],
+    pairs: list,
 ) -> list[dict]:
     """Return individual prompts where any feature in feature_keys has activation > 0.
 
     Filters at the prompt level (pos/neg independently), not the pair level.
     Returns a flat list of {"prompt", "target", "split", "pair_idx"} dicts.
-    Targets are predict_pos/predict_neg — the true expected answers (e.g. str(a+b) for addition),
-    not label_pos/label_neg which are binary concept labels (e.g. "carry"/"no_carry").
+    pairs must be the same template-filtered list used to generate the sweep, so
+    pairs[ex["pair_idx"]] resolves to the correct ConceptPair.
     """
     # Track which (pair_idx, side) has any feature firing. side: 0=pos, 1=neg.
     active_sides: set[tuple[int, int]] = set()
@@ -206,17 +203,18 @@ def _filter_active_prompts(
     prompts: list[dict] = []
     for ex in examples:
         i = ex["pair_idx"]
+        pair = pairs[i]
         if (i, 0) in active_sides:
             prompts.append({
-                "prompt": ex["prompt_pos"],
-                "target": ex["predict_pos"],
+                "prompt": pair.prompt_pos,
+                "target": pair.predict_pos,
                 "split": "pos",
                 "pair_idx": i,
             })
         if (i, 1) in active_sides:
             prompts.append({
-                "prompt": ex["prompt_neg"],
-                "target": ex["predict_neg"],
+                "prompt": pair.prompt_neg,
+                "target": pair.predict_neg,
                 "split": "neg",
                 "pair_idx": i,
             })
@@ -277,16 +275,17 @@ def evaluate(
     alpha: float = 0.0,
     batch_size: int = 8,
     desc: str | None = None,
-    subtract_mode: bool = False,
+    inject_deltas_by_layer: dict[int, dict[int, float]] | None = None,
+    inject_positions: list[int] | None = None,
 ) -> EvalMetrics:
     """Teacher-forced full-answer accuracy over a flat list of prompt dicts.
 
     Each prompt dict: {"prompt": str, "target": str, "split": "pos"|"neg"}.
 
-    feature_map=None                        → plain model (no intervention)
-    feature_map={L: [fid]}, subtract_mode  → subtract act_f * W_dec[f] from real MLP output
-    feature_map={L: [fid]}                 → transcoder reconstruction at L, feature fid scaled by alpha
-    feature_map={L: []}                    → transcoder reconstruction at L, no features scaled
+    feature_map=None                → plain model (no intervention)
+    feature_map + inject_deltas_by_layer → add delta_f * W_dec[f] unconditionally at inject_positions (induce feature activation even if it does not fire)
+    feature_map                     → subtract (1-alpha) * act_f * W_dec[f] from real MLP output
+                                      alpha=0 → full ablation, alpha=0.5 → half, alpha=1 → no-op
     """
     rows: list[dict] = []
     skipped = 0
@@ -305,14 +304,14 @@ def evaluate(
             desc = "+".join(parts) or "tc-baseline"
 
     examples_by_len: dict[int, list] = {}
-    for p in prompts:
+    for orig_idx, p in enumerate(prompts):
         prompt_ids = model.tokenizer(p["prompt"], add_special_tokens=False).input_ids
         answer_ids = model.tokenizer(p["target"], add_special_tokens=False).input_ids
         if not answer_ids:
             skipped += 1
             continue
         examples_by_len.setdefault(len(prompt_ids) + len(answer_ids), []).append(
-            (p["split"], prompt_ids, answer_ids)
+            (p["split"], prompt_ids, answer_ids, orig_idx)
         )
 
     total = sum(len(v) for v in examples_by_len.values())
@@ -325,26 +324,31 @@ def evaluate(
                         tokenize_qwen_input(
                             prompt_ids + answer_ids, model.tokenizer, model.cfg.device
                         )
-                        for _, prompt_ids, answer_ids in batch
+                        for _, prompt_ids, answer_ids, _orig in batch
                     ],
                     dim=0,
                 )
-                if feature_map is None:
+                if inject_deltas_by_layer is not None:
+                    logits = inject_feature_directions(
+                        model, tokens, inject_deltas_by_layer, inject_positions
+                    )
+                elif feature_map is None:
                     logits = model(tokens)
-                elif subtract_mode:
-                    logits = ablate_feature_directions(model, tokens, feature_map)
                 else:
-                    logits = inhibit_features(model, tokens, feature_map, alpha=alpha)
+                    logits = ablate_feature_directions(model, tokens, feature_map, alpha=alpha)
 
-                for i, (split, prompt_ids, answer_ids) in enumerate(batch):
+                for i, (split, prompt_ids, answer_ids, orig_idx) in enumerate(batch):
                     n = len(prompt_ids)
                     correct_prob = torch.softmax(logits[i, n], dim=-1)[answer_ids[0]].item()
-                    pred_first = int(logits[i, n].argmax())
-                    all_correct = all(
-                        int(logits[i, n + j].argmax()) == tok_id
-                        for j, tok_id in enumerate(answer_ids)
-                    )
-                    rows.append({"split": split, "correct": all_correct, "correct_prob": correct_prob, "pred_first": pred_first})
+                    pred_toks = [int(logits[i, n + j].argmax()) for j in range(len(answer_ids))]
+                    all_correct = all(p == t for p, t in zip(pred_toks, answer_ids))
+                    rows.append({
+                        "split": split, "correct": all_correct, "correct_prob": correct_prob,
+                        "orig_idx":  orig_idx,
+                        "pred_toks": pred_toks,
+                        # keep pred_first for tok_change_rate in diff_metrics
+                        "pred_first": pred_toks[0] if pred_toks else None,
+                    })
                 pbar.update(len(batch))
 
     return _metrics(rows, skipped), rows
@@ -424,6 +428,34 @@ def print_modulation_report(results: dict) -> None:
                 f"{chg['mean_correct_prob']:+.6f},"
                 f"{rel:+.2f},{chg['improved_frac']:.4f},{tok:.4f}"
             )
+
+
+def print_token_comparison(
+    feature_key: str,
+    prompts_r: list[dict],
+    base_rows: list[dict],
+    mod_rows: list[dict],
+    tokenizer,
+) -> None:
+    """Print per-prompt first 3 predicted tokens comparison between baseline and ablated model."""
+    def _dec(tok_id):
+        return tokenizer.decode([tok_id]).strip() if tok_id is not None else "-"
+
+    # Rows from evaluate() are reordered by sequence length for batching.
+    # Re-sort both row lists back to the original prompts_r order via orig_idx.
+    base_sorted = sorted(base_rows, key=lambda r: r["orig_idx"])
+    mod_sorted  = sorted(mod_rows,  key=lambda r: r["orig_idx"])
+
+    print(f"\n--- Token comparison: {feature_key} ---")
+    print(f"{'#':>3}  {'sp':<3}  {'target':<8}  {'baseline':<12}  {'ablated':<12}  chg  prompt")
+    print("-" * 100)
+    for idx, (p, br, mr) in enumerate(zip(prompts_r, base_sorted, mod_sorted)):
+        base_str = tokenizer.decode(br.get("pred_toks", [])).strip()
+        mod_str  = tokenizer.decode(mr.get("pred_toks", [])).strip()
+        target   = str(p.get("target", ""))
+        marker   = "★" if base_str != mod_str else " "
+        prompt_tail = str(p.get("prompt", ""))[-40:]
+        print(f"{idx:>3}  {p['split']:<3}  {target:<8}  {base_str:<12}  {mod_str:<12}  {marker}    ...{prompt_tail}")
 
 
 def plot_results(results: dict, out_dir: Path) -> list[Path]:
@@ -523,12 +555,19 @@ def main() -> None:
              "Required in modulation mode: each feature is evaluated only on prompts where it fires.",
     )
     parser.add_argument(
-        "--subtract", action="store_true", default=True,
-        help="Subtract act_f * W_dec[f] from the real MLP output instead of using "
-             "transcoder reconstruction. Baseline is the raw model; no reconstruction "
-             "error is introduced. Pass --no-subtract to use the old transcoder-reconstruction mode.",
+        "--inject_delta", type=float, default=None,
+        help="If set, inject delta * W_dec[f] unconditionally at --anchor_pos for each feature. "
+             "Unlike alpha, this forces the feature direction even when the feature does not fire.",
     )
-    parser.add_argument("--no-subtract", dest="subtract", action="store_false")
+    parser.add_argument(
+        "--inject_split", default="pos", choices=["pos", "neg", "all"],
+        help="Which split to inject on: 'pos', 'neg', or 'all'. Default 'pos'.",
+    )
+    parser.add_argument(
+        "--anchor_pos", type=int, default=10,
+        help="Sequence position (0-indexed, post-sink-token) at which to inject. "
+             "Default 10 = original position 9 (units digit of second operand) + 1 sink token.",
+    )
     parser.add_argument("--out_dir", default=None)
     args = parser.parse_args()
 
@@ -538,13 +577,13 @@ def main() -> None:
     if not eval_only and args.sweep_dir is None:
         parser.error("--sweep_dir is required in modulation mode")
 
-    if eval_only:
-        log.info("Generating pairs for concept '%s'", args.concept)
-        all_pairs = _load_concept(args.concept, 200, args.seed)
-        if args.template and args.template.lower() != "none":
-            all_pairs = [p for p in all_pairs if p.template == args.template]
-        log.info("Loaded %d pairs for concept '%s' template '%s'", len(all_pairs), args.concept, args.template)
-    else:
+    log.info("Generating pairs for concept '%s'", args.concept)
+    all_pairs = _load_concept(args.concept, 200, args.seed)
+    if args.template and args.template.lower() != "none":
+        all_pairs = [p for p in all_pairs if p.template == args.template]
+    log.info("Loaded %d pairs for concept '%s' template '%s'", len(all_pairs), args.concept, args.template)
+
+    if not eval_only:
         log.info("sweep_dir=%s — each feature evaluated only on prompts where it fires", args.sweep_dir)
 
     device = get_default_device()
@@ -584,6 +623,86 @@ def main() -> None:
         log.info("Saved → %s", out_path)
         return
 
+    # --- inject mode: force feature direction on a chosen split ---
+    if args.inject_delta is not None:
+        if not feature_names:
+            parser.error("--inject_delta requires --features or --features_file")
+        features = [parse_feature_name(n) for n in feature_names]
+        joint_feature_map: dict[int, list[int]] = {}
+        for f in features:
+            joint_feature_map.setdefault(f.layer, []).append(f.feature_id)
+        joint_key = "+".join(f.key for f in features)
+
+        # Build prompt list for the chosen split
+        inject_prompts: list[dict] = []
+        for p in all_pairs:
+            if args.inject_split in ("pos", "all"):
+                inject_prompts.append({"prompt": p.prompt_pos, "target": p.predict_pos, "split": "pos"})
+            if args.inject_split in ("neg", "all"):
+                inject_prompts.append({"prompt": p.prompt_neg, "target": p.predict_neg, "split": "neg"})
+
+        # Compute per-feature deltas: use mean activation from sweep when available,
+        # fall back to --inject_delta for features not in the sweep.
+        sweep_npz_inj = None
+        if args.sweep_dir is not None:
+            sweep_npz_inj = np.load(args.sweep_dir / "sweep_activations.npz")
+
+        inject_deltas_by_layer: dict[int, dict[int, float]] = {}
+        for f in features:
+            if sweep_npz_inj is not None and f.key in sweep_npz_inj.files:
+                pos_acts = sweep_npz_inj[f.key][0::2]  # pos activations (interleaved)
+                firing = pos_acts[pos_acts > 0]
+                delta = float(firing.mean()) if len(firing) > 0 else args.inject_delta
+                source = f"sweep mean ({len(firing)} firing)"
+            else:
+                delta = args.inject_delta # hard-coded alpha value for inducting activation
+                source = "--inject_delta fallback"
+            inject_deltas_by_layer.setdefault(f.layer, {})[f.feature_id] = delta
+            log.info("  %s: delta=%.4f (%s)", f.key, delta, source)
+
+        log.info(
+            "Injecting per-feature deltas at anchor_pos=%d on %d '%s' prompts",
+            args.anchor_pos, len(inject_prompts), args.inject_split,
+        )
+
+        _, base_rows = evaluate(model, inject_prompts, feature_map=None,
+                                batch_size=args.batch_size, desc="inject-baseline")
+        _, inj_rows = evaluate(
+            model, inject_prompts,
+            inject_deltas_by_layer=inject_deltas_by_layer,
+            inject_positions=[args.anchor_pos],
+            batch_size=args.batch_size, desc="inject-modulated",
+        )
+
+        base_sorted = sorted(base_rows, key=lambda r: r["orig_idx"])
+        inj_sorted  = sorted(inj_rows,  key=lambda r: r["orig_idx"])
+
+        delta_summary = ", ".join(f"{f.key}={inject_deltas_by_layer[f.layer][f.feature_id]:.2f}" for f in features)
+        print(f"\n--- Injection comparison: {joint_key} (deltas=[{delta_summary}], pos={args.anchor_pos}, split={args.inject_split}) ---")
+        print(f"{'#':>3}  {'sp':<3}  {'target':<10}  {'baseline':<12}  {'injected':<12}  {'Δp(correct)':>12}  chg  prompt")
+        print("-" * 120)
+        for idx, (p, br, ir) in enumerate(zip(inject_prompts, base_sorted, inj_sorted)):
+            base_str = model.tokenizer.decode(br.get("pred_toks", [])).strip()
+            inj_str  = model.tokenizer.decode(ir.get("pred_toks", [])).strip()
+            target   = str(p.get("target", ""))
+            delta_p  = ir["correct_prob"] - br["correct_prob"]
+            marker   = "★" if base_str != inj_str else " "
+            prompt_tail = str(p.get("prompt", ""))[-35:]
+            print(
+                f"{idx:>3}  {p['split']:<3}  {target:<10}  {base_str:<12}  {inj_str:<12}  "
+                f"{delta_p:>+12.4f}  {marker}    ...{prompt_tail}"
+            )
+
+        n_changed = sum(1 for b, i in zip(base_sorted, inj_sorted) if b.get("pred_toks") != i.get("pred_toks"))
+        mean_delta_p = sum(i["correct_prob"] - b["correct_prob"] for b, i in zip(base_sorted, inj_sorted)) / len(base_sorted)
+        base_acc = sum(1 for r in base_sorted if r["correct"]) / len(base_sorted)
+        inj_acc  = sum(1 for r in inj_sorted  if r["correct"]) / len(inj_sorted)
+        print(f"\nSummary ({len(inject_prompts)} '{args.inject_split}' prompts): "
+              f"acc {base_acc:.1%} → {inj_acc:.1%} | "
+              f"mean Δp(correct) = {mean_delta_p:+.4f} | "
+              f"{n_changed} predictions changed")
+        return
+
     # --- modulation mode ---
     features = [parse_feature_name(n) for n in feature_names]
 
@@ -619,31 +738,24 @@ def main() -> None:
         log.info("Joint modulation of %d features: %s", len(features), joint_key)
 
         feature_keys_joint = [f.key for f in features]
-        prompts_r = _filter_active_prompts(feature_keys_joint, sweep_npz, sweep_examples)
+        prompts_r = _filter_active_prompts(feature_keys_joint, sweep_npz, sweep_examples, all_pairs)
         if not prompts_r:
             raise ValueError("No prompts where any joint feature fires — check sweep_dir")
         log.info("Joint: %d active prompts (any feature fires)", len(prompts_r))
 
-        if args.subtract:
-            baseline, base_rows = evaluate(model, prompts_r, feature_map=None,
-                                           batch_size=args.batch_size, desc="joint-baseline")
-            modulated, mod_rows = evaluate(model, prompts_r, feature_map=joint_feature_map,
-                                           batch_size=args.batch_size, desc="joint-modulated",
-                                           subtract_mode=True)
-        else:
-            joint_baseline_map = {l: [] for l in joint_feature_map}
-            baseline, base_rows = evaluate(model, prompts_r, feature_map=joint_baseline_map,
-                                           batch_size=args.batch_size, desc="joint-baseline")
-            modulated, mod_rows = evaluate(model, prompts_r, feature_map=joint_feature_map,
-                                           alpha=alpha, batch_size=args.batch_size, desc="joint-modulated")
+        baseline, base_rows = evaluate(model, prompts_r, feature_map=None,
+                                       batch_size=args.batch_size, desc="joint-baseline")
+        modulated, mod_rows = evaluate(model, prompts_r, feature_map=joint_feature_map,
+                                       alpha=alpha, batch_size=args.batch_size, desc="joint-modulated")
 
+        print_token_comparison(joint_key, prompts_r, base_rows, mod_rows, model.tokenizer)
         rows = [{"feature": joint_key, "features": [f.key for f in features],
                  "metrics": diff_metrics(baseline, modulated, base_rows, mod_rows)}]
 
     else:
         rows = []
         for feature in features:
-            prompts_r = _filter_active_prompts([feature.key], sweep_npz, sweep_examples)
+            prompts_r = _filter_active_prompts([feature.key], sweep_npz, sweep_examples, all_pairs)
             if not prompts_r:
                 log.warning("Feature %s fires on no prompts — skipping", feature.key)
                 continue
@@ -653,30 +765,19 @@ def main() -> None:
                      sum(1 for p in prompts_r if p["split"] == "neg"))
 
             # Baseline
-            if args.subtract:
-                baseline, base_rows = evaluate(
-                    model, prompts_r, feature_map=None,
-                    batch_size=args.batch_size, desc=f"{feature.key}_base",
-                )
-            else:
-                baseline, base_rows = evaluate(
-                    model, prompts_r, feature_map={feature.layer: []},
-                    batch_size=args.batch_size, desc=f"{feature.key}_base",
-                )
+            baseline, base_rows = evaluate(
+                model, prompts_r, feature_map=None,
+                batch_size=args.batch_size, desc=f"{feature.key}_base",
+            )
 
-            # Modulated
+            # Modulated: subtract (1-alpha) * act_f * W_dec[f] from real MLP output
             modulated_map = {feature.layer: [feature.feature_id]}
-            if args.subtract:
-                modulated, mod_rows = evaluate(
-                    model, prompts_r, feature_map=modulated_map,
-                    batch_size=args.batch_size, subtract_mode=True,
-                )
-            else:
-                modulated, mod_rows = evaluate(
-                    model, prompts_r, feature_map=modulated_map,
-                    alpha=alpha, batch_size=args.batch_size,
-                )
+            modulated, mod_rows = evaluate(
+                model, prompts_r, feature_map=modulated_map,
+                alpha=alpha, batch_size=args.batch_size,
+            )
 
+            print_token_comparison(feature.key, prompts_r, base_rows, mod_rows, model.tokenizer)
             rows.append({
                 "feature": feature.key,
                 "input_name": feature.name,
@@ -686,8 +787,7 @@ def main() -> None:
             })
 
     alpha_tag = f"alpha{alpha}".replace(".", "p").replace("-", "neg")
-    subtract_tag = "_subtract" if args.subtract else ""
-    default_out = f"runs/concept_localization/{args.concept}/modulation_{alpha_tag}{subtract_tag}"
+    default_out = f"runs/concept_localization/{args.concept}/modulation_{alpha_tag}"
     out_dir = Path(args.out_dir or default_out)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -701,7 +801,6 @@ def main() -> None:
             "template": args.template,
             "alpha": alpha,
             "joint": args.joint,
-            "subtract": args.subtract,
             "features_file": args.features_file,
             "sweep_dir": str(args.sweep_dir),
         },

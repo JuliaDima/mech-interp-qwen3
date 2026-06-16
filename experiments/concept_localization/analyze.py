@@ -296,6 +296,124 @@ def sweep_concept_feature_activations(
 
 
 @torch.no_grad()
+def sweep_multi_anchor_activations(
+    model,
+    pairs,
+    anchor_features: dict[str, list[tuple[int, int]]],
+) -> dict[str, dict[tuple[int, int], tuple[np.ndarray, np.ndarray]]]:
+    """One-pass activation sweep for multiple anchor positions simultaneously.
+
+    anchor_features: {anchor_mode: [(layer, feat_id), ...]}
+
+    For each pair we run ONE forward pass (pos) and ONE (neg), hooking every needed
+    layer and capturing residuals at every needed anchor position in that single pass.
+    This is O(n_pairs × 2) forward passes regardless of how many anchor modes there are,
+    versus O(n_anchors × n_pairs × 2) if sweep_concept_feature_activations were called
+    once per anchor.
+
+    Returns {anchor_mode: {(layer, feat_id): (pos_acts, neg_acts)}}.
+    """
+    from collections import defaultdict
+
+    from mechinterp_qwen3.transcoder.activation_functions import JumpReLU
+
+    # Pre-build encoder weight slices per anchor per layer
+    anchor_layer_info: dict[str, dict[int, tuple]] = {}
+    all_layers: set[int] = set()
+    for anchor_mode, feature_ids in anchor_features.items():
+        by_layer: dict[int, list[int]] = defaultdict(list)
+        for layer, feat_id in feature_ids:
+            by_layer[layer].append(feat_id)
+        all_layers.update(by_layer.keys())
+        layer_info: dict[int, tuple] = {}
+        for layer, feat_ids_l in by_layer.items():
+            tc = model.transcoders[layer]
+            idx = torch.tensor(feat_ids_l, dtype=torch.long)
+            W_sub = tc.W_enc[idx].detach()
+            b_sub = tc.b_enc[idx].detach()
+            act_fn = tc.activation_function
+            is_jr = isinstance(act_fn, JumpReLU)
+            thr_sub = None
+            if is_jr:
+                thr = act_fn.threshold.detach()
+                thr_sub = thr[idx] if thr.numel() > 1 else thr.expand(len(feat_ids_l))
+            layer_info[layer] = (feat_ids_l, W_sub, b_sub, is_jr, thr_sub)
+        anchor_layer_info[anchor_mode] = layer_info
+
+    n = len(pairs)
+    anchor_modes = list(anchor_features.keys())
+    feature_ids_per_anchor = {am: anchor_features[am] for am in anchor_modes}
+
+    buf_pos = {am: {fid: np.zeros(n, dtype=np.float32) for fid in fids}
+               for am, fids in feature_ids_per_anchor.items()}
+    buf_neg = {am: {fid: np.zeros(n, dtype=np.float32) for fid in fids}
+               for am, fids in feature_ids_per_anchor.items()}
+    valid = np.zeros(n, dtype=bool)
+
+    for i, pair in enumerate(tqdm(pairs, desc="Multi-anchor activation sweep")):
+        ids_pos = model.tokenizer(pair.prompt_pos, add_special_tokens=False).input_ids
+        ids_neg = model.tokenizer(pair.prompt_neg, add_special_tokens=False).input_ids
+        if len(ids_pos) != len(ids_neg):
+            continue
+
+        # Resolve all anchor positions for this pair (sink token offset already included)
+        anchor_pos_map: dict[str, int] = {
+            am: _resolve_anchor(ids_pos, model.tokenizer, am, None, pair) + 1
+            for am in anchor_modes
+        }
+
+        # For each layer, collect the set of positions we need to capture
+        layer_positions: dict[int, set[int]] = defaultdict(set)
+        for am, layer_info in anchor_layer_info.items():
+            pos = anchor_pos_map[am]
+            for layer in layer_info:
+                layer_positions[layer].add(pos)
+
+        # Single hook per layer captures residuals at all needed positions
+        resid_cache: dict[tuple[int, int], torch.Tensor] = {}
+
+        def _make_hook(layer: int, positions: frozenset) -> object:
+            def _hook(acts, hook):
+                for pos in positions:
+                    if pos < acts.shape[1]:
+                        resid_cache[(layer, pos)] = acts[0, pos, :].detach().clone()
+                return acts
+            return _hook
+
+        hooks = [
+            (f"blocks.{layer}.{model.feature_input_hook}",
+             _make_hook(layer, frozenset(positions)))
+            for layer, positions in layer_positions.items()
+        ]
+
+        for ids, bufs in [(ids_pos, buf_pos), (ids_neg, buf_neg)]:
+            resid_cache.clear()
+            input_ids = tokenize_qwen_input(ids, model.tokenizer, model.cfg.device).unsqueeze(0)
+            model.run_with_hooks(input_ids, fwd_hooks=hooks)
+
+            for am, layer_info in anchor_layer_info.items():
+                pos = anchor_pos_map[am]
+                for layer, (feat_ids_l, W_sub, b_sub, is_jr, thr_sub) in layer_info.items():
+                    h = resid_cache.get((layer, pos))
+                    if h is None:
+                        continue
+                    dev, dt = h.device, h.dtype
+                    pre = h @ W_sub.to(dev, dt).T + b_sub.to(dev, dt)
+                    out = pre * (pre > thr_sub.to(dev, dt)) if is_jr else torch.relu(pre)
+                    out_np = out.float().cpu().numpy()
+                    for j, fid in enumerate(feat_ids_l):
+                        bufs[am][(layer, fid)][i] = out_np[j]
+
+        valid[i] = True
+
+    return {
+        am: {fid: (buf_pos[am][fid][valid], buf_neg[am][fid][valid])
+             for fid in feature_ids_per_anchor[am]}
+        for am in anchor_modes
+    }
+
+
+@torch.no_grad()
 def collect_layer_residuals(
     model,
     prompts_and_anchors: list[tuple[list[int], int]],
@@ -343,175 +461,3 @@ def collect_layer_residuals(
             H[layer].append(vec)
 
     return {layer: torch.stack(vecs).float().cpu().numpy() for layer, vecs in H.items()}
-
-
-def save_edec_features(
-    model,
-    deltas: dict[int, torch.Tensor],
-    out_path,
-    top_k: int = 15,
-    score_mode: str = "dec+enc",
-    pairs=None,
-    anchor_mode: str | None = None,
-    anchor_factory: "AnchorFactory | None" = None,
-) -> dict:
-    """Project delta onto transcoder directions; save top-k positive and top-k negative features.
-
-    Calls project_onto_E_dec_model twice — direction='pos' (highest score) and 'neg'
-    (lowest score) — so the caller gets both ends without abs-value mixing.
-
-    If pairs and anchor_mode are provided, also sweeps the model to compute mean/std
-    activations on pos and neg examples for each feature, embedding them in the JSON so
-    downstream plot scripts need no model.
-
-    Saved JSON structure:
-      {
-        "config": {"score_mode": ..., "top_k": ...},
-        "pos":  [{"feature": "LX_FY", "layer": X, "feature_id": Y,
-                  "dec_cos": ..., "enc_cos": ..., "score": ...,
-                  "mean_pos": ..., "mean_neg": ..., "std_pos": ..., "std_neg": ...}, ...],
-        "neg": [...]
-      }
-
-    Features in "pos" have the highest dec_cos+enc_cos (most positive);
-    "neg" have the lowest (most negative). mean_*/std_* are only present when
-    pairs is provided.
-    """
-    top_matches  = project_onto_E_dec_model(model, deltas, top_k=top_k,
-                                             score_mode=score_mode, direction="pos")
-    last_matches = project_onto_E_dec_model(model, deltas, top_k=top_k,
-                                             score_mode=score_mode, direction="neg")
-
-    def _to_list(matches: dict) -> list[dict]:
-        rows = []
-        for ms in matches.values():
-            for m in ms:
-                dec_cos = float(m.cos_sim)
-                enc_cos = float(m.enc_cos_sim)
-                rows.append({
-                    "feature":    f"L{m.layer}_F{m.feature_id}",
-                    "layer":      m.layer,
-                    "feature_id": m.feature_id,
-                    "dec_cos":    round(dec_cos, 5),
-                    "enc_cos":    round(enc_cos, 5),
-                    "score":      round(dec_cos + enc_cos, 5),
-                })
-        return sorted(rows, key=lambda r: -r["score"])
-
-    top_rows  = _to_list(top_matches)
-    last_rows = _to_list(last_matches)
-
-    # Optionally sweep activations and embed mean/std into each row
-    if pairs is not None and anchor_mode is not None:
-        unique_ids = list({(r["layer"], r["feature_id"]) for r in top_rows + last_rows})
-        log.info("Sweeping activations for %d features …", len(unique_ids))
-        act_map = sweep_concept_feature_activations(
-            model, pairs, unique_ids, anchor_mode=anchor_mode,
-            anchor_factory=anchor_factory,
-        )
-        act_stats: dict[str, dict] = {}
-        for (layer, fid), (pos_arr, neg_arr) in act_map.items():
-            act_stats[f"L{layer}_F{fid}"] = {
-                "mean_pos": round(float(pos_arr.mean()), 6) if len(pos_arr) else 0.0,
-                "mean_neg": round(float(neg_arr.mean()), 6) if len(neg_arr) else 0.0,
-                "std_pos":  round(float(pos_arr.std()),  6) if len(pos_arr) else 0.0,
-                "std_neg":  round(float(neg_arr.std()),  6) if len(neg_arr) else 0.0,
-            }
-        for row in top_rows + last_rows:
-            row.update(act_stats.get(row["feature"], {}))
-
-    data = {
-        "config": {"score_mode": score_mode, "top_k": top_k},
-        "pos": top_rows,
-        "neg": last_rows,
-    }
-    out_path = Path(out_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(data, indent=2))
-    log.info("Saved edec features → %s  (pos=%d, neg=%d)",
-             out_path, len(data["pos"]), len(data["neg"]))
-    return data
-
-
-# WILL DELETE THIS
-if __name__ == "__main__":
-    import argparse
-
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s  %(levelname)-8s  %(name)s — %(message)s",
-        datefmt="%H:%M:%S",
-    )
-
-    parser = argparse.ArgumentParser(
-        description="Compute and save edec feature projections for one or more anchor run dirs.",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-    parser.add_argument(
-        "--run_dirs", nargs="+", required=True,
-        help="One or more anchor run directories containing deltas.pt",
-    )
-    parser.add_argument("--top_k", type=int, default=15)
-    parser.add_argument("--score_mode", default="dec+enc", choices=["dec", "enc", "dec+enc"])
-    parser.add_argument("--model", default="Qwen/Qwen3-4B")
-    parser.add_argument("--transcoder_set", default="mwhanna/qwen3-4b-transcoders")
-    parser.add_argument("--dtype", default="bfloat16")
-    parser.add_argument("--concept", default=None,
-                        help="Concept name — if provided, sweeps activations and embeds mean/std in JSON")
-    parser.add_argument("--n", type=int, default=200, help="Pairs to sweep (only used with --concept)")
-    parser.add_argument("--seed", type=int, default=42)
-    cli_args = parser.parse_args()
-
-    _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-    sys.path.insert(0, str(_REPO_ROOT / "src"))
-    sys.path.insert(0, str(_REPO_ROOT))
-
-    from mechinterp_qwen3.attribution_model import AttributionModel
-    from mechinterp_qwen3.utils.hf_utils import load_transcoder_from_hub
-    from mechinterp_qwen3.utils.model_utils import get_default_device, parse_dtype
-
-    device = get_default_device()
-    dtype = parse_dtype(cli_args.dtype)
-    log.info("Loading model %s …", cli_args.model)
-    tc_set, _ = load_transcoder_from_hub(
-        cli_args.transcoder_set, dtype=dtype, lazy_encoder=False, lazy_decoder=False
-    )
-    model = AttributionModel.from_pretrained_and_transcoders(
-        cli_args.model, tc_set, dtype=dtype, device=device
-    )
-    model.eval()
-
-    pairs = None
-    if cli_args.concept:
-        from experiments.concept_localization.run_concept import _load_concept
-        pairs = _load_concept(cli_args.concept, cli_args.n, cli_args.seed)
-
-    for run_dir_str in cli_args.run_dirs:
-        run_dir = Path(run_dir_str)
-        deltas_path = run_dir / "deltas.pt"
-        if not deltas_path.exists():
-            log.warning("deltas.pt not found in %s — skipping", run_dir)
-            continue
-        raw = torch.load(str(deltas_path), map_location=device)
-        deltas = raw["all"]  # dict[int, Tensor]
-
-        anchor_mode = None
-        results_path = run_dir / "results.json"
-        if results_path.exists() and pairs is not None:
-            cfg = json.loads(results_path.read_text()).get("config", {})
-            anchor_mode = str(cfg.get("anchor_mode", cfg.get("anchor_pos", "delimiter")))
-
-        out_path = run_dir / "edec_features.json"
-        data = save_edec_features(model, deltas, out_path,
-                                  top_k=cli_args.top_k, score_mode=cli_args.score_mode,
-                                  pairs=pairs, anchor_mode=anchor_mode)
-        print(f"\n=== {run_dir.name} ===")
-        print(f"  score_mode={cli_args.score_mode}  top_k={cli_args.top_k}")
-        print("  POS (most positive):")
-        for r in data["pos"][:5]:
-            acts = f"  mean_pos={r['mean_pos']:+.4f} mean_neg={r['mean_neg']:+.4f}" if "mean_pos" in r else ""
-            print(f"    {r['feature']:>14}  dec={r['dec_cos']:+.4f}  enc={r['enc_cos']:+.4f}  score={r['score']:+.4f}{acts}")
-        print("  NEG (most negative):")
-        for r in data["neg"][:5]:
-            acts = f"  mean_pos={r['mean_pos']:+.4f} mean_neg={r['mean_neg']:+.4f}" if "mean_pos" in r else ""
-            print(f"    {r['feature']:>14}  dec={r['dec_cos']:+.4f}  enc={r['enc_cos']:+.4f}  score={r['score']:+.4f}{acts}")

@@ -13,7 +13,6 @@ Phase B  (model, per anchor in top-k)
     5. sweep             → sweep/sweep_ranked.json etc.
     6. cluster analysis  → sweep/cluster_analysis_T0/
     7. peak-feature plot → sweep/top_features_peak_layers.png
-    8. PySR (optional)   → sweep/cluster_analysis_T0/pysr_*.{csv,json,png}
 
 Phase C
     Per-anchor layer summaries are produced during Phase B.
@@ -21,7 +20,6 @@ Phase C
 Usage
 -----
     python scripts/run_full_pipeline.py --concept carry --k 6
-    python scripts/run_full_pipeline.py --concept carry --k 6 --pysr
     python scripts/run_full_pipeline.py --concept gcd --k 4 --skip_gif
 """
 
@@ -95,11 +93,6 @@ def main() -> None:
     parser.add_argument("--null_k", type=int, default=20)
     parser.add_argument("--cluster_top_k", type=int, default=100)
     parser.add_argument("--n_clusters", type=int, default=6)
-
-    # PySR
-    parser.add_argument("--pysr", action="store_true",
-                        help="Run PySR on top-3 features per cluster (carry-only; slow)")
-    parser.add_argument("--pysr_niterations", type=int, default=40)
 
     # Model / dtype
     parser.add_argument("--model", default="Qwen/Qwen3-4B")
@@ -188,10 +181,7 @@ def main() -> None:
             "--null_k", str(args.null_k),
             "--cluster_top_k", str(args.cluster_top_k),
             "--n_clusters", str(args.n_clusters),
-            "--pysr_niterations", str(args.pysr_niterations),
         ]
-        if args.pysr:
-            anchor_args.append("--pysr")
 
         _run(anchor_args)
 

@@ -166,26 +166,32 @@ def make_subtract_hook(
     model: AttributionModel,
     layer: int,
     feature_ids: list[int],
+    alpha: float = 0.0,
 ) -> tuple[str, Callable]:
-    """Build a hook that subtracts each feature's decoder direction from the real MLP output.
+    """Build a hook that subtracts (1 - alpha) * act_f * W_dec[f] from the real MLP output.
 
-    Unlike make_inhibit_hook, this keeps the real MLP output intact and only removes
-    the attributed feature contribution: ``mlp_out -= act_f * W_dec[f]`` for each f.
+    Keeps the real MLP output intact and only removes the attributed feature contribution.
     Reconstruction error is never introduced. An empty feature_ids list is a no-op.
+
+    alpha=0.0 → full ablation (subtract entire feature contribution)
+    alpha=0.5 → half suppression
+    alpha=1.0 → no-op
 
     Args:
         model: AttributionModel instance
         layer: Layer at which to apply the subtraction
         feature_ids: Feature indices whose directions to subtract
+        alpha: Fraction of feature activation to keep (0 = fully remove, 1 = no-op)
 
     Returns:
         (hook_name, hook_fn) ready to pass to run_with_hooks
     """
     transcoder = model.transcoders[layer]  # type: ignore[index]
+    scale = 1.0 - alpha
 
     def _hook(mlp_out: torch.Tensor, hook) -> torch.Tensor:
         h_in = _hook._last_mlp_in  # type: ignore[attr-defined]
-        if h_in is None or not feature_ids:
+        if h_in is None or not feature_ids or scale == 0.0:
             return mlp_out
 
         with torch.no_grad():
@@ -198,7 +204,7 @@ def make_subtract_hook(
 
             out = mlp_out.to(W_dec.dtype)
             for fid in feature_ids:
-                out = out - acts[..., fid : fid + 1] * W_dec[fid]
+                out = out - scale * acts[..., fid : fid + 1] * W_dec[fid]
         return out.to(mlp_out.dtype)
 
     _hook._last_mlp_in = None  # type: ignore[attr-defined]
@@ -206,23 +212,104 @@ def make_subtract_hook(
     return hook_name, _hook
 
 
+def make_inject_hook(
+    model: AttributionModel,
+    layer: int,
+    feature_deltas: dict[int, float],
+    positions: list[int] | None = None,
+) -> tuple[str, Callable]:
+    """Build a hook that adds delta_f * W_dec[f] to MLP output at the given positions.
+
+    Unlike make_subtract_hook, no capture hook is needed — the injection is
+    unconditional and does not depend on the MLP input.
+
+    Args:
+        model: AttributionModel instance
+        layer: Layer at which to inject
+        feature_deltas: Mapping {feature_id: delta} — per-feature injection magnitudes
+        positions: Sequence positions to inject at (None = all positions)
+    """
+    transcoder = model.transcoders[layer]  # type: ignore[index]
+
+    def _hook(mlp_out: torch.Tensor, hook) -> torch.Tensor:
+        if not feature_deltas:
+            return mlp_out
+        W_dec = transcoder.W_dec.to(mlp_out.dtype)  # (d_tc, d_model)
+        out = mlp_out
+        for fid, delta in feature_deltas.items():
+            direction = W_dec[fid]  # (d_model,)
+            if positions is None:
+                out = out + delta * direction
+            else:
+                out = out.clone()
+                for pos in positions:
+                    if pos < out.shape[1]:
+                        out[:, pos, :] = out[:, pos, :] + delta * direction
+        return out
+
+    hook_name = f"blocks.{layer}.{model.original_feature_output_hook}"
+    return hook_name, _hook
+
+
+@torch.no_grad()
+def inject_feature_directions(
+    model: AttributionModel,
+    tokens: torch.Tensor,
+    feature_deltas_by_layer: dict[int, dict[int, float]],
+    positions: list[int] | None = None,
+) -> torch.Tensor:
+    """Add delta_f * W_dec[f] to MLP output at specified positions for each feature.
+
+    Forces the feature's decoder direction into the residual stream regardless of
+    whether the transcoder would have activated it naturally. No reconstruction error
+    is introduced; the raw MLP output is preserved for all other directions.
+
+    Args:
+        model: AttributionModel instance
+        tokens: Token IDs, shape (1, n_pos) or (n_pos,)
+        feature_deltas_by_layer: Mapping {layer_idx: {feature_id: delta}} — per-feature magnitudes
+        positions: Sequence positions to inject at (None = all positions)
+
+    Returns:
+        Output logits, shape (1, n_pos, d_vocab)
+    """
+    if tokens.ndim == 1:
+        tokens = tokens.unsqueeze(0)
+
+    hooks: list[tuple[str, Callable]] = []
+    for layer, feat_deltas in feature_deltas_by_layer.items():
+        if not feat_deltas:
+            continue
+        hook_name, hook_fn = make_inject_hook(model, layer, feat_deltas, positions)
+        hooks.append((hook_name, hook_fn))
+
+    if not hooks:
+        return model(tokens)
+    return model.run_with_hooks(tokens, fwd_hooks=hooks)
+
+
 @torch.no_grad()
 def ablate_feature_directions(
     model: AttributionModel,
     tokens: torch.Tensor,
     feature_ids_by_layer: dict[int, list[int]],
+    alpha: float = 0.0,
 ) -> torch.Tensor:
-    """Subtract each feature's decoder direction from the real MLP output.
+    """Subtract (1 - alpha) * act_f * W_dec[f] from the real MLP output.
 
-    Preserves the raw MLP output for all layers; only removes the attributed
-    contribution of each listed feature (``act_f * W_dec[f]``). Layers with an
-    empty feature list are left untouched. The empty-dict case is identical to a
-    plain forward pass — no reconstruction error is ever introduced.
+    Preserves the raw MLP output for all layers; only modifies the attributed
+    contribution of each listed feature. Layers with an empty feature list are
+    left untouched. No reconstruction error is ever introduced.
+
+    alpha=0.0 → full ablation (default)
+    alpha=0.5 → half suppression
+    alpha=1.0 → no-op
 
     Args:
         model: AttributionModel instance
         tokens: Token IDs, shape (1, n_pos) or (n_pos,)
         feature_ids_by_layer: Mapping {layer_idx: [feature_indices]} to subtract
+        alpha: Fraction of feature activation to keep (0 = fully remove, 1 = no-op)
 
     Returns:
         Output logits, shape (1, n_pos, d_vocab)
@@ -234,7 +321,7 @@ def ablate_feature_directions(
     for layer, feat_ids in feature_ids_by_layer.items():
         if not feat_ids:
             continue
-        sub_name, sub_fn = make_subtract_hook(model, layer, feat_ids)
+        sub_name, sub_fn = make_subtract_hook(model, layer, feat_ids, alpha=alpha)
         cap_name, cap_fn = make_capture_hook(model, layer, sub_fn)
         hooks.append((cap_name, cap_fn))
         hooks.append((sub_name, sub_fn))
