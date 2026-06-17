@@ -71,6 +71,9 @@ def main() -> None:
     parser.add_argument("--feature_score_modes", nargs="+", default=["dec+enc", "dec"],
                         choices=["dec", "enc", "dec+enc"],
                         help="Edec score modes for delta_feature_projections (each gets its own subdir)")
+    parser.add_argument("--min_norm_frac", type=float, default=0.7,
+                        help="Restrict feature selection to layers whose peak-normalised delta norm "
+                             ">= this fraction. 0 = all layers (includes digit detectors).")
     args = parser.parse_args()
 
     out_dir = (
@@ -98,7 +101,6 @@ def main() -> None:
         "--causal",
         "--causal_pairs", str(args.causal_pairs),
         "--top_k", str(args.top_k),
-        "--skip_features",
         "--out_dir", str(out_dir),
     ])
 
@@ -124,6 +126,8 @@ def main() -> None:
             "--concept", args.concept,
             "--top_k", str(args.top_k),
             "--score_mode", *args.feature_score_modes,
+            "--min_norm_frac", str(args.min_norm_frac),
+            "--no_attr_filter",
         ])
     except subprocess.CalledProcessError as e:
         log.warning("delta_feature_projections failed (non-fatal): %s", e)
