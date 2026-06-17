@@ -654,14 +654,17 @@ def plot_feature_heatmap_grid(
     xlabel: str = "a",
     ylabel: str = "b",
     ncols: int = 5,
-    cmap: str = "Purples",
+    cmap: str = "unused",  # kept for API compat; always uses white→violet
+    cluster_labels: "dict[tuple[int, int], int] | None" = None,
+    coverage: "np.ndarray | None" = None,  # (10,10) bool — True where prompt samples exist
 ) -> None:
     """Grid of 2-D heatmaps over swept input digits, one panel per feature.
 
-    matrices: (layer, feat_id) → (n_x, n_y) activation array.
-    Axes correspond to the swept digit values (e.g. 0–9 for ones digits).
-    Title shows dec and enc cosine similarity when both are available on FeatureMatch.
+    matrices: (layer, feat_id) → (n_x, n_y) float32 array, expected [0,1] normalised.
+    Uses imshow with minor-tick grid lines aligned to cell boundaries, white→violet colormap.
     """
+    from matplotlib.colors import LinearSegmentedColormap
+
     match_lookup: dict[tuple[int, int], FeatureMatch] = {
         (m.layer, m.feature_id): m for matches in projections.values() for m in matches
     }
@@ -670,68 +673,74 @@ def plot_feature_heatmap_grid(
     if not items:
         return
 
+    _cmap = LinearSegmentedColormap.from_list("white_violet", ["white", ps.VIOLET])
+    _cmap.set_bad("white")
+
     n = len(items)
     nrows = math.ceil(n / ncols)
-    cell = 3.2
+    cell = 2.4
     ps.apply()
-    _cmap = plt.get_cmap(cmap).copy()
-    _cmap.set_bad("white")
     fig, axes = plt.subplots(
-        nrows,
-        ncols,
-        figsize=(ncols * cell, nrows * cell + 1.2),
+        nrows, ncols,
+        figsize=(ncols * cell, nrows * cell + 0.8),
         squeeze=False,
     )
-
-    DIGITS = np.arange(10)
 
     for idx, ((layer, feat_id), mat) in enumerate(items):
         ax = axes[idx // ncols][idx % ncols]
         m = match_lookup.get((layer, feat_id))
         n_x, n_y = mat.shape
 
-        masked = np.ma.masked_invalid(mat.T)
-        pcm = ax.pcolormesh(
-            DIGITS[:n_x], DIGITS[:n_y], masked,
+        # extent=(0, n_x, 0, n_y): cell i spans [i, i+1], left edge at integer i
+        ax.imshow(
+            mat.T,
+            origin="lower",
+            aspect="equal",
             cmap=_cmap,
-            vmin=0,
-            vmax=float(np.nanmax(mat)) if not np.all(np.isnan(mat)) else 1.0,
-            shading="nearest",
-            linewidth=0.3,
-            edgecolors="#cccccc",
+            vmin=0, vmax=1,
+            interpolation="nearest",
+            extent=(0, n_x, 0, n_y),
         )
 
-        # Title: feature label + scores
-        import re as _re
-        key_m = _re.match(r"(\d+)$", str(feat_id))
+        # Ticks at integers (left edge of each cell) — grid lines land exactly on tick labels
+        ax.set_xticks(range(n_x))
+        ax.set_yticks(range(n_y))
+        ax.grid(True, color="#cccccc", linewidth=0.4)
+        ax.tick_params(labelsize=5, length=2)
+        ax.set_axisbelow(False)
+
+        if coverage is not None:
+            for a in range(n_x):
+                for b in range(n_y):
+                    if not coverage[a, b]:
+                        ax.text(a + 0.5, b + 0.5, "×", ha="center", va="center",
+                                fontsize=5, color="#aaaaaa", transform=ax.transData)
+
         layer_s, fid_s = str(layer), str(feat_id)
         title = rf"$L^{{{layer_s}}}_{{{fid_s}}}$"
+        if cluster_labels is not None and (layer, feat_id) in cluster_labels:
+            title += f" [C{cluster_labels[(layer, feat_id)]}]"
         if m is not None:
             dec = m.cos_sim
             enc = m.enc_cos_sim
             if enc != 0.0:
-                title += f"\ndec={dec:+.3f}  enc={enc:+.3f}"
+                title += f"\ndec={dec:+.3f} enc={enc:+.3f}"
             else:
                 title += f"  cs={dec:+.2f}"
-        ax.set_title(title, fontsize=8, pad=3)
-        ax.set_xlabel(xlabel, fontsize=7, labelpad=2)
-        ax.set_ylabel(ylabel, fontsize=7, labelpad=2)
-        ax.set_xticks(range(n_x))
-        ax.set_yticks(range(n_y))
-        ax.tick_params(labelsize=5)
+        ax.set_title(title, fontsize=7, pad=2)
+        ax.set_xlabel(xlabel, fontsize=6, labelpad=1)
+        ax.set_ylabel(ylabel, fontsize=6, labelpad=1)
         for sp in ax.spines.values():
-            sp.set_visible(False)
-        fig.colorbar(pcm, ax=ax, shrink=0.8, pad=0.02)
+            sp.set_color(ps.GRAY)
 
     for idx in range(n, nrows * ncols):
         axes[idx // ncols][idx % ncols].set_visible(False)
 
     fig.suptitle(
-        f"{concept} — feature activations at anchor {anchor_label}  " f"(x={xlabel}, y={ylabel})",
-        fontsize=10,
-        y=1.01,
+        f"{concept} — feature activations at anchor {anchor_label}  (x={xlabel}, y={ylabel})",
+        fontsize=9, y=1.01,
     )
-    fig.tight_layout()
+    fig.tight_layout(pad=0.5)
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
 

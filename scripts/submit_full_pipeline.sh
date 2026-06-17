@@ -30,8 +30,6 @@
 #   ANCHOR_TIME=01:30:00   time limit per anchor pipeline     (default: 01:30:00)
 #   N_PAIRS=100            pairs per template for run_concept (default: 100)
 #   NULL_K=50              null permutation count             (default: 50)
-#   CLUSTER_TOP_K=100      top-k features for cluster analysis(default: 100)
-#   N_CLUSTERS=6           number of feature clusters         (default: 6)
 #   TEMPLATE=T0            template for per-anchor analyses   (default: T0)
 set -euo pipefail
 
@@ -66,8 +64,6 @@ ANCHOR_K="${ANCHOR_K:-3}"                     # displayed anchors (top-k by comb
 ANCHOR_TIME="${ANCHOR_TIME:-01:30:00}"
 N_PAIRS="${N_PAIRS:-100}"
 NULL_K="${NULL_K:-50}"
-CLUSTER_TOP_K="${CLUSTER_TOP_K:-100}"
-N_CLUSTERS="${N_CLUSTERS:-6}"
 TEMPLATE="${TEMPLATE:-T0}"
 # ── Arg parsing ─────────────────────────────────────────────────────────────
 DRY_RUN=false
@@ -106,7 +102,7 @@ echo "========================================================"
 echo "Submitting full pipeline for ${#CONCEPTS[@]} concept(s)"
 echo "  GIF_N=${GIF_N}  ANCHOR_K=${ANCHOR_K}  ANCHOR_TIME=${ANCHOR_TIME}"
 echo "  N_PAIRS=${N_PAIRS}  NULL_K=${NULL_K}"
-echo "  CLUSTER_TOP_K=${CLUSTER_TOP_K}  N_CLUSTERS=${N_CLUSTERS}  TEMPLATE=${TEMPLATE}"
+echo "  TEMPLATE=${TEMPLATE}"
 $DRY_RUN && echo "  *** DRY RUN — no jobs submitted ***"
 echo "========================================================"
 
@@ -139,9 +135,7 @@ for CONCEPT in "${CONCEPTS[@]}"; do
                 --template "$TEMPLATE" \
                 --anchor_time "$ANCHOR_TIME" \
                 --n "$N_PAIRS" \
-                --null_k "$NULL_K" \
-                --cluster_top_k "$CLUSTER_TOP_K" \
-                --n_clusters "$N_CLUSTERS")
+                --null_k "$NULL_K")
     echo "  coordinator         → job ${COORD_JID}  (after ${GIF_JID})"
     echo "  anchor_pipeline x${ANCHOR_CANDIDATES} (display top ${ANCHOR_K})  → submitted by coordinator after it runs"
 done

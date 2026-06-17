@@ -71,14 +71,8 @@ def main() -> None:
                         help="Pairs per template for run_concept and null")
     parser.add_argument("--top_k", type=int, default=15,
                         help="Top-k features for directional projection")
-    parser.add_argument("--sweep_top_k", type=int, default=200,
-                        help="Top-k features per layer for sweep")
     parser.add_argument("--causal_pairs", type=int, default=50)
     parser.add_argument("--null_k", type=int, default=20)
-    parser.add_argument("--cluster_top_k", type=int, default=100,
-                        help="Top-k features fed into cluster analysis")
-    parser.add_argument("--n_clusters", type=int, default=6,
-                        help="Number of feature clusters")
     parser.add_argument("--dry_run", action="store_true",
                         help="Print sbatch commands without submitting")
     args = parser.parse_args()
@@ -139,11 +133,8 @@ def main() -> None:
             "--template", args.template,
             "--n", str(args.n),
             "--top_k", str(args.top_k),
-            "--sweep_top_k", str(args.sweep_top_k),
             "--causal_pairs", str(args.causal_pairs),
             "--null_k", str(args.null_k),
-            "--cluster_top_k", str(args.cluster_top_k),
-            "--n_clusters", str(args.n_clusters),
         ]
         jid = _submit(cmd, args.dry_run)
         submitted.append((rank, anchor_idx, label, jid))
