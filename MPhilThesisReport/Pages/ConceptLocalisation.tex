@@ -188,19 +188,21 @@ own separation is concentrated, independent of its magnitude relative to other
 anchors.
 
 A sharpness score summarises how concentrated the delta norm is across layers. In
-these experiments it is computed as a peak-to-average statistic,
+the implementation used for these experiments it is computed as the fraction of
+total trajectory mass contained in the peak layer and its immediate neighbours.
+Let $l^*=\arg\max_l D_l$. Then
 \begin{equation}
 \operatorname{sharp}(t^*)
 =
-\frac{\max_l D_l}{\frac{1}{L}\sum_{l=0}^{L-1} D_l + \varepsilon}.
+\frac{\sum_{l=\max(0,l^*-1)}^{\min(L-1,l^*+1)} D_l}
+     {\sum_{l=0}^{L-1} D_l + \varepsilon}.
 \label{eq:sharpness}
 \end{equation}
-High sharpness indicates that the concept appears in a narrow processing window.
-Low sharpness, however, indicates either diffuse representation, weak separation, or consistent separation
-from early to late layers. Anchors
-are selected by combining peak norm, sharpness, and downstream causal scores. This
-prevents the analysis from selecting an anchor merely because it has a large but
-uninformative residual-stream scale.
+High sharpness indicates that much of the concept separation is concentrated in a
+small processing window. Low sharpness, however, indicates either diffuse
+representation, weak separation, or consistent separation from early to late layers.
+This statistic is distinct from a peak-to-average ratio: it rewards localised mass
+rather than only the height of the single largest layer.
 
 The inter-layer cosine similarity matrix measures whether the delta direction is
 stable across layers:
@@ -296,8 +298,10 @@ giving the double-normalised trajectory
 A peak in $\tilde{D}_l^{\mathrm{act}}$ identifies a layer where the concept delta is
 disproportionately large relative to the ambient residual-stream scale.
 
-A scalar summary of peak concentration is used to rank anchor positions. Let
-$c_l = \tilde{D}_l^{\mathrm{act}}$. The non-monotonicity score is
+Anchor selection is staged. Before per-anchor causal and null analyses have been
+run, candidate anchors are chosen from emergence statistics computed over the
+double-normalised trajectory. One such diagnostic is the non-monotonicity score.
+Let $c_l = \tilde{D}_l^{\mathrm{act}}$. The score is
 \begin{equation}
 \mathrm{nm}(t^*)
 =
@@ -311,10 +315,13 @@ $c_l = \tilde{D}_l^{\mathrm{act}}$. The non-monotonicity score is
 This quantity is the prominence of the most prominent local peak: it equals the
 smaller of how much the curve rises to reach layer $l$ from the left and how much it
 falls away to the right. A monotone curve scores near zero; a sharp, isolated peak
-scores near one. The top-$k$ anchors by this score are selected for detailed
-analysis, since high non-monotonicity indicates that concept-specific computation is
-concentrated in a narrow depth window, without being diffusely distributed across
-the network.
+scores near one. In the current pipeline, candidate anchors are submitted from
+\texttt{emergence.npy} using pre-pipeline trajectory/cosine statistics such as
+mean inter-layer cosine. After the per-anchor pipeline has produced null and causal
+outputs, the displayed or retained anchors are re-ranked by the combined downstream
+score that includes null-excess, activation patching, and gradient-dot-delta terms.
+Thus the double-normalised trajectory proposes candidate positions, while the final
+selection is controlled by whether the signal is above null and causally relevant.
 
 \subsection{Null Permutation Baseline}
 \label{sec:null_permutation}
@@ -392,9 +399,14 @@ stream. The combined score
 \end{equation}
 requires alignment through both the input sensitivity and the output contribution.
 Features that score highly on both components are identified as concept-encoding
-candidates and ranked by $\sigma_{l,f}$. Features with zero activation on all
-dataset examples are excluded after the concept sweep regardless of their geometric
-score, since they cannot causally contribute to the concept computation.
+candidates and ranked by $\sigma_{l,f}$, called \texttt{enc+dec} in the
+implementation. The final feature-projection stage first forms signed positive and
+negative pools, merges them, deduplicates by $(l,f)$, and ranks globally by the
+absolute combined score. It then filters out features that are inactive on every
+sweep example. For report-grade runs it also requires the attribution-survival
+filter: a feature must appear in at least the configured fraction of attribution
+graphs, $5\%$ by default. This survival filter can be disabled only by the explicit
+exploratory flag \texttt{--no\_attr\_filter}.
 
 For a selected feature, the activation grid is formed by averaging feature activations
 over arithmetic variables. In the carry case the grid is
@@ -407,10 +419,9 @@ A_f(a,b)
 where \(z_{l,f}(x)\) is the transcoder feature activation. The resulting
 \(10\times10\) matrix can reveal whether a decoder-aligned feature is active on a
 carry boundary, an iso-sum band, a parity pattern, or a more local arithmetic
-condition. For intrinsic feature selection, the pipeline also records the fraction
-of dataset examples on which a feature is active. Requiring nontrivial activity, for
-example at least ten percent of examples, filters out features whose high cosine is
-dominated by one or two isolated cells.
+condition. Empty grid cells are kept as missing values and are marked with an
+$\times$ in the plot rather than being converted to zero, so unsampled cells are not
+visually confused with genuine zero activation.
 
 % Two overlap metrics are useful when comparing activation grids. The centred cosine
 % between two grids \(A\) and \(B\) is

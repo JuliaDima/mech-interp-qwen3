@@ -13,11 +13,11 @@ import importlib
 import sys
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from scripts.sweeps.run_concept_sweep import CONCEPTS
+from experiments.concept_localization.pipeline.run_concept_sweep import CONCEPTS
 
 
 def print_concept_pairs(concept: str, n_pairs: int = 3):

@@ -5,9 +5,9 @@ Runs the full pipeline for any registered concept:
 
 Usage
 -----
-    python -m experiments.concept_localization.run_concept --concept gcd
-    python -m experiments.concept_localization.run_concept --concept residue_class --n 300
-    python -m experiments.concept_localization.run_concept --concept negation_scope --skip_features
+    python -m experiments.concept_localization.pipeline.run_concept --concept gcd
+    python -m experiments.concept_localization.pipeline.run_concept --concept residue_class --n 300
+    python -m experiments.concept_localization.pipeline.run_concept --concept negation_scope --skip_features
 
 Registered concepts
 -------------------
@@ -42,7 +42,7 @@ from pathlib import Path
 
 import torch
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
@@ -58,7 +58,7 @@ from experiments.concept_localization.extract_deltas_generic import (
     extract_layer_deltas_generic,
     resolve_anchor_token,
 )
-from experiments.concept_localization.plot_anchor_analysis import (
+from experiments.concept_localization.plots.plot_anchor_analysis import (
     load_emergence,
     top_k_anchors,
 )
@@ -193,7 +193,7 @@ def _get_dataset_attr(concept: str, attr: str, default=None):
         return default
 
 
-_FEATURE_PROJECTION_SCORE_MODES = ("dec", "dec+enc")
+_FEATURE_PROJECTION_SCORE_MODES = ("dec", "enc+dec")
 
 
 def _run_feature_projection_plots(
@@ -204,21 +204,17 @@ def _run_feature_projection_plots(
     top_k: int,
     concept: str,
 ) -> None:
-    """Run delta_feature_projections.run_one_mode for dec and dec+enc, saving edec_topk_grid.pdf.
+    """Run delta_feature_projections.run_one_mode for dec and enc+dec, saving edec_topk_grid.pdf.
 
     Collects residual streams once and reuses them for both score modes to avoid
     running the model forward pass twice.  Skips attribution-graph survival filter
     (survival_set=None) since graphs may not exist yet at this pipeline stage.
     """
-    from experiments.concept_localization.delta_feature_projections import (
+    from experiments.concept_localization.pipeline.delta_feature_projections import (
         _build_inputs_and_examples,
         run_one_mode,
     )
-
-    _sweeps = _REPO_ROOT / "scripts" / "sweeps"
-    if str(_sweeps) not in sys.path:
-        sys.path.insert(0, str(_sweeps))
-    from sweep_utils import apply_transcoder_all
+    from experiments.concept_localization.sweep_utils import apply_transcoder_all
 
     inputs, examples = _build_inputs_and_examples(model, pairs, anchor_mode, max_pairs=None)
     if not inputs:
@@ -296,9 +292,9 @@ def main() -> None:
         "--skip_features", action="store_true", help="Skip transcoder feature projection (faster)"
     )
     parser.add_argument(
-        "--feature_score_mode", default="dec+enc", choices=["dec", "enc", "dec+enc"],
+        "--feature_score_mode", default="enc+dec", choices=["dec", "enc", "enc+dec"],
         help="Ranking mode for top-k feature projection: dec=decoder cosine, "
-             "enc=encoder cosine, (default) dec+enc=sum of both normalised cosine similarities",
+             "enc=encoder cosine, (default) enc+dec=sum of both normalised cosine similarities",
     )
     parser.add_argument(
         "--template",
@@ -374,12 +370,12 @@ def _run_single(args, base_subdir: str | None = None) -> None:
             k = int(_top_m.group(1))
             em = load_emergence(args.concept)
             if em is None:
-                log.warning(
-                    "emergence.npy not found for '%s' — cannot use 'top%d'; "
-                    "run make_gif first. Falling back to delimiter.",
-                    args.concept, k,
+                raise FileNotFoundError(
+                    f"emergence.npy not found for concept {args.concept!r}; cannot resolve "
+                    f"--anchor_modes top{k}. Run the emergence stage first, for example: "
+                    f"python -m experiments.concept_localization.concept_emergence_gif.make_gif "
+                    f"--concept {args.concept}, or pass explicit valid anchor positions."
                 )
-                anchors_to_run = ["delimiter"]
             else:
                 norms_raw = em["norms_raw"]
                 n_nonzero = sum(

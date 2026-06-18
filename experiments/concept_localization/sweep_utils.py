@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import re
 import sys
 from pathlib import Path
 
@@ -17,29 +16,6 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from mechinterp_qwen3.transcoder.activation_functions import JumpReLU
-
-
-def resolve_anchor_from_positions(positions: dict[str, int], anchor_mode: str, fallback: int) -> int:
-    """Look up anchor_mode in positions, falling back to lower digit indices if missing.
-
-    For keys ending in an integer (e.g. digit_2, h_digit_3, paren_3), decrements
-    the index until a present key is found.  Falls back to ``fallback`` only when
-    no digit variant exists at all, and logs a warning in both cases.
-    """
-    if anchor_mode in positions:
-        return positions[anchor_mode]
-
-    m = re.match(r"^(.*?)(\d+)$", anchor_mode)
-    if m:
-        prefix, n = m.group(1), int(m.group(2))
-        for k in range(n - 1, 0, -1):
-            candidate = f"{prefix}{k}"
-            if candidate in positions:
-                log.warning("Anchor '%s' not in positions — using '%s' instead", anchor_mode, candidate)
-                return positions[candidate]
-
-    log.warning("Anchor '%s' not in positions and no digit fallback found — using last token", anchor_mode)
-    return fallback
 
 
 def apply_transcoder_all(model, layer: int, H_l: np.ndarray) -> np.ndarray:

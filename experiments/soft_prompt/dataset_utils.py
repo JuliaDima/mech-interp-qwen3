@@ -15,7 +15,7 @@ log = logging.getLogger("soft_prompt.dataset_utils")
 
 def _get_pairs(concept: str, template: str, n_per_template: int, seed: int):
     """Generate ConceptPairs via the existing registry in run_concept.py."""
-    from experiments.concept_localization.run_concept import _load_concept
+    from experiments.concept_localization.pipeline.run_concept import _load_concept
 
     mod_name = f"data.concept_datasets.{concept}_dataset"
     import importlib

@@ -16,7 +16,7 @@ runs/concept_localization/{concept}/anchor_rank{R}_pos{P}/
 
 Usage
 -----
-    python scripts/run_anchor_pipeline.py \
+    python -m experiments.concept_localization.pipeline.run_anchor_pipeline \
         --concept carry --anchor_pos 7 --anchor_rank 1
 
 """
@@ -29,7 +29,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
@@ -68,8 +68,8 @@ def main() -> None:
                         help="Max pairs for causal patching analysis")
     parser.add_argument("--null_k", type=int, default=20,
                         help="Number of null permutations")
-    parser.add_argument("--feature_score_modes", nargs="+", default=["dec+enc", "dec"],
-                        choices=["dec", "enc", "dec+enc"],
+    parser.add_argument("--feature_score_modes", nargs="+", default=["enc+dec", "dec"],
+                        choices=["dec", "enc", "enc+dec"],
                         help="Edec score modes for delta_feature_projections (each gets its own subdir)")
     parser.add_argument("--min_norm_frac", type=float, default=0.7,
                         help="Restrict feature selection to layers whose peak-normalised delta norm "
@@ -165,7 +165,7 @@ def main() -> None:
     sweep_dir.mkdir(parents=True, exist_ok=True)
     sweep_cmd = [
         sys.executable,
-        str(_REPO_ROOT / "scripts" / "sweeps" / "run_concept_sweep.py"),
+        str(_REPO_ROOT / "experiments" / "concept_localization" / "pipeline" / "run_concept_sweep.py"),
         "--concept", args.concept,
         "--layers", layers_str,
         "--anchor", str(args.anchor_pos),

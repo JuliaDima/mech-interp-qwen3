@@ -9,16 +9,16 @@ raw-model concept accuracy on the chosen dataset and template, then exits.
 
 Examples:
     # Eval-only — just report baseline accuracy on T0 carry
-    python -m experiments.concept_localization.run_feature_modulation \\
+    python -m experiments.concept_localization.pipeline.run_feature_modulation \\
         --concept carry
 
     # Ablate joint features (subtract their decoder directions from MLP output)
-    python -m experiments.concept_localization.run_feature_modulation \\
+    python -m experiments.concept_localization.pipeline.run_feature_modulation \\
         --concept carry --joint --features L4_F126502 L19_F23877 \\
         --sweep_dir runs/concept_localization/carry/carry_T0/anchor_rank2_pos9/sweep
 
     # Inject feature directions on wrong pos pairs
-    python -m experiments.concept_localization.run_feature_modulation \\
+    python -m experiments.concept_localization.pipeline.run_feature_modulation \\
         --concept carry --features L4_F126502 L19_F23877 \\
         --inject_delta 5.0 --anchor_pos 10 \\
         --sweep_dir runs/concept_localization/carry/carry_T0/anchor_rank2_pos9/sweep
@@ -39,11 +39,11 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from experiments.concept_localization.run_concept import (
+from experiments.concept_localization.pipeline.run_concept import (
     CONCEPTS,
     _MODEL,
     _TRANSCODER_SET,
@@ -145,6 +145,52 @@ def _dedupe_preserving_order(names: list[str]) -> list[str]:
     return out
 
 
+def _load_sweep_examples(sweep_dir: Path) -> list[dict]:
+    """Load sweep examples, accepting sweep_examples.pkl or sweep_dataset_examples.pkl."""
+    path = sweep_dir / "sweep_dataset_examples.pkl"
+    if path.exists():
+        with open(path, "rb") as f:
+            return pickle.load(f)
+    raise FileNotFoundError(f"No sweep examples file found in {sweep_dir}")
+
+
+def _ensure_sweep_activations(sweep_dir: Path, feature_keys: list[str], model) -> "dict[str, np.ndarray]":
+    """Compute per-feature activations from sweep_residuals.npz.
+
+    Returns a plain dict {feature_key: np.ndarray of shape (N,)} where N is
+    2*n_pairs (interleaved pos/neg).  No file is written — the computation is
+    just a few linear-layer applications over the small residual matrix and is
+    fast enough to redo on each call.
+    """
+    from collections import defaultdict
+
+    residuals_path = sweep_dir / "sweep_residuals.npz"
+    if not residuals_path.exists():
+        raise FileNotFoundError(f"sweep_residuals.npz not found in {sweep_dir}")
+
+    from experiments.concept_localization.sweep_utils import apply_transcoder_all
+
+    residuals = np.load(residuals_path)
+    layers_to_feats: dict[int, list[tuple[int, str]]] = defaultdict(list)
+    for key in feature_keys:
+        spec = parse_feature_name(key)
+        layers_to_feats[spec.layer].append((spec.feature_id, key))
+
+    acts_dict: dict[str, np.ndarray] = {}
+    for layer, feat_list in sorted(layers_to_feats.items()):
+        h_key = f"H_L{layer}"
+        if h_key not in residuals.files:
+            log.warning("Layer %d not in sweep_residuals — skipping: %s", layer, [k for _, k in feat_list])
+            continue
+        H = residuals[h_key]  # (N, d_model)
+        all_acts = apply_transcoder_all(model, layer, H)  # (N, n_features)
+        for feat_id, key in feat_list:
+            acts_dict[key] = all_acts[:, feat_id]
+        log.info("  Layer %d: computed activations for %d features", layer, len(feat_list))
+
+    return acts_dict
+
+
 def load_feature_names(args: argparse.Namespace) -> list[str]:
     names = list(args.features or [])
     if args.features_file:
@@ -186,7 +232,7 @@ def _filter_active_prompts(
     active_sides: set[tuple[int, int]] = set()
     missing: list[str] = []
     for key in feature_keys:
-        if key not in npz.files:
+        if key not in npz:
             missing.append(key)
             continue
         acts = npz[key]  # shape (2*n_pairs,): interleaved [pos_0, neg_0, pos_1, neg_1, ...]
@@ -521,6 +567,87 @@ def plot_results(results: dict, out_dir: Path) -> list[Path]:
 
 
 # ---------------------------------------------------------------------------
+# heatmap grid (edec_topk_grid style)
+# ---------------------------------------------------------------------------
+
+
+def _save_heatmap_grid(
+    features: list[FeatureSpec],
+    sweep_npz,
+    sweep_examples: list[dict],
+    out_path: Path,
+    concept: str,
+    anchor_label: str,
+    feature_scores: "dict[str, dict] | None" = None,
+) -> None:
+    """Save an edec_topk_grid-style PDF for the modulated features.
+
+    Reuses plot_feature_heatmap_grid from visualize.py and _bin_to_heatmap
+    from delta_feature_projections.py.  Silently skips when examples lack
+    the per-operand digit metadata required for binning (non-carry concepts).
+    """
+    if not sweep_examples or not all(
+        "a_pos" in ex.get("meta", {}) for ex in sweep_examples[:3]
+    ):
+        log.info("Sweep examples lack digit metadata (a_pos/b_pos) — skipping heatmap grid")
+        return
+
+    try:
+        from experiments.concept_localization.plots.visualize import plot_feature_heatmap_grid
+        from experiments.concept_localization.analyze import FeatureMatch
+        from experiments.concept_localization.pipeline.delta_feature_projections import _bin_to_heatmap
+    except ImportError as exc:
+        log.warning("Heatmap grid skipped (import error: %s)", exc)
+        return
+
+    coverage = np.zeros((10, 10), dtype=bool)
+    for ex in sweep_examples:
+        m = ex.get("meta", {})
+        for ak, bk in (("a_pos", "b_pos"), ("a_neg", "b_neg")):
+            if ak in m and bk in m:
+                coverage[int(m[ak]) % 10, int(m[bk]) % 10] = True
+
+    matrices: dict[tuple[int, int], np.ndarray] = {}
+    projections: dict[int, list] = {}
+    for f in features:
+        if f.key not in sweep_npz:
+            log.warning("Feature %s not in sweep_activations — skipping from heatmap", f.key)
+            continue
+        acts = sweep_npz[f.key]  # (2*n_pairs,) interleaved pos/neg
+        grid = _bin_to_heatmap(acts, sweep_examples)  # (10, 10) mean activations
+        max_val = float(grid.max())
+        if max_val > 0:
+            grid = grid / max_val  # normalise to [0, 1] for white→violet cmap
+        matrices[(f.layer, f.feature_id)] = grid
+
+        scores = (feature_scores or {}).get(f.key, {})
+        projections.setdefault(f.layer, []).append(FeatureMatch(
+            feature_id=f.feature_id,
+            projection=scores.get("score", 0.0),
+            cos_sim=scores.get("dec_cos", 0.0),
+            layer=f.layer,
+            enc_cos_sim=scores.get("enc_cos", 0.0),
+        ))
+
+    if not matrices:
+        log.info("No features with sweep activations — skipping heatmap grid")
+        return
+
+    plot_feature_heatmap_grid(
+        matrices=matrices,
+        projections=projections,
+        out_path=out_path,
+        concept=concept,
+        anchor_label=anchor_label,
+        xlabel="a",
+        ylabel="b",
+        ncols=5,
+        coverage=coverage,
+    )
+    log.info("Saved heatmap grid → %s", out_path)
+
+
+# ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
 
@@ -642,14 +769,15 @@ def main() -> None:
                 inject_prompts.append({"prompt": p.prompt_neg, "target": p.predict_neg, "split": "neg"})
 
         # Compute per-feature deltas: use mean activation from sweep when available,
-        # fall back to --inject_delta for features not in the sweep.
+        # fall back to --inject_delta value passed as argument, for features not in the sweep.
         sweep_npz_inj = None
         if args.sweep_dir is not None:
-            sweep_npz_inj = np.load(args.sweep_dir / "sweep_activations.npz")
+            inj_keys = [parse_feature_name(n).key for n in feature_names]
+            sweep_npz_inj = _ensure_sweep_activations(args.sweep_dir, inj_keys, model)
 
         inject_deltas_by_layer: dict[int, dict[int, float]] = {}
         for f in features:
-            if sweep_npz_inj is not None and f.key in sweep_npz_inj.files:
+            if sweep_npz_inj is not None and f.key in sweep_npz_inj:
                 pos_acts = sweep_npz_inj[f.key][0::2]  # pos activations (interleaved)
                 firing = pos_acts[pos_acts > 0]
                 delta = float(firing.mean()) if len(firing) > 0 else args.inject_delta
@@ -726,9 +854,9 @@ def main() -> None:
     log.info("Mode: %s | features: %s", mode_str, [f.key for f in features])
 
     # Load sweep files once — shared across all features
-    sweep_npz = np.load(args.sweep_dir / "sweep_activations.npz")
-    with open(args.sweep_dir / "sweep_examples.pkl", "rb") as fh:
-        sweep_examples = pickle.load(fh)
+    feature_keys_all = [parse_feature_name(n).key for n in feature_names]
+    sweep_npz = _ensure_sweep_activations(args.sweep_dir, feature_keys_all, model)
+    sweep_examples = _load_sweep_examples(args.sweep_dir)
 
     if args.joint:
         joint_feature_map: dict[int, list[int]] = {}
@@ -813,6 +941,34 @@ def main() -> None:
     plot_paths = plot_results(results, out_dir)
     for p in plot_paths:
         log.info("Saved plot → %s", p)
+
+    # Load scores (dec_cos, enc_cos) from edec_features.json if the features came from one,
+    # so the heatmap panel titles show the alignment scores.
+    feature_scores: dict[str, dict] | None = None
+    if args.features_file:
+        fp = Path(args.features_file)
+        if fp.suffix == ".json":
+            try:
+                data = json.loads(fp.read_text())
+                if isinstance(data, dict) and ("pos" in data or "neg" in data):
+                    direction = getattr(args, "features_direction", "pos")
+                    feature_scores = {
+                        row["feature"]: row
+                        for row in data.get(direction, [])
+                        if "feature" in row
+                    }
+            except Exception:
+                pass
+
+    _save_heatmap_grid(
+        features=features,
+        sweep_npz=sweep_npz,
+        sweep_examples=sweep_examples,
+        out_path=out_dir / "modulation_features_grid.pdf",
+        concept=args.concept,
+        anchor_label=args.sweep_dir.parent.name,
+        feature_scores=feature_scores,
+    )
 
     print_modulation_report(results)
 

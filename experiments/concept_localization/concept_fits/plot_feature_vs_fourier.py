@@ -14,7 +14,7 @@ Output: runs/concept_localization/carry/feature_vs_fourier/
 Usage
 -----
     python experiments/concept_localization/concept_fits/plot_feature_vs_fourier.py \
-        --features_json scripts/sweeps/features_to_analyse.json \
+        --features_json experiments/concept_localization/features_to_analyse.json \
         --sweep_dir     runs/concept_localization/carry/carry_T0 \
         --out_dir       runs/concept_localization/carry/feature_vs_fourier
 """
@@ -312,8 +312,8 @@ def _force_extract_grids(
     from mechinterp_qwen3.utils.hf_utils import load_transcoder_from_hub
     from mechinterp_qwen3.attribution_model import AttributionModel
     from mechinterp_qwen3.utils.model_utils import get_default_device, parse_dtype
-    sys.path.insert(0, str(_REPO_ROOT / "scripts" / "sweeps"))
-    from sweep_utils import apply_transcoder_all
+    sys.path.insert(0, str(_REPO_ROOT / "experiments" / "concept_localization" / "pipeline"))
+    from experiments.concept_localization.sweep_utils import apply_transcoder_all
     from run_concept_sweep import _load_concept, _build_inputs, _acts_to_grid
 
     _MODEL         = "Qwen/Qwen3-4B"

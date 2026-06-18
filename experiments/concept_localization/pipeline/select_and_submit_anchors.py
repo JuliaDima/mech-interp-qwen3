@@ -24,11 +24,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from experiments.concept_localization.plot_emergence_per_anchor import (
+from experiments.concept_localization.plots.plot_emergence_per_anchor import (
     load_concept_anchor_data,
 )
 
@@ -40,7 +40,7 @@ logging.basicConfig(
 log = logging.getLogger("select_and_submit_anchors")
 
 _SBATCH_RUN = str(_REPO_ROOT / "scripts" / "sbatch_run.sh")
-_PIPELINE_SCRIPT = str(_REPO_ROOT / "scripts" / "run_anchor_pipeline.py")
+_PIPELINE_SCRIPT = str(_REPO_ROOT / "experiments" / "concept_localization" / "pipeline" / "run_anchor_pipeline.py")
 
 
 def _submit(cmd: list[str], dry_run: bool) -> str:

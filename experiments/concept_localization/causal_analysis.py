@@ -19,7 +19,7 @@ Two complementary methods:
 Both methods are anchored from the same anchor_mode used during delta extraction.
 
 Usage:
-python -m experiments.concept_localization.run_concept --concept <name> --causal --causal_pairs <n>
+python -m experiments.concept_localization.pipeline.run_concept --concept <name> --causal --causal_pairs <n>
 
 """
 
@@ -364,7 +364,11 @@ def run_positional_attribution(
         else:
             expr_end = _find_expression_end(tokens)
             if expr_end is None:
-                expr_end = seq_len - 1  # fallback: trailing space
+                raise ValueError(
+                    "Could not resolve expression-end delimiter for positional attribution. "
+                    "Use anchor='last' explicitly only if the final token is the intended analysis position, "
+                    "or update the prompt/template delimiter handling."
+                )
 
         if any(ids_pos[i] != ids_neg[i] for i in range(expr_end, seq_len)):
             log.debug("Tokens after expression end differ between pos/neg — skipping pair")
@@ -505,7 +509,11 @@ def run_positional_attribution_sweep(
         else:
             expr_end = _find_expression_end(tokens)
             if expr_end is None:
-                expr_end = seq_len - 1  # fallback: trailing space
+                raise ValueError(
+                    "Could not resolve expression-end delimiter for positional attribution. "
+                    "Use anchor='last' explicitly only if the final token is the intended analysis position, "
+                    "or update the prompt/template delimiter handling."
+                )
 
         if any(ids_pos[i] != ids_neg[i] for i in range(expr_end, seq_len)):
             log.debug("Tokens after expression end differ between pos/neg — skipping pair")

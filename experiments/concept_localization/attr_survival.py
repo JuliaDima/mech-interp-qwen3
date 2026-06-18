@@ -66,16 +66,3 @@ def load_survival_set(
         f"{n_total} graphs) from {survival_file.name}"
     )
     return surviving
-
-
-def filter_by_survival(
-    features: list[tuple[int, int]],
-    survival_set: set[tuple[int, int]] | None,
-) -> list[tuple[int, int]]:
-    """Filter (layer, feat_idx) pairs to those in survival_set.
-
-    If survival_set is None, returns features unchanged.
-    """
-    if survival_set is None:
-        return features
-    return [(l, f) for l, f in features if (l, f) in survival_set]

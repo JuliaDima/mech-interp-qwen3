@@ -59,3 +59,5 @@ scripts/print_carry_t0_pairs.py
 experiments/addition/dataset_generation/regen_positional_cascade.py
 experiments/multilingual_circuits/multilingual_circuits.md
 .venv/
+scripts/sweeps/find_and_plot_closest_csvs_all_anchors.py
+scripts/sweeps/submit_find_plot_closest_csvs_all_anchors.sh

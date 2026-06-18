@@ -757,7 +757,7 @@ def plot_edec_mean_activations(
     Reads mean_pos/mean_neg/std_pos/std_neg directly from the JSON rows. 
     Raises if activation stats are absent.
     """
-    score_mode = edec_data.get("config", {}).get("score_mode", "dec+enc")
+    score_mode = edec_data.get("config", {}).get("score_mode", "enc+dec")
     rows = edec_data.get(direction, [])
     rows = [r for r in rows if "mean_pos" in r]
     if not rows:

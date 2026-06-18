@@ -19,8 +19,8 @@ Phase C
 
 Usage
 -----
-    python scripts/run_full_pipeline.py --concept carry --k 6
-    python scripts/run_full_pipeline.py --concept gcd --k 4 --skip_gif
+    python -m experiments.concept_localization.pipeline.run_full_pipeline --concept carry --k 6
+    python -m experiments.concept_localization.pipeline.run_full_pipeline --concept gcd --k 4 --skip_gif
 """
 
 from __future__ import annotations
@@ -32,11 +32,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from experiments.concept_localization.plot_emergence_per_anchor import load_concept_anchor_data
+from experiments.concept_localization.plots.plot_emergence_per_anchor import load_concept_anchor_data
 
 logging.basicConfig(
     level=logging.INFO,
@@ -169,7 +169,7 @@ def main() -> None:
 
         anchor_args = [
             sys.executable,
-            str(_REPO_ROOT / "scripts" / "run_anchor_pipeline.py"),
+            str(_REPO_ROOT / "experiments" / "concept_localization" / "pipeline" / "run_anchor_pipeline.py"),
             "--concept", args.concept,
             "--anchor_pos", str(anchor_pos),
             "--anchor_rank", str(rank),
