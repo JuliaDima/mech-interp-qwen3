@@ -12,7 +12,7 @@ Produces:
 
 Usage
 -----
-    python -m experiments.concept_localization.plot_anchor_analysis
+    python -m experiments.concept_localization.plots.plot_anchor_analysis
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ import matplotlib.transforms as mtransforms
 import numpy as np
 from matplotlib.lines import Line2D
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_REPO_ROOT))
 
 from experiments.plot_style import (

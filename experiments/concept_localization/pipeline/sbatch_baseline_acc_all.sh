@@ -11,7 +11,7 @@
 if [ -n "${SLURM_SUBMIT_DIR:-}" ]; then
   REPO_ROOT="${SLURM_SUBMIT_DIR}"
 else
-  REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 fi
 cd "${REPO_ROOT}"
 
@@ -70,7 +70,7 @@ for concept in "${CONCEPTS[@]}"; do
     for template in "${TEMPLATES[@]}"; do
         echo ""
         echo "--- ${concept} / ${template} ---"
-        python -m experiments.concept_localization.run_feature_modulation \
+        python -m experiments.concept_localization.pipeline.run_feature_modulation \
             --concept "${concept}" \
             --template "${template}" \
             --n 100 || { echo "FAILED: ${concept}/${template}"; }

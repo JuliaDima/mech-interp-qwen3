@@ -26,15 +26,15 @@ lengths match, so no pairs are discarded for length mismatch.
 Usage
 -----
     # Run real extraction + K null permutations:
-    python -m experiments.concept_localization.run_null_permutation \\
+    python -m experiments.concept_localization.pipeline.run_null_permutation \\
         --concept carry --k 20
 
     # Run all concepts sequentially:
-    python -m experiments.concept_localization.run_null_permutation \\
+    python -m experiments.concept_localization.pipeline.run_null_permutation \\
         --concept all --k 20
 
     # Load existing real deltas to skip re-running the model:
-    python -m experiments.concept_localization.run_null_permutation \\
+    python -m experiments.concept_localization.pipeline.run_null_permutation \\
         --concept carry --k 20 \\
         --real_deltas runs/concept_localization/carry/deltas.pt
 """
@@ -61,7 +61,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from experiments.concept_localization.concept_pair import ConceptPair
 from experiments.concept_localization.extract_deltas_generic import extract_layer_deltas_generic
-from experiments.concept_localization.run_concept import CONCEPTS, _load_concept
+from experiments.concept_localization.pipeline.run_concept import CONCEPTS, _load_concept
 from experiments.plot_style import GRAY, VIOLET, apply
 from mechinterp_qwen3.attribution_model import AttributionModel
 from mechinterp_qwen3.utils.hf_utils import load_transcoder_from_hub
@@ -512,7 +512,7 @@ def main() -> None:
         # ── Resolve anchor list ───────────────────────────────────────────────
         if args.anchor_modes:
             import re as _re
-            from experiments.concept_localization.plot_anchor_analysis import (
+            from experiments.concept_localization.plots.plot_anchor_analysis import (
                 load_emergence, top_k_anchors,
             )
             _top_m = _re.fullmatch(r"top(\d+)", args.anchor_modes)

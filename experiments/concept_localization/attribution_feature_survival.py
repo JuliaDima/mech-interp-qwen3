@@ -96,11 +96,13 @@ def main() -> None:
         "influences": [], "activations": [],
     })
 
+    parse_errors: list[tuple[str, str]] = []
     for i, gdir in enumerate(graph_dirs):
         is_pos = args.neg_tag not in gdir.name
         try:
             g = load_graph(gdir)
         except Exception as e:
+            parse_errors.append((gdir.name, str(e)))
             print(f"  skipping {gdir.name}: {e}")
             continue
 
@@ -135,6 +137,16 @@ def main() -> None:
 
         if (i + 1) % 20 == 0:
             print(f"  processed {i+1}/{n_total} graphs, {len(stats)} unique features so far")
+
+    if n_total and len(parse_errors) / n_total > 0.5:
+        sample = "; ".join(f"{name}: {err}" for name, err in parse_errors[:5])
+        raise RuntimeError(
+            f"Parsed graph failure rate is {len(parse_errors)}/{n_total} "
+            f"({len(parse_errors) / n_total:.0%}), exceeding the 50% failure threshold. "
+            f"First failures: {sample}"
+        )
+    if parse_errors:
+        print(f"Parsed graph warnings: skipped {len(parse_errors)}/{n_total} graph dirs below 50% threshold")
 
     print(f"\nTotal unique (layer, feat_idx) pairs: {len(stats)}")
 
@@ -184,6 +196,8 @@ def main() -> None:
             "n_neg_graphs": n_neg,
             "min_survival": args.min_survival,
             "min_n_graphs": min_n,
+            "parse_errors": [{"graph_dir": name, "error": err} for name, err in parse_errors],
+            "parse_error_threshold": 0.5,
         },
         "features": rows,
         "surviving": surviving,

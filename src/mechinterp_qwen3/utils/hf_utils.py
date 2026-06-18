@@ -11,7 +11,11 @@ from urllib.parse import parse_qs, urlparse
 import torch
 import yaml
 from huggingface_hub import get_token, hf_api, hf_hub_download, snapshot_download
-from huggingface_hub.constants import HF_HUB_ENABLE_HF_TRANSFER
+try:
+    from huggingface_hub.constants import HF_HUB_ENABLE_HF_TRANSFER
+except ImportError:
+    import os as _os
+    HF_HUB_ENABLE_HF_TRANSFER = _os.environ.get("HF_HUB_ENABLE_HF_TRANSFER", "0") == "1"
 from huggingface_hub.utils.tqdm import tqdm as hf_tqdm
 from tqdm.contrib.concurrent import thread_map
 

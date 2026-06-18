@@ -36,7 +36,11 @@ from experiments.concept_localization.extract_deltas_generic import (
     _find_delimiter_anchor,
     extract_layer_deltas_generic,
 )
-from experiments.concept_localization.run_concept import _load_concept
+from experiments.concept_localization.pipeline.run_concept import _load_concept
+from experiments.concept_localization.plots.plot_emergence_per_anchor import (
+    plot_anchor_layer_grid,
+    plot_emergence_per_anchor,
+)
 from experiments.plot_style import GRAY, TEAL, VIOLET, apply
 
 _GREEN = "#27ae60"
@@ -334,6 +338,11 @@ def make_emergence_gif(
         duration=durations,
     )
     log.info("Saved GIF (%d frames, %d fps, 7 s hold at delimiter) → %s", len(frames), fps, out_path)
+
+    log.info("Plotting emergence PDFs for concept=%s template=%s", concept, template)
+    plot_emergence_per_anchor(concept)
+    plot_anchor_layer_grid(concept, template=template or "T0")
+    log.info("Emergence PDFs saved.")
 
 
 def regen_gif_from_npy(npy_path: Path, out_path: Path, fps: int = 2) -> None:

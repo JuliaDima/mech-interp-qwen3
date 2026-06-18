@@ -71,8 +71,7 @@ def _resolve_anchor(
 ) -> int:
     """Resolve anchor_mode to a 0-indexed token position for one sequence.
 
-    Raises ValueError for unrecognised anchor_mode rather than silently
-    falling back to a delimiter scan.
+    Raises ValueError for unresolved anchors.
     """
     if anchor_factory and pair is not None:
         positions = anchor_factory(pair, tokenizer)
@@ -81,18 +80,28 @@ def _resolve_anchor(
         m = re.match(r"^(.*?)(\d+)$", anchor_mode)
         if m:
             prefix, n = m.group(1), int(m.group(2))
-            for k in range(n - 1, 0, -1):
-                candidate = f"{prefix}{k}"
-                if candidate in positions:
-                    log.warning("Anchor '%s' not in positions — using '%s' instead", anchor_mode, candidate)
-                    return positions[candidate]
+            known = ", ".join(sorted(positions)) or "<none>"
+            raise ValueError(
+                f"Anchor mode {anchor_mode!r} is not available for this pair. "
+                f"Known concept-specific anchors: {known}. "
+                "Regenerate anchor rankings or pass an explicit valid anchor."
+            )
     if anchor_mode == "last":
         return len(ids) - 1
     if anchor_mode == "delimiter":
         return _find_delimiter_anchor(ids, tokenizer)
     try:
-        return min(int(anchor_mode), len(ids) - 1)
-    except ValueError:
+        pos = int(anchor_mode)
+        if not 0 <= pos < len(ids):
+            raise ValueError(
+                f"Anchor position {pos} is out of range for tokenized prompt length {len(ids)}. "
+                "Use a valid 0-indexed token position or regenerate anchor rankings for this template."
+            )
+        return pos
+    except ValueError as exc:
+        if str(exc).startswith("Anchor position"):
+            raise
+
         raise ValueError(
             f"Unknown anchor_mode {anchor_mode!r}. "
             f"Expected 'last', 'delimiter', an integer position string, "
@@ -105,14 +114,18 @@ def _find_delimiter_anchor(ids: list[int], tokenizer) -> int:
 
     Matches any token whose decoded string ends with a structural delimiter
     character.  This handles merged tokens such as '():' or ')?' that would
-    be missed by exact token-ID lookup.  Falls back to the final token.
+    be missed by exact token-ID lookup.  Raises if no delimiter is present.
     """
     tokens = tokenizer.convert_ids_to_tokens(ids)
     for i in range(len(tokens) - 1, -1, -1):
         tok = tokens[i].replace("Ġ", "").replace("Ċ", "\n")
         if tok and tok[-1] in _DELIMITER_CHARS:
             return i
-    return len(ids) - 1  # fallback: last token
+    raise ValueError(
+        "Could not resolve delimiter anchor: no token ends with one of "
+        f"{sorted(_DELIMITER_CHARS)!r}. Use --anchor_modes/--anchor with an explicit valid "
+        "0-indexed token position for this prompt template."
+    )
 
 
 def extract_layer_deltas_generic(
@@ -129,7 +142,7 @@ def extract_layer_deltas_generic(
     """Capture residual stream at the anchor token; return aggregated pos − neg delta.
 
     anchor_mode="delimiter" (default) — last structural delimiter token ('=', ':',
-                              '?', ')').  Falls back to the last token when none found.
+                              '?', ')').  Raises when none is found.
     anchor_mode="last"      — absolute last token of the sequence.
     anchor_mode="<int>"     — explicit 0-indexed token position.
     anchor_mode=<concept key> — resolved via anchor_factory(pair, tokenizer) if provided;
@@ -199,7 +212,13 @@ def extract_layer_deltas_generic(
                         buckets[tmpl_key][layer][bucket_name].append(vec)
 
     if skipped:
-        log.warning("Skipped %d pairs (tokenization length mismatch)", skipped)
+        kept = len(pairs) - skipped
+        msg = (
+            f"Skipped {skipped}/{len(pairs)} pairs due to tokenization length mismatch; "
+            f"{kept} pairs remain."
+        )
+        print(msg)
+        log.warning(msg)
 
     results: dict[str, LayerDeltas] = {}
     for key, layer_buckets in buckets.items():

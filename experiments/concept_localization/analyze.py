@@ -126,7 +126,7 @@ def project_onto_E_dec_model(
     score_mode controls which weight matrix is used:
       "dec"     — score = cos(δ_l, W_dec[f]);            cos_sim = dec cosine
       "enc"     — score = cos(δ_l, W_enc[f]);            cos_sim = enc cosine
-      "dec+enc" — score = dec_cos + enc_cos;             cos_sim = dec cosine, enc_cos_sim = enc cosine
+      "enc+dec" — score = dec_cos + enc_cos;             cos_sim = dec cosine, enc_cos_sim = enc cosine
 
     direction controls which end of the ranking to take:
       "pos" — highest-scoring features (most positive alignment with delta)
@@ -135,13 +135,13 @@ def project_onto_E_dec_model(
     No absolute values are used; features are purely ranked by signed score.
     Only the weight matrices required by score_mode are loaded.
     """
-    if score_mode not in ("dec", "enc", "dec+enc"):
-        raise ValueError(f"score_mode must be 'dec', 'enc', or 'dec+enc', got {score_mode!r}")
+    if score_mode not in ("dec", "enc", "enc+dec"):
+        raise ValueError(f"score_mode must be 'dec', 'enc', or 'enc+dec', got {score_mode!r}")
     if direction not in ("pos", "neg"):
         raise ValueError(f"direction must be 'pos' or 'neg', got {direction!r}")
 
-    need_dec = score_mode in ("dec", "dec+enc")
-    need_enc = score_mode in ("enc", "dec+enc")
+    need_dec = score_mode in ("dec", "enc+dec")
+    need_enc = score_mode in ("enc", "enc+dec")
     largest = direction == "pos"
 
     result: dict[int, list[FeatureMatch]] = {}
@@ -181,7 +181,7 @@ def project_onto_E_dec_model(
         elif score_mode == "enc":
             rank_scores = enc_cos
             primary_cos, secondary_cos = enc_cos, torch.zeros_like(enc_cos)
-        else:  # dec+enc
+        else:  # enc+dec
             rank_scores = dec_cos + enc_cos
             primary_cos, secondary_cos = dec_cos, enc_cos
 

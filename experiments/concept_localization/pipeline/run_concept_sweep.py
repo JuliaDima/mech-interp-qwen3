@@ -8,15 +8,17 @@ for whichever features and ranking criteria they need.
 
 Usage
 -----
-    python scripts/sweeps/run_concept_sweep.py --concept carry --layers all
-    python scripts/sweeps/run_concept_sweep.py --concept gcd --layers 4,5,17,18,19 --anchor delimiter
-    python scripts/sweeps/run_concept_sweep.py --concept decimal_termination --layers 17,18,19,20 --anchor digit_1
+    python -m experiments.concept_localization.pipeline.run_concept_sweep --concept carry --layers all
+    python -m experiments.concept_localization.pipeline.run_concept_sweep --concept gcd --layers 4,5,17,18,19 --anchor delimiter
+    python -m experiments.concept_localization.pipeline.run_concept_sweep --concept decimal_termination --layers 17,18,19,20 --anchor digit_1
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib
+import json
 import logging
 import random
 import sys
@@ -25,13 +27,9 @@ from pathlib import Path
 import numpy as np
 import torch
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-_SWEEPS_DIR = Path(__file__).resolve().parent
-for _p in (_REPO_ROOT, _SWEEPS_DIR):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
-
-from sweep_utils import resolve_anchor_from_positions
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 from experiments.concept_localization.analyze import collect_layer_residuals
 from experiments.concept_localization.extract_deltas_generic import (
@@ -73,6 +71,45 @@ CONCEPTS = [
 ]
 
 
+def _jsonable(value):
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, dict):
+        return {str(k): _jsonable(v) for k, v in sorted(value.items(), key=lambda item: str(item[0]))}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(v) for v in value]
+    return value
+
+
+def _stable_hash(payload: dict) -> str:
+    encoded = json.dumps(_jsonable(payload), sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _sweep_cache_metadata(args, target_layers: list[int], prompts: list[str], examples: list[dict]) -> dict:
+    payload = {
+        "concept": args.concept,
+        "model": args.model,
+        "transcoder_set": args.transcoder_set,
+        "dtype": args.dtype,
+        "layers": target_layers,
+        "anchor": args.anchor or "delimiter",
+        "n": args.n,
+        "template": args.template,
+        "max_pairs": args.max_pairs,
+        "seed": args.seed,
+        "prompts": prompts,
+        "examples": examples,
+    }
+    return {
+        "version": 1,
+        "hash": _stable_hash(payload),
+        "payload": _jsonable(payload),
+    }
+
+
 def _load_concept(name: str, n: int, seed: int):
     mod = importlib.import_module(f"data.concept_datasets.{name}_dataset")
     # Try different naming conventions: full name, suffix-only, then any generate_*_pairs function
@@ -92,7 +129,7 @@ def _load_concept(name: str, n: int, seed: int):
     raise ValueError(f"Cannot find a generate function in {name}_dataset")
 
 
-def _build_inputs(model, pairs, anchor_mode, anchor_factory, max_pairs):
+def _build_inputs(model, pairs, anchor_mode, max_pairs):
     inputs, pos_mask, prompts, examples = [], [], [], []
     for pair_idx, pair in enumerate(pairs[:max_pairs]):
         ids_pos = model.tokenizer(pair.prompt_pos, add_special_tokens=False).input_ids
@@ -100,11 +137,7 @@ def _build_inputs(model, pairs, anchor_mode, anchor_factory, max_pairs):
         if len(ids_pos) != len(ids_neg):
             continue
 
-        if anchor_factory:
-            positions = anchor_factory(pair, model.tokenizer)
-            anchor = resolve_anchor_from_positions(positions, anchor_mode, len(ids_pos) - 1)
-        else:
-            anchor = _resolve_anchor(ids_pos, model.tokenizer, anchor_mode, None, None)
+        anchor = _resolve_anchor(ids_pos, model.tokenizer, anchor_mode, None, None)
 
         for ids, is_pos, prompt in [
             (ids_pos, True, pair.prompt_pos),
@@ -136,12 +169,11 @@ def cache_sweep_residuals(
     pairs,
     target_layers: list[int],
     anchor_mode: str = "delimiter",
-    anchor_factory=None,
     max_pairs: int = 200,
 ) -> tuple[dict[int, np.ndarray], np.ndarray, list[str], list[dict]]:
     """Return residual cache plus prompt/example metadata for one anchor."""
     inputs, pos_mask, prompts, examples = _build_inputs(
-        model, pairs, anchor_mode, anchor_factory, max_pairs
+        model, pairs, anchor_mode, max_pairs
     )
     if len(inputs) == 0:
         raise ValueError("No valid pairs found; check anchor_mode and pair lengths")
@@ -192,7 +224,6 @@ def main() -> None:
     )
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    anchor_factory = None
     anchor_mode = args.anchor or "delimiter"
 
     log.info("Concept: %s  anchor: %s  layers: %s", args.concept, anchor_mode, target_layers)
@@ -227,7 +258,6 @@ def main() -> None:
         pairs,
         target_layers,
         anchor_mode=anchor_mode,
-        anchor_factory=anchor_factory,
         max_pairs=args.max_pairs,
     )
 
@@ -248,6 +278,11 @@ def main() -> None:
     with open(examples_path, "wb") as f:
         pickle.dump(sweep_examples, f)
     log.info("Saved sweep dataset examples → %s", examples_path)
+
+    metadata = _sweep_cache_metadata(args, target_layers, prompts, sweep_examples)
+    metadata_path = out_dir / "sweep_residuals.meta.json"
+    metadata_path.write_text(json.dumps(metadata, indent=2))
+    log.info("Saved residual cache metadata hash %s → %s", metadata["hash"], metadata_path)
     log.info("Done. Outputs in %s", out_dir)
 
 
