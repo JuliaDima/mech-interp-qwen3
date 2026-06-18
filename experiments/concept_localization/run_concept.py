@@ -46,7 +46,13 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from experiments.concept_localization.analyze import compute_sharpness
+import numpy as np
+
+from experiments.concept_localization.analyze import (
+    collect_layer_residuals,
+    compute_sharpness,
+    project_onto_E_dec_model,
+)
 from experiments.concept_localization.causal_analysis import run_causal_analysis
 from experiments.concept_localization.extract_deltas_generic import (
     extract_layer_deltas_generic,
@@ -185,6 +191,74 @@ def _get_dataset_attr(concept: str, attr: str, default=None):
         return getattr(mod, attr, default)
     except ImportError:
         return default
+
+
+_FEATURE_PROJECTION_SCORE_MODES = ("dec", "dec+enc")
+
+
+def _run_feature_projection_plots(
+    model,
+    pairs: list,
+    anchor_mode: str,
+    out_dir: Path,
+    top_k: int,
+    concept: str,
+) -> None:
+    """Run delta_feature_projections.run_one_mode for dec and dec+enc, saving edec_topk_grid.pdf.
+
+    Collects residual streams once and reuses them for both score modes to avoid
+    running the model forward pass twice.  Skips attribution-graph survival filter
+    (survival_set=None) since graphs may not exist yet at this pipeline stage.
+    """
+    from experiments.concept_localization.delta_feature_projections import (
+        _build_inputs_and_examples,
+        run_one_mode,
+    )
+
+    _sweeps = _REPO_ROOT / "scripts" / "sweeps"
+    if str(_sweeps) not in sys.path:
+        sys.path.insert(0, str(_sweeps))
+    from sweep_utils import apply_transcoder_all
+
+    inputs, examples = _build_inputs_and_examples(model, pairs, anchor_mode, max_pairs=None)
+    if not inputs:
+        log.info("No valid pairs for feature projection plots (all sequence lengths mismatched)")
+        return
+
+    all_layers = list(range(model.cfg.n_layers))
+    log.info(
+        "Collecting residuals for feature projection plots (%d prompts, %d layers)…",
+        len(inputs), len(all_layers),
+    )
+    H_scan = collect_layer_residuals(model, inputs, all_layers)
+
+    active_features: dict[int, set[int]] = {}
+    for layer in all_layers:
+        acts = apply_transcoder_all(model, layer, H_scan[layer])
+        active_ids = set(np.where(acts.max(axis=0) > 0)[0].tolist())
+        active_features[layer] = active_ids
+    total_active = sum(len(v) for v in active_features.values())
+    log.info("Active features: %d across %d layers", total_active, len(all_layers))
+
+    for score_mode in _FEATURE_PROJECTION_SCORE_MODES:
+        log.info("delta_feature_projections: score_mode=%s …", score_mode)
+        run_one_mode(
+            anchor_dir=out_dir,
+            model=model,
+            inputs=inputs,
+            examples=examples,
+            active_features=active_features,
+            survival_set=None,
+            score_mode=score_mode,
+            top_k=top_k,
+            concept=concept,
+            H_cached=H_scan,
+        )
+        mode_suffix = score_mode.replace("+", "_")
+        log.info(
+            "Saved → %s",
+            out_dir / "sweep" / f"delta_feature_projections_{mode_suffix}" / "edec_topk_grid.pdf",
+        )
 
 
 def main() -> None:
@@ -409,17 +483,41 @@ def _run_single(args, base_subdir: str | None = None) -> None:
 
         # ── 6. Feature projection ─────────────────────────────────────────────
         if not args.skip_features:
-            from experiments.concept_localization.analyze import save_edec_features
-
             log.info("Projecting delta onto transcoder decoder directions (E_dec)…")
-            save_edec_features(
-                model, ld.delta,
-                out_path=out_dir / "edec_features.json",
+            edec_features = project_onto_E_dec_model(
+                model,
+                ld.delta,
                 top_k=args.top_k,
                 score_mode=args.feature_score_mode,
+            )
+            edec_path = out_dir / "edec_features.json"
+            with open(edec_path, "w") as f:
+                json.dump(
+                    {
+                        str(layer): [
+                            {
+                                "feature_id": match.feature_id,
+                                "projection": match.projection,
+                                "cos_sim": match.cos_sim,
+                                "layer": match.layer,
+                                "enc_cos_sim": match.enc_cos_sim,
+                            }
+                            for match in matches
+                        ]
+                        for layer, matches in edec_features.items()
+                    },
+                    f,
+                    indent=2,
+                )
+            log.info("Saved feature projection → %s", edec_path)
+
+            _run_feature_projection_plots(
+                model=model,
                 pairs=pairs,
                 anchor_mode=anchor_mode,
-                anchor_factory=anchor_factory,
+                out_dir=out_dir,
+                top_k=args.top_k,
+                concept=args.concept,
             )
 
         mean_act_norms = {l: v for l, v in ld.mean_act_norm.items()} if ld.mean_act_norm else {}

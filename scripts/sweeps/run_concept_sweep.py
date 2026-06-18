@@ -237,7 +237,7 @@ def main() -> None:
         pos_mask=pos_mask,
         prompts=np.array(prompts, dtype=object),
         layers=np.array(sorted(residuals), dtype=np.int32),
-        **{f"H_L{layer}": H.astype(np.float16) for layer, H in residuals.items()},
+        **{f"H_L{layer}": H for layer, H in residuals.items()},
     )
     log.info("Saved residual cache for %d layers → %s", len(residuals), residuals_path)
 
