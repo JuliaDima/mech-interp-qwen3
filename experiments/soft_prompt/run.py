@@ -52,11 +52,7 @@ from mechinterp_qwen3.attribution_model import AttributionModel  # noqa: E402
 from mechinterp_qwen3.utils.hf_utils import load_transcoder_from_hub  # noqa: E402
 from mechinterp_qwen3.utils.model_utils import get_default_device, parse_dtype  # noqa: E402
 
-_OTHERS_DIR = str(Path(__file__).parent.parent)
-if _OTHERS_DIR not in sys.path:
-    sys.path.insert(0, _OTHERS_DIR)
-from common.small_addition import load_addition_dataset  # noqa: E402
-
+from experiments.soft_prompt.dataset_utils import load_concept_dataset  # noqa: E402
 from experiments.soft_prompt.model import PrefixTuning, SoftPrompt, load_prefix  # noqa: E402
 
 logging.basicConfig(
@@ -81,46 +77,60 @@ def _sample_ids(sample: dict, device: torch.device) -> tuple[torch.Tensor, list[
     return raw_ids, answer_ids
 
 
-def _find_eq_pos(token_ids: torch.Tensor, tokenizer) -> int | None:
-    eq_ids = tokenizer("=", add_special_tokens=False).input_ids
-    if not eq_ids:
-        return None
-    eq_id = eq_ids[-1]
-    positions = (token_ids == eq_id).nonzero(as_tuple=True)[0]
-    return int(positions[-1]) if len(positions) > 0 else None
+_target_ids_cache: dict[str, set[int]] = {}
 
 
-def _pad_batch(
-    samples_meta: list[dict],
-    device: torch.device,
-) -> tuple[torch.Tensor, torch.Tensor, list[int]]:
-    """Right-pad a list of 1-D token tensors; return (padded, mask, last_pos)."""
-    max_len = max(d["ids"].shape[0] for d in samples_meta)
-    B = len(samples_meta)
-    padded = torch.zeros(B, max_len, dtype=torch.long, device=device)
-    mask = torch.zeros(B, max_len, dtype=torch.long, device=device)
-    last_pos = []
-    for i, d in enumerate(samples_meta):
-        L = d["ids"].shape[0]
-        padded[i, :L] = d["ids"]
-        mask[i, :L] = 1
-        last_pos.append(L - 1)
-    return padded, mask, last_pos
-
-
-def _greedy_first_token(
-    model: AttributionModel,
+@torch.no_grad()
+def _greedy_decode(
+    model,
     input_ids: torch.Tensor,
-    attn_mask: torch.Tensor,
-    fwd_hooks: list,
-) -> torch.Tensor:
-    """Return argmax logit at last real token position for each sample in batch."""
-    logits = model.run_with_hooks(input_ids, fwd_hooks=fwd_hooks, attention_mask=attn_mask)
-    # last real token = last 1 in attn_mask
-    last_positions = attn_mask.sum(dim=1) - 1  # (B,)
-    return torch.stack(
-        [logits[i, last_positions[i], :].argmax() for i in range(input_ids.shape[0])]
-    )
+    max_new_tokens: int,
+    hooks: list | None = None,
+    attn_mask: torch.Tensor | None = None,
+    eos_token_id: int | None = None,
+) -> list[int]:
+    """Greedy decode up to max_new_tokens tokens. Works with or without prefix hooks."""
+    ids = input_ids  # (1, seq_len)
+    mask = attn_mask
+    generated = []
+    for _ in range(max_new_tokens):
+        if hooks:
+            logits = model.run_with_hooks(ids, fwd_hooks=hooks, attention_mask=mask)
+        else:
+            logits = model(ids)
+        next_id = int(logits[0, -1, :].argmax())
+        generated.append(next_id)
+        if eos_token_id is not None and next_id == eos_token_id:
+            break
+        next_tok = torch.tensor([[next_id]], dtype=torch.long, device=ids.device)
+        ids = torch.cat([ids, next_tok], dim=1)
+        if mask is not None:
+            mask = torch.cat([mask, torch.ones(1, 1, dtype=torch.long, device=ids.device)], dim=1)
+    return generated
+
+
+def _matching_token_ids(tokenizer, target_str: str) -> set[int]:
+    """Return all single-token IDs that are case/space variants of target_str.
+
+    Uses candidate generation + tokenization rather than vocab scanning,
+    because Qwen stores vocab keys with Ġ (GPT-2 byte encoding) not literal spaces.
+    """
+    if target_str in _target_ids_cache:
+        return _target_ids_cache[target_str]
+    base = target_str.strip()
+    candidates = {
+        base, base.lower(), base.upper(), base.capitalize(),
+        " " + base, " " + base.lower(), " " + base.upper(), " " + base.capitalize(),
+        "\n" + base, "\n" + base.lower(),
+    }
+    matches: set[int] = set()
+    for cand in candidates:
+        ids = tokenizer(cand, add_special_tokens=False).input_ids
+        if len(ids) == 1:
+            matches.add(ids[0])
+    _target_ids_cache[target_str] = matches
+    return matches
+
 
 
 # ---------------------------------------------------------------------------
@@ -164,7 +174,7 @@ def run_train(args: argparse.Namespace, device: torch.device) -> None:
     optimiser = torch.optim.AdamW(prefix_module.parameters(), lr=args.lr, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimiser, T_max=args.epochs)
 
-    samples = load_addition_dataset(args.dataset_path, max_samples=args.max_samples)
+    samples = load_concept_dataset(args.concept, tokenizer, template=args.template, n_per_template=args.n_per_template)
     split = int(0.9 * len(samples))
     train_samples = samples[:split]
     val_samples = samples[split:]
@@ -185,8 +195,7 @@ def run_train(args: argparse.Namespace, device: torch.device) -> None:
             for gi in idx_batch:
                 sample = train_samples[gi]
                 raw_ids, answer_ids = _sample_ids(sample, device)
-                eq_pos = _find_eq_pos(raw_ids, tokenizer)
-                if eq_pos is None or not answer_ids:
+                if not answer_ids:
                     continue
                 ext_ids, attn = prefix_module.prepare_inputs(raw_ids, pad_id)
                 meta.append(
@@ -194,7 +203,6 @@ def run_train(args: argparse.Namespace, device: torch.device) -> None:
                         "ids": ext_ids.squeeze(0),  # (k + seq_len,)
                         "attn": attn.squeeze(0),
                         "target_id": answer_ids[0],
-                        "eq_pos": eq_pos + args.prefix_len,  # shifted by prefix
                     }
                 )
 
@@ -230,18 +238,23 @@ def run_train(args: argparse.Namespace, device: torch.device) -> None:
 
         scheduler.step()
         avg_ce = epoch_ce / max(n_batches, 1)
+        grad_norm = (
+            prefix_module.prefix.grad.norm().item()
+            if prefix_module.prefix.grad is not None else 0.0
+        )
 
         # Quick val pass (no grad)
-        val_ce = _eval_ce(
+        val_ce, val_prob = _eval_ce(
             prefix_module, model, tokenizer, pad_id, val_samples[:200], args, device, dtype
         )
 
         if epoch % max(1, args.epochs // 10) == 0 or epoch == args.epochs:
             log.info(
-                "Epoch %3d/%d — train_CE=%.4f  val_CE=%.4f", epoch, args.epochs, avg_ce, val_ce
+                "Epoch %3d/%d — train_CE=%.4f  val_CE=%.4f  val_p(correct)=%.4f  grad_norm=%.4f",
+                epoch, args.epochs, avg_ce, val_ce, val_prob, grad_norm,
             )
 
-        history.append({"epoch": epoch, "train_ce": avg_ce, "val_ce": val_ce})
+        history.append({"epoch": epoch, "train_ce": avg_ce, "val_ce": val_ce, "val_prob_correct": val_prob, "grad_norm": grad_norm})
 
         if val_ce < best_val_ce:
             best_val_ce = val_ce
@@ -261,9 +274,11 @@ def _eval_ce(
     args: argparse.Namespace,
     device: torch.device,
     dtype: torch.dtype,
-) -> float:
+) -> tuple[float, float]:
+    """Return (mean_CE, mean_p_correct) over samples."""
     prefix_module.eval()
     total_ce = 0.0
+    total_prob = 0.0
     n = 0
     with torch.no_grad():
         for sample in samples:
@@ -274,10 +289,15 @@ def _eval_ce(
             hooks = prefix_module.hooks(batch_size=1)
             logits = model.run_with_hooks(ext_ids, fwd_hooks=hooks, attention_mask=attn)
             last_logit = logits[0, attn.sum() - 1, :]
-            target = torch.tensor(answer_ids[0], device=device)
+            target_id = answer_ids[0]
+            target = torch.tensor(target_id, device=device)
             total_ce += F.cross_entropy(last_logit.unsqueeze(0), target.unsqueeze(0)).item()
+            target_str = sample.get("true_answer_str", tokenizer.decode([target_id]))
+            probs = F.softmax(last_logit.float(), dim=-1)
+            target_ids_set = _matching_token_ids(tokenizer, target_str)
+            total_prob += float(sum(probs[tid].item() for tid in target_ids_set if tid < probs.shape[0]))
             n += 1
-    return total_ce / max(n, 1)
+    return total_ce / max(n, 1), total_prob / max(n, 1)
 
 
 # ---------------------------------------------------------------------------
@@ -308,13 +328,15 @@ def run_eval(args: argparse.Namespace, device: torch.device) -> None:
     prefix_module = prefix_module.to(device=device, dtype=dtype)
     prefix_module.eval()
 
-    samples = load_addition_dataset(args.dataset_path, max_samples=args.max_samples)
+    samples = load_concept_dataset(args.concept, tokenizer, template=args.template, n_per_template=args.n_per_template)
     eval_samples = samples[int(0.9 * len(samples)) :]
     log.info("Evaluating on %d samples", len(eval_samples))
 
     n_correct_base = 0
     n_correct_prefix = 0
     n_total = 0
+    sum_prob_base = 0.0
+    sum_prob_pfx = 0.0
     per_sample: list[dict] = []
 
     with torch.no_grad():
@@ -323,38 +345,109 @@ def run_eval(args: argparse.Namespace, device: torch.device) -> None:
             if not answer_ids:
                 continue
             target_id = answer_ids[0]
+            target_str = sample.get("true_answer_str", tokenizer.decode([target_id]))
+            target_ids_set = _matching_token_ids(tokenizer, target_str)
 
             # Baseline (no prefix)
             base_input = raw_ids.unsqueeze(0)
             base_logits = model(base_input)
-            base_pred = int(base_logits[0, -1, :].argmax())
+            base_last = base_logits[0, -1, :]
+            base_pred = int(base_last.argmax())
+            base_probs = F.softmax(base_last.float(), dim=-1)
+            base_prob = float(sum(base_probs[tid].item() for tid in target_ids_set if tid < base_probs.shape[0]))
 
             # With prefix
             ext_ids, attn = prefix_module.prepare_inputs(raw_ids, pad_id)
             hooks = prefix_module.hooks(batch_size=1)
             pfx_logits = model.run_with_hooks(ext_ids, fwd_hooks=hooks, attention_mask=attn)
-            pfx_pred = int(pfx_logits[0, attn.sum() - 1, :].argmax())
+            pfx_last = pfx_logits[0, attn.sum() - 1, :]
+            pfx_pred = int(pfx_last.argmax())
+            pfx_probs = F.softmax(pfx_last.float(), dim=-1)
+            pfx_prob = float(sum(pfx_probs[tid].item() for tid in target_ids_set if tid < pfx_probs.shape[0]))
 
-            base_ok = int(base_pred == target_id)
-            pfx_ok = int(pfx_pred == target_id)
+            base_ok = int(base_pred in target_ids_set)
+            pfx_ok = int(pfx_pred in target_ids_set)
             n_correct_base += base_ok
             n_correct_prefix += pfx_ok
+            sum_prob_base += base_prob
+            sum_prob_pfx += pfx_prob
             n_total += 1
-            per_sample.append(
+
+            # Top-k tokens
+            top_k = args.top_k_tokens
+            base_topk = base_last.float().softmax(-1).topk(top_k)
+            pfx_topk = pfx_last.float().softmax(-1).topk(top_k)
+            base_topk_info = [
+                {"token": tokenizer.decode([int(i)]), "id": int(i), "prob": float(p)}
+                for i, p in zip(base_topk.indices.tolist(), base_topk.values.tolist())
+            ]
+            pfx_topk_info = [
+                {"token": tokenizer.decode([int(i)]), "id": int(i), "prob": float(p)}
+                for i, p in zip(pfx_topk.indices.tolist(), pfx_topk.values.tolist())
+            ]
+
+            _skip = {"prompt_token_ids", "answer_token_ids"}
+            meta = {k: v for k, v in sample.items() if k not in _skip}
+            meta.update(
                 {
-                    "a": sample.get("a"),
-                    "b": sample.get("b"),
-                    "true_answer": sample.get("true_answer_str"),
                     "base_correct": bool(base_ok),
                     "pfx_correct": bool(pfx_ok),
+                    "base_prob_correct": base_prob,
+                    "pfx_prob_correct": pfx_prob,
+                    "base_top_tokens": base_topk_info,
+                    "pfx_top_tokens": pfx_topk_info,
                 }
             )
+            per_sample.append(meta)
 
     acc_base = 100.0 * n_correct_base / max(n_total, 1)
     acc_pfx = 100.0 * n_correct_prefix / max(n_total, 1)
+    mean_prob_base = sum_prob_base / max(n_total, 1)
+    mean_prob_pfx = sum_prob_pfx / max(n_total, 1)
     log.info("Baseline accuracy:       %.2f%%  (%d/%d)", acc_base, n_correct_base, n_total)
     log.info("With-prefix accuracy:    %.2f%%  (%d/%d)", acc_pfx, n_correct_prefix, n_total)
-    log.info("Delta:                   %+.2f%%", acc_pfx - acc_base)
+    log.info("Delta accuracy:          %+.2f%%", acc_pfx - acc_base)
+    log.info("Baseline mean p(correct):  %.4f", mean_prob_base)
+    log.info("With-prefix mean p(correct): %.4f", mean_prob_pfx)
+    log.info("Delta p(correct):          %+.4f", mean_prob_pfx - mean_prob_base)
+
+    # Generate continuations for first n_show samples
+    n_show = min(args.n_show, len(eval_samples))
+    eos_id = tokenizer.eos_token_id
+    if n_show > 0 and args.gen_tokens > 0:
+        log.info("Generating %d tokens for first %d samples...", args.gen_tokens, n_show)
+        with torch.no_grad():
+            for i, sample in enumerate(eval_samples[:n_show]):
+                raw_ids, _ = _sample_ids(sample, device)
+                base_gen_ids = _greedy_decode(
+                    model, raw_ids.unsqueeze(0), args.gen_tokens, eos_token_id=eos_id
+                )
+                ext_ids, attn = prefix_module.prepare_inputs(raw_ids, pad_id)
+                pfx_hooks = prefix_module.hooks(batch_size=1)
+                pfx_gen_ids = _greedy_decode(
+                    model, ext_ids, args.gen_tokens, hooks=pfx_hooks, attn_mask=attn, eos_token_id=eos_id
+                )
+                per_sample[i]["base_gen"] = tokenizer.decode(base_gen_ids)
+                per_sample[i]["pfx_gen"] = tokenizer.decode(pfx_gen_ids)
+
+    # Print top-k token comparison and generation for a few samples
+    n_show = min(args.n_show, len(per_sample))
+    if n_show > 0:
+        log.info("")
+        log.info("Top-%d token predictions and generation for first %d samples:", args.top_k_tokens, n_show)
+        _eval_keys = {"base_correct", "pfx_correct", "base_prob_correct", "pfx_prob_correct",
+                      "base_top_tokens", "pfx_top_tokens", "base_gen", "pfx_gen",
+                      "prompt_token_ids", "answer_token_ids"}
+        for s in per_sample[:n_show]:
+            base_str = "  ".join(f"{t['token']!r}({t['prob']:.3f})" for t in s["base_top_tokens"])
+            pfx_str  = "  ".join(f"{t['token']!r}({t['prob']:.3f})" for t in s["pfx_top_tokens"])
+            meta_str = "  ".join(f"{k}={v}" for k, v in s.items() if k not in _eval_keys)
+            log.info("  %s", meta_str)
+            log.info("    base top: %s", base_str)
+            log.info("    pfx  top: %s", pfx_str)
+            if "base_gen" in s:
+                log.info("    base gen: %r", s["base_gen"])
+                log.info("    pfx  gen: %r", s["pfx_gen"])
 
     results = {
         "mode": mode,
@@ -362,6 +455,9 @@ def run_eval(args: argparse.Namespace, device: torch.device) -> None:
         "acc_base": acc_base,
         "acc_prefix": acc_pfx,
         "delta_acc": acc_pfx - acc_base,
+        "mean_prob_correct_base": mean_prob_base,
+        "mean_prob_correct_prefix": mean_prob_pfx,
+        "delta_prob_correct": mean_prob_pfx - mean_prob_base,
     }
     out_path = Path(args.out_root) / f"eval_{mode}.json"
     with open(out_path, "w") as f:
@@ -414,7 +510,7 @@ def run_analyze(args: argparse.Namespace, device: torch.device) -> None:
     prefix_module.eval()
     k = prefix_module.k
 
-    samples = load_addition_dataset(args.dataset_path, max_samples=args.max_samples)
+    samples = load_concept_dataset(args.concept, tokenizer, template=args.template, n_per_template=args.n_per_template)
     eval_samples = samples[int(0.9 * len(samples)) :][: args.analyze_n]
     log.info("Analyzing %d samples across layers %s", len(eval_samples), args.analyze_layers)
 
@@ -440,13 +536,11 @@ def run_analyze(args: argparse.Namespace, device: torch.device) -> None:
                 continue
             target_id = answer_ids[0]
 
-            eq_pos_raw = _find_eq_pos(raw_ids, tokenizer)
-            if eq_pos_raw is None:
-                continue
-            eq_pos_pfx = eq_pos_raw + k
-
+            # Last token of the prompt is always the answer position
+            last_pos_raw = raw_ids.shape[0] - 1
             base_input = raw_ids.unsqueeze(0)
             ext_ids, attn = prefix_module.prepare_inputs(raw_ids, pad_id)
+            last_pos_pfx = attn.sum().item() - 1
 
             base_cache: dict[int, torch.Tensor] = {}
             pfx_cache: dict[int, torch.Tensor] = {}
@@ -454,7 +548,7 @@ def run_analyze(args: argparse.Namespace, device: torch.device) -> None:
             base_hooks = [
                 (
                     f"blocks.{L}.hook_resid_post",
-                    lambda act, hook, _L=L, _pos=eq_pos_raw, cache=base_cache: (
+                    lambda act, hook, _L=L, _pos=last_pos_raw, cache=base_cache: (
                         cache.update({_L: act[0, _pos, :].detach().clone()}) or act
                     ),
                 )
@@ -464,7 +558,7 @@ def run_analyze(args: argparse.Namespace, device: torch.device) -> None:
             pfx_capture_hooks = [
                 (
                     f"blocks.{L}.hook_resid_post",
-                    lambda act, hook, _L=L, _pos=eq_pos_pfx, cache=pfx_cache: (
+                    lambda act, hook, _L=L, _pos=last_pos_pfx, cache=pfx_cache: (
                         cache.update({_L: act[0, _pos, :].detach().clone()}) or act
                     ),
                 )
@@ -642,8 +736,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dtype", default="bfloat16")
 
     # Data
-    p.add_argument("--dataset_path", default="data/addition_3digit.jsonl")
-    p.add_argument("--max_samples", type=int, default=None)
+    p.add_argument("--concept", default="carry",
+                   help="Concept dataset name (e.g. carry, gcd, perfect_square)")
+    p.add_argument("--template", default="T0",
+                   help="Template key within the concept dataset (e.g. T0, T1, T2)")
+    p.add_argument("--n_per_template", type=int, default=500,
+                   help="Number of pairs per template to generate")
 
     # Prefix
     p.add_argument("--prefix_len", type=int, default=10, help="Number of prefix tokens (k)")
@@ -656,6 +754,9 @@ def build_parser() -> argparse.ArgumentParser:
     # Output
     p.add_argument("--out_root", default="runs/soft_prompt")
     p.add_argument("--force", action="store_true")
+    p.add_argument("--top_k_tokens", type=int, default=3, help="Top-k tokens to show per sample in eval")
+    p.add_argument("--n_show", type=int, default=5, help="Number of sample token comparisons to print in eval")
+    p.add_argument("--gen_tokens", type=int, default=50, help="Number of tokens to greedily generate per shown sample (0 to disable)")
 
     # Analyze
     p.add_argument(

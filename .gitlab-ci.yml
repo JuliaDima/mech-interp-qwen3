@@ -9,6 +9,7 @@ variables:
 .conda_setup: &conda_setup
   - unset LD_PRELOAD || true
   - export PATH="${CONDA_ROOT}/envs/${CONDA_ENV}/bin:${PATH}"
+  - export LD_LIBRARY_PATH="${CONDA_ROOT}/envs/${CONDA_ENV}/lib/python3.11/site-packages/nvidia/nccl/lib:${LD_LIBRARY_PATH:-}"
   - python --version
 
 unit-test-job:
