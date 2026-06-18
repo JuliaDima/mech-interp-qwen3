@@ -812,7 +812,11 @@ def fig_prefix_nn(
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Visualize soft-prompt experiment results")
     p.add_argument("--out_root", default="runs/soft_prompt")
-    p.add_argument("--dataset_path", default="data/addition_3digit.jsonl")
+    p.add_argument("--concept", default="carry",
+                   help="Concept dataset name (e.g. carry, gcd, perfect_square)")
+    p.add_argument("--template", default="T0",
+                   help="Template key within the concept dataset")
+    p.add_argument("--n_per_template", type=int, default=500)
     p.add_argument("--mode", default="soft_prompt", choices=["soft_prompt", "prefix_tuning"])
     p.add_argument("--model", default="Qwen/Qwen3-4B")
     p.add_argument(
@@ -834,18 +838,20 @@ def main() -> None:
     figs = set(args.figures) if args.figures else set(range(1, 8))
 
     # Paths
-    dataset_path = Path(args.dataset_path)
     analysis_path = root / f"analysis_{mode}.json"
     ckpt_path = root / f"prefix_{mode}.pt"
     samples_path = root / f"eval_{mode}_samples.json"
 
     print(f"Output directory: {out}")
 
-    # Load dataset once
-    dataset = []
-    if dataset_path.exists():
-        with open(dataset_path) as f:
-            dataset = [json.loads(line) for line in f]
+    # Load dataset once (no tokenizer needed for visualisation)
+    import sys as _sys
+    _repo = str(Path(__file__).resolve().parent.parent.parent)
+    for _p in [_repo, _repo + "/src"]:
+        if _p not in _sys.path:
+            _sys.path.insert(0, _p)
+    from experiments.soft_prompt.dataset_utils import load_concept_pairs
+    dataset = load_concept_pairs(args.concept, template=args.template, n_per_template=args.n_per_template)
 
     if 1 in figs:
         print("[1/6] Prompt templates")
