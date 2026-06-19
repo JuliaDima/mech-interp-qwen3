@@ -111,7 +111,7 @@ def _sweep_cache_metadata(args, target_layers: list[int], prompts: list[str], ex
 
 
 def _load_concept(name: str, n: int, seed: int):
-    mod = importlib.import_module(f"data.concept_datasets.{name}_dataset")
+    mod = importlib.import_module(f"experiments.concept_localization.concept_datasets.{name}_dataset")
     # Try different naming conventions: full name, suffix-only, then any generate_*_pairs function
     for fn in [
         f"generate_{name}_pairs",

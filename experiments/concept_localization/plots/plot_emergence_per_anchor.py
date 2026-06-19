@@ -108,7 +108,7 @@ def load_concept_anchor_data(concept: str) -> dict | None:
     template_str: str | None = None
     try:
         import importlib
-        mod = importlib.import_module(f"data.concept_datasets.{concept}_dataset")
+        mod = importlib.import_module(f"experiments.concept_localization.concept_datasets.{concept}_dataset")
         templates = getattr(mod, "TEMPLATES", {})
         if template_key in templates:
             template_str = templates[template_key][0]

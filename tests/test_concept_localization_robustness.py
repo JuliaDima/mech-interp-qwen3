@@ -612,7 +612,7 @@ class TestProjectOntoFeatures:
 
 class TestDatasetGeneration:
     def test_carry_pairs_reproducible_with_same_seed(self):
-        from data.concept_datasets.carry_dataset import generate_carry_pairs
+        from experiments.concept_localization.concept_datasets.carry_dataset import generate_carry_pairs
 
         p1 = generate_carry_pairs(n_per_template=10, seed=42)
         p2 = generate_carry_pairs(n_per_template=10, seed=42)
@@ -621,14 +621,14 @@ class TestDatasetGeneration:
             assert a.prompt_pos == b.prompt_pos and a.prompt_neg == b.prompt_neg
 
     def test_gcd_pairs_reproducible_with_same_seed(self):
-        from data.concept_datasets.gcd_dataset import generate_gcd_pairs
+        from experiments.concept_localization.concept_datasets.gcd_dataset import generate_gcd_pairs
 
         p1 = generate_gcd_pairs(n_per_template=10, seed=0)
         p2 = generate_gcd_pairs(n_per_template=10, seed=0)
         assert all(a.prompt_pos == b.prompt_pos for a, b in zip(p1, p2, strict=False))
 
     def test_carry_pos_has_carry_neg_does_not(self):
-        from data.concept_datasets.carry_dataset import generate_carry_pairs
+        from experiments.concept_localization.concept_datasets.carry_dataset import generate_carry_pairs
 
         for p in generate_carry_pairs(n_per_template=20):
             a_pos, b_pos = p.meta["a_pos"], p.meta["b_pos"]
@@ -637,14 +637,14 @@ class TestDatasetGeneration:
             assert (a_neg % 10 + b_neg % 10) < 10, "Neg pair must not carry at units digit"
 
     def test_gcd_pos_divisible_by_7_neg_not(self):
-        from data.concept_datasets.gcd_dataset import generate_gcd_pairs
+        from experiments.concept_localization.concept_datasets.gcd_dataset import generate_gcd_pairs
 
         for p in generate_gcd_pairs(n_per_template=20):
             assert p.meta["a_pos"] % 7 == 0, f"a_pos={p.meta['a_pos']} not divisible by 7"
             assert p.meta["a_neg"] % 7 != 0, f"a_neg={p.meta['a_neg']} is divisible by 7"
 
     def test_gcd_same_digit_count_for_pos_and_neg(self):
-        from data.concept_datasets.gcd_dataset import generate_gcd_pairs
+        from experiments.concept_localization.concept_datasets.gcd_dataset import generate_gcd_pairs
 
         for p in generate_gcd_pairs(n_per_template=20):
             assert len(str(p.meta["a_pos"])) == len(
@@ -652,25 +652,25 @@ class TestDatasetGeneration:
             ), f"Digit mismatch: a_pos={p.meta['a_pos']} vs a_neg={p.meta['a_neg']}"
 
     def test_carry_template_values_are_valid_keys(self):
-        from data.concept_datasets.carry_dataset import TEMPLATES, generate_carry_pairs
+        from experiments.concept_localization.concept_datasets.carry_dataset import TEMPLATES, generate_carry_pairs
 
         for p in generate_carry_pairs(n_per_template=5):
             assert p.template in TEMPLATES
 
     def test_gcd_template_values_are_valid_keys(self):
-        from data.concept_datasets.gcd_dataset import TEMPLATES, generate_gcd_pairs
+        from experiments.concept_localization.concept_datasets.gcd_dataset import TEMPLATES, generate_gcd_pairs
 
         for p in generate_gcd_pairs(n_per_template=5):
             assert p.template in TEMPLATES
 
     def test_carry_meta_has_required_keys(self):
-        from data.concept_datasets.carry_dataset import generate_carry_pairs
+        from experiments.concept_localization.concept_datasets.carry_dataset import generate_carry_pairs
 
         for p in generate_carry_pairs(n_per_template=5):
             assert {"a_pos", "b_pos", "a_neg", "b_neg"}.issubset(p.meta.keys())
 
     def test_gcd_meta_has_required_keys(self):
-        from data.concept_datasets.gcd_dataset import generate_gcd_pairs
+        from experiments.concept_localization.concept_datasets.gcd_dataset import generate_gcd_pairs
 
         for p in generate_gcd_pairs(n_per_template=5):
             assert {"a_pos", "a_neg"}.issubset(p.meta.keys())

@@ -73,7 +73,7 @@ from experiments.concept_localization.pipeline.delta_feature_projections import 
 )
 
 
-DATASET_DIR = REPO_ROOT / "data" / "concept_datasets"
+DATASET_DIR = REPO_ROOT / "experiments" / "concept_localization" / "concept_datasets"
 CONCEPT_GENERATORS = {
     "carry": ("carry_dataset", "generate_carry_pairs"),
     "gcd": ("gcd_dataset", "generate_gcd_pairs"),
@@ -97,7 +97,7 @@ CONCEPT_GENERATORS = {
 
 def _load_concept(concept: str, n_per_template: int, seed: int) -> list[ConceptPair]:
     module_name, function_name = CONCEPT_GENERATORS[concept]
-    module = importlib.import_module(f"data.concept_datasets.{module_name}")
+    module = importlib.import_module(f"experiments.concept_localization.concept_datasets.{module_name}")
     return getattr(module, function_name)(n_per_template=n_per_template, seed=seed)
 
 
@@ -131,7 +131,7 @@ def test_registered_concepts_have_dataset_files_and_templates() -> None:
         module_path = DATASET_DIR / f"{module_name}.py"
         assert module_path.exists(), f"{concept} is registered without {module_path.name}"
 
-        module = importlib.import_module(f"data.concept_datasets.{module_name}")
+        module = importlib.import_module(f"experiments.concept_localization.concept_datasets.{module_name}")
         assert getattr(module, "TEMPLATES"), f"{concept} has no prompt templates"
 
 

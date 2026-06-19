@@ -80,71 +80,71 @@ _TRANSCODER_SET = "mwhanna/qwen3-4b-transcoders"
 # ── concept registry ──────────────────────────────────────────────────────────
 def _load_concept(name: str, n_per_template: int, seed: int):
     if name == "carry":
-        from data.concept_datasets.carry_dataset import generate_carry_pairs
+        from experiments.concept_localization.concept_datasets.carry_dataset import generate_carry_pairs
 
         return generate_carry_pairs(n_per_template, seed=seed)
     if name == "gcd":
-        from data.concept_datasets.gcd_dataset import generate_gcd_pairs
+        from experiments.concept_localization.concept_datasets.gcd_dataset import generate_gcd_pairs
 
         return generate_gcd_pairs(n_per_template, seed=seed)
     if name == "residue_class":
-        from data.concept_datasets.residue_class_dataset import generate_residue_pairs
+        from experiments.concept_localization.concept_datasets.residue_class_dataset import generate_residue_pairs
 
         return generate_residue_pairs(n_per_template, seed=seed)
     if name == "transitive_ordering":
-        from data.concept_datasets.transitive_ordering_dataset import generate_ordering_pairs
+        from experiments.concept_localization.concept_datasets.transitive_ordering_dataset import generate_ordering_pairs
 
         return generate_ordering_pairs(n_per_template, seed=seed)
     if name == "conservation":
-        from data.concept_datasets.conservation_dataset import generate_conservation_pairs
+        from experiments.concept_localization.concept_datasets.conservation_dataset import generate_conservation_pairs
 
         return generate_conservation_pairs(n_per_template, seed=seed)
     if name == "causal_direction":
-        from data.concept_datasets.causal_direction_dataset import generate_causal_pairs
+        from experiments.concept_localization.concept_datasets.causal_direction_dataset import generate_causal_pairs
 
         return generate_causal_pairs(n_per_template, seed=seed)
     if name == "negation_scope":
-        from data.concept_datasets.negation_scope_dataset import generate_negation_pairs
+        from experiments.concept_localization.concept_datasets.negation_scope_dataset import generate_negation_pairs
 
         return generate_negation_pairs(n_per_template, seed=seed)
     if name == "balanced_parentheses":
-        from data.concept_datasets.balanced_parentheses_dataset import generate_parentheses_pairs
+        from experiments.concept_localization.concept_datasets.balanced_parentheses_dataset import generate_parentheses_pairs
 
         return generate_parentheses_pairs(n_per_template, seed=seed)
     if name == "decimal_termination":
-        from data.concept_datasets.decimal_termination_dataset import generate_decimal_pairs
+        from experiments.concept_localization.concept_datasets.decimal_termination_dataset import generate_decimal_pairs
 
         return generate_decimal_pairs(n_per_template, seed=seed)
     if name == "doppler_shift":
-        from data.concept_datasets.doppler_shift_dataset import generate_doppler_pairs
+        from experiments.concept_localization.concept_datasets.doppler_shift_dataset import generate_doppler_pairs
 
         return generate_doppler_pairs(n_per_template, seed=seed)
     if name == "dot_product_sign":
-        from data.concept_datasets.dot_product_sign_dataset import generate_dot_pairs
+        from experiments.concept_localization.concept_datasets.dot_product_sign_dataset import generate_dot_pairs
 
         return generate_dot_pairs(n_per_template, seed=seed)
     if name == "geometric_series":
-        from data.concept_datasets.geometric_series_dataset import generate_geometric_pairs
+        from experiments.concept_localization.concept_datasets.geometric_series_dataset import generate_geometric_pairs
 
         return generate_geometric_pairs(n_per_template, seed=seed)
     if name == "momentum_conservation":
-        from data.concept_datasets.momentum_conservation_dataset import generate_momentum_pairs
+        from experiments.concept_localization.concept_datasets.momentum_conservation_dataset import generate_momentum_pairs
 
         return generate_momentum_pairs(n_per_template, seed=seed)
     if name == "perfect_square":
-        from data.concept_datasets.perfect_square_dataset import generate_perfect_square_pairs
+        from experiments.concept_localization.concept_datasets.perfect_square_dataset import generate_perfect_square_pairs
 
         return generate_perfect_square_pairs(n_per_template, seed=seed)
     if name == "syllogism":
-        from data.concept_datasets.syllogism_dataset import generate_syllogism_pairs
+        from experiments.concept_localization.concept_datasets.syllogism_dataset import generate_syllogism_pairs
 
         return generate_syllogism_pairs(n_per_template, seed=seed)
     if name == "triangle_inequality":
-        from data.concept_datasets.triangle_inequality_dataset import generate_triangle_pairs
+        from experiments.concept_localization.concept_datasets.triangle_inequality_dataset import generate_triangle_pairs
 
         return generate_triangle_pairs(n_per_template, seed=seed)
     if name == "wave_interference":
-        from data.concept_datasets.wave_interference_dataset import generate_wave_pairs
+        from experiments.concept_localization.concept_datasets.wave_interference_dataset import generate_wave_pairs
 
         return generate_wave_pairs(n_per_template, seed=seed)
     raise ValueError(f"Unknown concept: {name!r}")
@@ -187,7 +187,7 @@ SYMBOLIC_SUBSET = [
 def _get_dataset_attr(concept: str, attr: str, default=None):
     """Load an attribute from a concept's dataset module, returning default if absent."""
     try:
-        mod = importlib.import_module(f"data.concept_datasets.{concept}_dataset")
+        mod = importlib.import_module(f"experiments.concept_localization.concept_datasets.{concept}_dataset")
         return getattr(mod, attr, default)
     except ImportError:
         return default
