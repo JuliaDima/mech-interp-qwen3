@@ -33,7 +33,7 @@
 #   TEMPLATE=T0            template for per-anchor analyses   (default: T0)
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "$REPO_ROOT"
 
 # ── All registered concepts ─────────────────────────────────────────────────
@@ -128,7 +128,7 @@ for CONCEPT in "${CONCEPTS[@]}"; do
         --time=00:10:00 \
         --dependency=afterok:"${GIF_JID}" \
         scripts/sbatch_run.sh \
-            python scripts/select_and_submit_anchors.py \
+            python experiments/concept_localization/pipeline/select_and_submit_anchors.py \
                 --concept "$CONCEPT" \
                 --candidates "$ANCHOR_CANDIDATES" \
                 --k "$ANCHOR_K" \

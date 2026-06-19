@@ -93,7 +93,7 @@ def main() -> None:
     # ── Stage 1: run_concept ──────────────────────────────────────────────
     log.info("=== Stage 1: run_concept ===")
     _run([
-        sys.executable, "-m", "experiments.concept_localization.run_concept",
+        sys.executable, "-m", "experiments.concept_localization.pipeline.run_concept",
         "--concept", args.concept,
         "--anchor_modes", str(args.anchor_pos),
         "--template", args.template,
@@ -108,7 +108,7 @@ def main() -> None:
     log.info("=== Stage 1b: edec activation plot ===")
     try:
         _run([
-            sys.executable, "-m", "experiments.concept_localization.plot_edec_activations",
+            sys.executable, "-m", "experiments.concept_localization.plots.plot_edec_activations",
             "--anchor_dir", str(out_dir),
             "--concept", args.concept,
             "--direction", "pos", "neg",
@@ -121,7 +121,7 @@ def main() -> None:
     try:
         _run([
             sys.executable, "-m",
-            "experiments.concept_localization.delta_feature_projections",
+            "experiments.concept_localization.pipeline.delta_feature_projections",
             "--anchor_dir", str(out_dir),
             "--concept", args.concept,
             "--top_k", str(args.top_k),
@@ -138,7 +138,7 @@ def main() -> None:
     null_dir = out_dir / "null"
     null_dir.mkdir(parents=True, exist_ok=True)
     _run([
-        sys.executable, "-m", "experiments.concept_localization.run_null_permutation",
+        sys.executable, "-m", "experiments.concept_localization.pipeline.run_null_permutation",
         "--concept", args.concept,
         "--anchor_mode", str(args.anchor_pos),
         "--k", str(args.null_k),
@@ -150,7 +150,7 @@ def main() -> None:
     # ── Stage 2b: combined per-anchor layer summary ───────────────────────
     log.info("=== Stage 2b: combined layer summary plot ===")
     _run([
-        sys.executable, "-m", "experiments.concept_localization.plot_anchor_layer_summary",
+        sys.executable, "-m", "experiments.concept_localization.plots.plot_anchor_layer_summary",
         "--anchor_dir", str(out_dir),
         "--template", args.template,
         "--out", str(out_dir / f"anchor_layer_summary_{args.template}.png"),

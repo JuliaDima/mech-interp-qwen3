@@ -507,6 +507,14 @@ def _run_single(args, base_subdir: str | None = None) -> None:
                 )
             log.info("Saved feature projection → %s", edec_path)
 
+            # deltas.pt must exist before _run_feature_projection_plots loads it
+            _deltas_path_early = out_dir / "deltas.pt"
+            torch.save(
+                {key: {l: v for l, v in lr.delta.items()} for key, lr in layer_results.items()},
+                _deltas_path_early,
+            )
+            log.info("Saved delta tensors (early) → %s", _deltas_path_early)
+
             _run_feature_projection_plots(
                 model=model,
                 pairs=pairs,

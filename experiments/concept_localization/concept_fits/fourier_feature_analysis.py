@@ -221,7 +221,7 @@ def mode_energy_breakdown(C: np.ndarray) -> dict[str, float]:
 
     cats: dict[str, float] = {
         "diff": 0.0, "sum": 0.0, "row": 0.0, "col": 0.0,
-        "parity": 0.0, "mixed": 0.0,
+        "parity": 0.0, "row_parity": 0.0, "col_parity": 0.0, "mixed": 0.0,
     }
     total = 0.0
     seen: set[tuple] = set()
@@ -245,9 +245,15 @@ def mode_energy_breakdown(C: np.ndarray) -> dict[str, float]:
             sv = v if v <= half else v - N
 
             if u == 0:
-                cats["col"] += energy
+                if abs(sv) == half:
+                    cats["col_parity"] += energy
+                else:
+                    cats["col"] += energy
             elif v == 0:
-                cats["row"] += energy
+                if abs(su) == half:
+                    cats["row_parity"] += energy
+                else:
+                    cats["row"] += energy
             elif abs(su) == half and abs(sv) == half:
                 cats["parity"] += energy
             elif su == sv:
@@ -272,6 +278,8 @@ def dominant_mode_direction(breakdown: dict[str, float]) -> str:
         "row": "row-only (a)",
         "col": "col-only (b)",
         "parity": "parity (-1)^(a+b)",
+        "row_parity": "row-parity (-1)^a",
+        "col_parity": "col-parity (-1)^b",
         "mixed": "mixed",
     }.get(top, top)
     others = sorted(
@@ -662,16 +670,21 @@ def _build_scan_masks(N: int = 10) -> dict[str, np.ndarray]:
     SU = np.where(U <= half, U, U - N)
     SV = np.where(V <= half, V, V - N)
     dc = (U == 0) & (V == 0)
-    col     = (U == 0) & ~dc                                          # u=0, v≠0
-    row     = (V == 0) & ~dc                                          # v=0, u≠0
-    parity  = (np.abs(SU) == half) & (np.abs(SV) == half) & ~dc & ~row & ~col
-    sum_    = (SU == SV)  & ~dc & ~row & ~col & ~parity
-    diff    = (SU == -SV) & ~dc & ~row & ~col & ~parity
-    mixed   = ~dc & ~row & ~col & ~parity & ~sum_ & ~diff
+    _col_all  = (U == 0) & ~dc                                        # u=0, v≠0
+    _row_all  = (V == 0) & ~dc                                        # v=0, u≠0
+    col_parity = _col_all & (np.abs(SV) == half)                      # u=0, |v|=N/2  → (-1)^b
+    row_parity = _row_all & (np.abs(SU) == half)                      # |u|=N/2, v=0  → (-1)^a
+    col     = _col_all & ~col_parity                                   # u=0, v≠0, not Nyquist
+    row     = _row_all & ~row_parity                                   # v=0, u≠0, not Nyquist
+    parity  = (np.abs(SU) == half) & (np.abs(SV) == half) & ~dc & ~row & ~col & ~row_parity & ~col_parity
+    sum_    = (SU == SV)  & ~dc & ~row & ~col & ~parity & ~row_parity & ~col_parity
+    diff    = (SU == -SV) & ~dc & ~row & ~col & ~parity & ~row_parity & ~col_parity
+    mixed   = ~dc & ~row & ~col & ~parity & ~sum_ & ~diff & ~row_parity & ~col_parity
     # canonical half for top-mode detection (deduplicate conjugate pairs)
     canonical = (U < half) | ((U == 0) & (V <= half)) | ((U == half))
     canonical &= ~dc
     return dict(col=col, row=row, parity=parity, sum=sum_, diff=diff, mixed=mixed,
+                row_parity=row_parity, col_parity=col_parity,
                 dc=dc, canonical=canonical, SU=SU, SV=SV)
 
 _SCAN_MASKS_10 = _build_scan_masks(10)
@@ -693,7 +706,7 @@ def _score_grids_batch(grids: np.ndarray, N: int = 10, subtract_mean: bool = Tru
     ac_total = P[:, ~masks["dc"]].sum(axis=1) + 1e-30
     cat_energy: dict[str, np.ndarray] = {
         k: P[:, masks[k]].sum(axis=1) / ac_total
-        for k in ("col", "row", "parity", "sum", "diff", "mixed")
+        for k in ("col", "row", "parity", "sum", "diff", "mixed", "row_parity", "col_parity")
     }
 
     # Top mode amplitude and type (canonical half only)
@@ -710,7 +723,7 @@ def _score_grids_batch(grids: np.ndarray, N: int = 10, subtract_mean: bool = Tru
 
     return {
         **cat_energy,
-        "structured_energy": cat_energy["diff"] + cat_energy["sum"] + cat_energy["parity"],
+        "structured_energy": cat_energy["diff"] + cat_energy["sum"] + cat_energy["parity"] + cat_energy["row_parity"] + cat_energy["col_parity"],
         "top_mode_amp": top_amp,
         "top_mode_type": top_type,
         "_C_batch": C,
@@ -820,6 +833,8 @@ def scan_from_residuals(
                 "diff_energy":       float(scores["diff"][i]),
                 "sum_energy":        float(scores["sum"][i]),
                 "parity_energy":     float(scores["parity"][i]),
+                "row_parity_energy": float(scores["row_parity"][i]),
+                "col_parity_energy": float(scores["col_parity"][i]),
                 "structured_energy": se,
                 "top_mode_amp":      float(scores["top_mode_amp"][i]),
                 "top_mode_type":     scores["top_mode_type"][i],

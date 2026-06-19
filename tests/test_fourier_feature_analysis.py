@@ -343,7 +343,7 @@ class TestScoreGridsBatch:
         rng = np.random.default_rng(7)
         grids = rng.standard_normal((5, N, N)).astype(np.float32)
         scores = _score_grids_batch(grids, N=N)
-        cats = ["diff", "sum", "parity", "row", "col", "mixed"]
+        cats = ["diff", "sum", "parity", "row", "col", "mixed", "row_parity", "col_parity"]
         for i in range(5):
             total = sum(scores[c][i] for c in cats)
             assert total == pytest.approx(1.0, abs=1e-5)
@@ -359,7 +359,7 @@ class TestScoreGridsBatch:
         C = np.fft.fft2(Xd - Xd.mean()) / (N * N)
         bd = mode_energy_breakdown(C)
 
-        for cat in ("diff", "sum", "parity", "row", "col", "mixed"):
+        for cat in ("diff", "sum", "parity", "row", "col", "mixed", "row_parity", "col_parity"):
             assert scores[cat][0] == pytest.approx(bd[cat], abs=1e-4), \
                 f"Mismatch for category '{cat}'"
 
@@ -368,13 +368,13 @@ class TestScoreGridsBatch:
         grids = rng.standard_normal((3, N, N)).astype(np.float32)
         scores = _score_grids_batch(grids, N=N)
         for i in range(3):
-            expected = scores["diff"][i] + scores["sum"][i] + scores["parity"][i]
+            expected = scores["diff"][i] + scores["sum"][i] + scores["parity"][i] + scores["row_parity"][i] + scores["col_parity"][i]
             assert scores["structured_energy"][i] == pytest.approx(expected, abs=1e-8)
 
     def test_output_shape(self):
         grids = np.zeros((7, N, N), dtype=np.float32)
         scores = _score_grids_batch(grids, N=N)
-        for k in ("diff", "sum", "parity", "row", "col", "mixed", "structured_energy", "top_mode_amp"):
+        for k in ("diff", "sum", "parity", "row", "col", "mixed", "row_parity", "col_parity", "structured_energy", "top_mode_amp"):
             assert scores[k].shape == (7,)
         assert len(scores["top_mode_type"]) == 7
 
