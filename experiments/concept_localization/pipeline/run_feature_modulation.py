@@ -244,7 +244,7 @@ def _filter_active_prompts(
                 active_sides.add((i, 1))
 
     if missing:
-        log.warning("Features not in sweep_activations.npz (skipped for filter): %s", missing)
+        log.warning("Features not in the input file (skipped for filter): %s", missing)
 
     prompts: list[dict] = []
     for ex in examples:
@@ -678,7 +678,7 @@ def main() -> None:
                         help="Modulate all features simultaneously")
     parser.add_argument(
         "--sweep_dir", default=None, type=Path,
-        help="Path to sweep dir containing sweep_activations.npz and sweep_examples.pkl. "
+        help="Path to sweep dir containing sweep residuals and sweep examples. "
              "Required in modulation mode: each feature is evaluated only on prompts where it fires.",
     )
     parser.add_argument(
