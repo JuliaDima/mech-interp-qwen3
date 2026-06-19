@@ -23,7 +23,7 @@ from experiments.concept_localization.pipeline.run_concept_sweep import CONCEPTS
 def print_concept_pairs(concept: str, n_pairs: int = 3):
     """Print sample pairs from a concept dataset."""
     try:
-        mod = importlib.import_module(f"data.concept_datasets.{concept}_dataset")
+        mod = importlib.import_module(f"experiments.concept_localization.concept_datasets.{concept}_dataset")
 
         # Find generate function
         gen_fn = None
