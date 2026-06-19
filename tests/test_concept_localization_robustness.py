@@ -25,9 +25,8 @@ from experiments.concept_localization.extract_deltas_generic import (
 )
 from mechinterp_qwen3.utils.token_utils import tokenize_qwen_input
 
-# ─────────────────────────────────────────────────────────────────────────────
+
 # Shared helpers
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 class _CharTok:
@@ -45,8 +44,6 @@ class _CharTok:
         return SimpleNamespace(input_ids=ids)
 
     def convert_ids_to_tokens(self, ids):
-        # Mimic Qwen: \n (ord 10) → "Ċ", other non-printable → "<N>"
-        # Accepts both a single int and a list of ints (like HF tokenizers do)
         def _id_to_tok(i: int) -> str:
             if i == 10:
                 return "Ċ"
@@ -84,24 +81,21 @@ def _pairs(n: int, template: str = "T0") -> list[ConceptPair]:
     return [ConceptPair(prompt_pos="ab= ", prompt_neg="ab= ", template=template) for _ in range(n)]
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # 1. Delimiter anchor detection
-# ─────────────────────────────────────────────────────────────────────────────
-
 
 class TestFindDelimiterAnchor:
     def test_returns_last_delimiter_not_first(self):
-        # "calc: 123+456= " has ":" at 4 and "=" at 13 — must return 13, not 4
+        # "calc: 123+456= " has ":" at 4 and "=" at 13; must return 13, not 4.
         text = "calc: 123+456= "
         ids = [ord(c) for c in text]
         pos = _find_delimiter_anchor(ids, _CHAR_TOK)
         assert text[pos] == "=", f"Expected '=' (last delimiter), got {text[pos]!r} at {pos}"
 
-    def test_falls_back_to_last_token_when_no_delimiter(self):
+    def test_raises_when_no_delimiter(self):
         text = "abcdef"
         ids = [ord(c) for c in text]
-        pos = _find_delimiter_anchor(ids, _CHAR_TOK)
-        assert pos == len(ids) - 1
+        with pytest.raises(ValueError, match="Could not resolve delimiter anchor"):
+            _find_delimiter_anchor(ids, _CHAR_TOK)
 
     def test_question_mark_is_delimiter(self):
         text = "what is 5+3? "
@@ -116,21 +110,19 @@ class TestFindDelimiterAnchor:
         assert text[pos] == "\n"
 
     def test_multiple_colons_returns_last(self):
-        # "Yes or No: foo: " — last ":" is at index 14
+        # "Yes or No: foo: " has two colons; use the final one.
         text = "Yes or No: foo: "
         ids = [ord(c) for c in text]
         pos = _find_delimiter_anchor(ids, _CHAR_TOK)
         expected = text.rindex(":")
         assert pos == expected, f"Expected last ':' at {expected}, got {pos}"
 
-    def test_position_always_in_range(self):
-        for text in ["x= ", "abc", "a:b= ", "\n"]:
+    def test_position_always_in_range_when_delimiter_exists(self):
+        for text in ["x= ", "a:b= ", "\n"]:
             ids = [ord(c) for c in text]
             pos = _find_delimiter_anchor(ids, _CHAR_TOK)
             assert 0 <= pos < len(ids)
 
-
-# ─────────────────────────────────────────────────────────────────────────────
 # 2. Anchor mode resolution — no silent fallbacks
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -149,9 +141,10 @@ class TestResolveAnchor:
         ids = [ord(c) for c in "abcde"]
         assert _resolve_anchor(ids, _CHAR_TOK, "2", None, None) == 2
 
-    def test_integer_mode_clamps_to_last_when_out_of_bounds(self):
+    def test_integer_mode_raises_when_out_of_bounds(self):
         ids = [ord(c) for c in "abc"]
-        assert _resolve_anchor(ids, _CHAR_TOK, "999", None, None) == 2
+        with pytest.raises(ValueError, match="out of range"):
+            _resolve_anchor(ids, _CHAR_TOK, "999", None, None)
 
     def test_unknown_mode_raises_value_error_not_silent_fallback(self):
         # Must raise, never silently fall through to delimiter or last
@@ -284,7 +277,7 @@ class TestTemplateGrouping:
         model = _make_model()
         pairs = _pairs(4, "T0") + _pairs(4, "T1")
         results = extract_layer_deltas_generic(
-            model, pairs, [0], torch.device("cpu"), torch.float32, per_template=True
+            model, pairs, [0], torch.device("cpu"), torch.float32, per_template=True, anchor_mode="last"
         )
         assert set(results.keys()) == {"all", "T0", "T1"}
 
@@ -305,7 +298,7 @@ class TestTemplateGrouping:
             ConceptPair(prompt_pos="abcde", prompt_neg="abcde", template="T0"),
         ]
         results = extract_layer_deltas_generic(
-            model, pairs, [0], torch.device("cpu"), torch.float32, per_template=True
+            model, pairs, [0], torch.device("cpu"), torch.float32, per_template=True, anchor_mode="last"
         )
         assert results["all"].skipped == 1
         assert results["T0"].skipped == 0

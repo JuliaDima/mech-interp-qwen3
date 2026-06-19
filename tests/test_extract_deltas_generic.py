@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
 import torch
 
 from experiments.concept_localization.concept_pair import ConceptPair
@@ -67,6 +68,7 @@ def test_pos_neg_counts_equal():
         device=torch.device("cpu"),
         dtype=torch.float32,
         per_template=False,
+        anchor_mode="last",
     )
 
     ld = results["all"]
@@ -114,9 +116,25 @@ def test_pos_neg_counts_equal_with_skipped():
         device=torch.device("cpu"),
         dtype=torch.float32,
         per_template=False,
+        anchor_mode="last",
     )
 
     ld = results["all"]
     # First pair was skipped; remaining 4 should be equal on both sides
     assert ld.skipped == 1
     assert ld.n_pairs == 4
+
+def test_default_delimiter_anchor_raises_when_no_delimiter():
+    """Default delimiter mode should fail loudly instead of falling back to last token."""
+    model = _make_model()
+    pairs = _pairs(1)
+
+    with pytest.raises(ValueError, match="Could not resolve delimiter anchor"):
+        extract_layer_deltas_generic(
+            model,
+            pairs,
+            [0],
+            device=torch.device("cpu"),
+            dtype=torch.float32,
+            per_template=False,
+        )
