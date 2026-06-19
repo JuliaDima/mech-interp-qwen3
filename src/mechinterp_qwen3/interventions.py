@@ -199,12 +199,15 @@ def make_subtract_hook(
             b_enc = transcoder.b_enc
             W_dec = transcoder.W_dec
 
-            pre = F.linear(h_in.to(W_enc.dtype), W_enc, b_enc)
-            acts = transcoder.activation_function(pre)  # (batch, n_pos, d_tc)
+            fids_t = torch.tensor(feature_ids, device=h_in.device)
+            w_enc_k = W_enc[fids_t]        # (k, d_model)
+            b_enc_k = b_enc[fids_t]        # (k,)
+            pre_k = F.linear(h_in.to(w_enc_k.dtype), w_enc_k, b_enc_k)  # (batch, n_pos, k)
+            acts_k = transcoder.activation_function(pre_k)
 
             out = mlp_out.to(W_dec.dtype)
-            for fid in feature_ids:
-                out = out - scale * acts[..., fid : fid + 1] * W_dec[fid]
+            for i, fid in enumerate(feature_ids):
+                out = out - scale * acts_k[..., i : i + 1] * W_dec[fid]
         return out.to(mlp_out.dtype)
 
     _hook._last_mlp_in = None  # type: ignore[attr-defined]

@@ -657,6 +657,7 @@ def plot_feature_heatmap_grid(
     cmap: str = "unused",  # kept for API compat; always uses white→violet
     cluster_labels: "dict[tuple[int, int], int] | None" = None,
     coverage: "np.ndarray | None" = None,  # (10,10) bool — True where prompt samples exist
+    extra_titles: "dict[tuple[int, int], str] | None" = None,  # extra per-panel annotation
 ) -> None:
     """Grid of 2-D heatmaps over swept input digits, one panel per feature.
 
@@ -727,6 +728,8 @@ def plot_feature_heatmap_grid(
                 title += f"\ndec={dec:+.3f} enc={enc:+.3f}"
             else:
                 title += f"  cs={dec:+.2f}"
+        if extra_titles and (layer, feat_id) in extra_titles:
+            title += f"\n{extra_titles[(layer, feat_id)]}"
         ax.set_title(title, fontsize=7, pad=2)
         ax.set_xlabel(xlabel, fontsize=6, labelpad=1)
         ax.set_ylabel(ylabel, fontsize=6, labelpad=1)

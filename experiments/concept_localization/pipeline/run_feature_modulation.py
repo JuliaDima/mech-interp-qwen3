@@ -9,18 +9,18 @@ raw-model concept accuracy on the chosen dataset and template, then exits.
 
 Examples:
     # Eval-only — just report baseline accuracy on T0 carry
-    python -m experiments.concept_localization.pipeline.run_feature_modulation \\
+    python -m experiments.concept_localization.pipeline.run_feature_modulation \
         --concept carry
 
     # Ablate joint features (subtract their decoder directions from MLP output)
-    python -m experiments.concept_localization.pipeline.run_feature_modulation \\
-        --concept carry --joint --features L4_F126502 L19_F23877 \\
+    python -m experiments.concept_localization.pipeline.run_feature_modulation \
+        --concept carry --joint --features L4_F126502 L19_F23877 \
         --sweep_dir runs/concept_localization/carry/carry_T0/anchor_rank2_pos9/sweep
 
     # Inject feature directions on wrong pos pairs
-    python -m experiments.concept_localization.pipeline.run_feature_modulation \\
-        --concept carry --features L4_F126502 L19_F23877 \\
-        --inject_delta 5.0 --anchor_pos 10 \\
+    python -m experiments.concept_localization.pipeline.run_feature_modulation \
+        --concept carry --features L4_F126502 L19_F23877 \
+        --inject_delta 5.0 --anchor_pos 10 \
         --sweep_dir runs/concept_localization/carry/carry_T0/anchor_rank2_pos9/sweep
 """
 
@@ -579,6 +579,7 @@ def _save_heatmap_grid(
     concept: str,
     anchor_label: str,
     feature_scores: "dict[str, dict] | None" = None,
+    results: "dict | None" = None,
 ) -> None:
     """Save an edec_topk_grid-style PDF for the modulated features.
 
@@ -633,16 +634,60 @@ def _save_heatmap_grid(
         log.info("No features with sweep activations — skipping heatmap grid")
         return
 
+    # Build overall delta summary for the suptitle
+    rich_anchor = anchor_label
+    if results:
+        def _fmt_split(chg: dict, split: str) -> str:
+            c = chg.get(split, {})
+            return f"{split}: Δacc={c.get('accuracy', 0):+.1%} Δp={c.get('mean_correct_prob', 0):+.4f}"
+        chg_all = results.get("features", [{}])[0].get("metrics", {}).get("change", {}) if results.get("features") else {}
+        # aggregate over all features (use results["summary"] if present, else mean of features)
+        feats = results.get("features", [])
+        if feats:
+            splits = ("all", "pos", "neg")
+            agg = {s: {"accuracy": 0.0, "mean_correct_prob": 0.0} for s in splits}
+            for row in feats:
+                for s in splits:
+                    for k in ("accuracy", "mean_correct_prob"):
+                        agg[s][k] += row["metrics"]["change"].get(s, {}).get(k, 0.0)
+            n = len(feats)
+            for s in splits:
+                for k in agg[s]:
+                    agg[s][k] /= n
+            rich_anchor = (
+                f"{anchor_label}  |  "
+                + "  ".join(
+                    f"{s}: Δacc={agg[s]['accuracy']:+.1%} Δp={agg[s]['mean_correct_prob']:+.4f}"
+                    for s in splits
+                )
+            )
+
+    # Build per-feature panel annotation
+    extra_titles: dict[tuple[int, int], str] = {}
+    if results:
+        feat_lookup = {row["feature"]: row for row in results.get("features", [])}
+        for f in features:
+            row = feat_lookup.get(f.key)
+            if row is None:
+                continue
+            chg = row["metrics"]["change"]
+            parts = []
+            for s in ("all", "pos", "neg"):
+                c = chg.get(s, {})
+                parts.append(f"{s}: Δp={c.get('mean_correct_prob', 0):+.4f}")
+            extra_titles[(f.layer, f.feature_id)] = "  ".join(parts)
+
     plot_feature_heatmap_grid(
         matrices=matrices,
         projections=projections,
         out_path=out_path,
         concept=concept,
-        anchor_label=anchor_label,
+        anchor_label=rich_anchor,
         xlabel="a",
         ylabel="b",
         ncols=5,
         coverage=coverage,
+        extra_titles=extra_titles if extra_titles else None,
     )
     log.info("Saved heatmap grid → %s", out_path)
 
@@ -938,9 +983,6 @@ def main() -> None:
     out_path.write_text(json.dumps(results, indent=2))
     log.info("Saved → %s", out_path)
 
-    plot_paths = plot_results(results, out_dir)
-    for p in plot_paths:
-        log.info("Saved plot → %s", p)
 
     # Load scores (dec_cos, enc_cos) from edec_features.json if the features came from one,
     # so the heatmap panel titles show the alignment scores.
@@ -968,6 +1010,7 @@ def main() -> None:
         concept=args.concept,
         anchor_label=args.sweep_dir.parent.name,
         feature_scores=feature_scores,
+        results=results,
     )
 
     print_modulation_report(results)
