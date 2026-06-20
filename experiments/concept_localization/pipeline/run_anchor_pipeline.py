@@ -71,9 +71,6 @@ def main() -> None:
     parser.add_argument("--feature_score_modes", nargs="+", default=["enc+dec", "dec"],
                         choices=["dec", "enc", "enc+dec"],
                         help="Edec score modes for delta_feature_projections (each gets its own subdir)")
-    parser.add_argument("--min_norm_frac", type=float, default=0.7,
-                        help="Restrict feature selection to layers whose peak-normalised delta norm "
-                             ">= this fraction. 0 = all layers (includes digit detectors).")
     args = parser.parse_args()
 
     out_dir = (
@@ -118,19 +115,15 @@ def main() -> None:
 
     # ── Stage 1c: activity-filtered delta projections + grid plots ────────
     log.info("=== Stage 1c: delta_feature_projections ===")
-    try:
-        _run([
-            sys.executable, "-m",
-            "experiments.concept_localization.pipeline.delta_feature_projections",
-            "--anchor_dir", str(out_dir),
-            "--concept", args.concept,
-            "--top_k", str(args.top_k),
-            "--score_mode", *args.feature_score_modes,
-            "--min_norm_frac", str(args.min_norm_frac),
-            "--no_attr_filter",
-        ])
-    except subprocess.CalledProcessError as e:
-        log.warning("delta_feature_projections failed (non-fatal): %s", e)
+    _run([
+        sys.executable, "-m",
+        "experiments.concept_localization.pipeline.delta_feature_projections",
+        "--anchor_dir", str(out_dir),
+        "--concept", args.concept,
+        "--top_k", str(args.top_k),
+        "--score_mode", *args.feature_score_modes,
+        "--no_attr_filter",
+    ])
 
     # ── Stage 2: null permutation (reuse deltas.pt from stage 1) ─────────
     log.info("=== Stage 2: null permutation ===")

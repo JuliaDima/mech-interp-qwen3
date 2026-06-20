@@ -216,7 +216,7 @@ def _run_feature_projection_plots(
     )
     from experiments.concept_localization.sweep_utils import apply_transcoder_all
 
-    inputs, examples = _build_inputs_and_examples(model, pairs, anchor_mode, max_pairs=None)
+    inputs, examples = _build_inputs_and_examples(model, pairs, anchor_mode)
     if not inputs:
         log.info("No valid pairs for feature projection plots (all sequence lengths mismatched)")
         return

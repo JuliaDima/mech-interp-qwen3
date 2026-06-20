@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import importlib
 import json
-import pickle
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -55,9 +54,11 @@ sys.modules.setdefault("experiments.concept_localization.plots.visualize", stub_
 sys.modules.setdefault("tqdm", SimpleNamespace(tqdm=lambda iterable, *args, **kwargs: iterable))
 
 from experiments.concept_localization.analyze import (
+    FeatureMatch,
     compute_sharpness,
     project_onto_E_dec_model,
 )
+import experiments.concept_localization.pipeline.delta_feature_projections as dfp
 from experiments.concept_localization.concept_pair import ConceptPair
 from experiments.concept_localization.extract_deltas_generic import (
     LayerDeltas,
@@ -66,6 +67,8 @@ from experiments.concept_localization.extract_deltas_generic import (
 )
 from experiments.concept_localization.pipeline.delta_feature_projections import (
     _bin_to_heatmap,
+    _build_inputs_from_saved_examples,
+    _classify_plot_metadata,
     _load_anchor_inputs_and_examples,
     _resolve_survival_set,
     _stable_hash,
@@ -264,7 +267,7 @@ class _SimpleTokenizer:
 def test_feature_projection_requires_saved_sweep_examples(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError, match="Required sweep examples file is missing"):
         _load_anchor_inputs_and_examples(
-            tmp_path, SimpleNamespace(tokenizer=_SimpleTokenizer()), "carry", "5", 42, None
+            tmp_path, SimpleNamespace(tokenizer=_SimpleTokenizer()), "carry", "5"
         )
 
 
@@ -296,22 +299,35 @@ def test_sweep_cache_metadata_validation_rejects_tampering(tmp_path: Path) -> No
     anchor_dir = tmp_path / "anchor"
     sweep_dir = anchor_dir / "sweep"
     sweep_dir.mkdir(parents=True)
-    payload = {
-        "prompts": ["p pos", "p neg"],
-        "examples": [{"pair_idx": 0}],
-    }
+    examples = [{
+        "pair_idx": 0,
+        "prompt_pos": "p pos",
+        "prompt_neg": "p neg",
+        "anchor": 0,
+        "meta": {"a_pos": 7, "a_neg": 8, "g": 7},
+    }]
+    payload = {"prompts": ["p pos", "p neg"], "examples": examples, "layers": [0]}
     metadata = {"version": 1, "hash": _stable_hash(payload), "payload": payload}
     (sweep_dir / "sweep_residuals.meta.json").write_text(json.dumps(metadata))
     npz_path = sweep_dir / "sweep_residuals.npz"
-    np.savez(npz_path, prompts=np.array(["p pos", "p neg"], dtype=object), layers=np.array([0]))
+    np.savez(
+        npz_path,
+        prompts=np.array(["p pos", "p neg"], dtype=object),
+        pos_mask=np.array([True, False]),
+        layers=np.array([0]),
+        H_L0=np.zeros((2, 3), dtype=np.float32),
+    )
 
     npz = np.load(npz_path, allow_pickle=True)
-    _validate_sweep_cache_metadata(anchor_dir, [([1], 0), ([2], 0)], [{"pair_idx": 0}], npz)
+    inputs = [([1], 0), ([2], 0)]
+    _validate_sweep_cache_metadata(anchor_dir, inputs, examples, npz, expected_layers=[0])
+    with pytest.raises(ValueError, match="do not match the model"):
+        _validate_sweep_cache_metadata(anchor_dir, inputs, examples, npz, expected_layers=[0, 1])
     with pytest.raises(ValueError, match="current run context"):
         _validate_sweep_cache_metadata(
             anchor_dir,
-            [([1], 0), ([2], 0)],
-            [{"pair_idx": 0}],
+            inputs,
+            examples,
             npz,
             expected={"concept": "carry"},
         )
@@ -319,4 +335,148 @@ def test_sweep_cache_metadata_validation_rejects_tampering(tmp_path: Path) -> No
     metadata["payload"]["prompts"] = ["changed", "p neg"]
     (sweep_dir / "sweep_residuals.meta.json").write_text(json.dumps(metadata))
     with pytest.raises(ValueError, match="hash mismatch"):
-        _validate_sweep_cache_metadata(anchor_dir, [([1], 0), ([2], 0)], [{"pair_idx": 0}], npz)
+        _validate_sweep_cache_metadata(anchor_dir, inputs, examples, npz)
+
+
+def test_saved_sweep_examples_are_strictly_validated() -> None:
+    model = SimpleNamespace(tokenizer=_SimpleTokenizer())
+    valid = [{
+        "prompt_pos": "a b",
+        "prompt_neg": "c d",
+        "anchor": 1,
+        "meta": {"a_pos": 7, "a_neg": 8, "g": 7},
+    }]
+    inputs, examples = _build_inputs_from_saved_examples(model, valid)
+    assert len(inputs) == 2
+    assert examples == valid
+
+    for field in ("prompt_pos", "prompt_neg", "anchor", "meta"):
+        broken = [dict(valid[0])]
+        del broken[0][field]
+        with pytest.raises(ValueError, match="missing required fields"):
+            _build_inputs_from_saved_examples(model, broken)
+
+    unequal = [dict(valid[0], prompt_neg="c")]
+    with pytest.raises(ValueError, match="unequal tokenized prompt lengths"):
+        _build_inputs_from_saved_examples(model, unequal)
+    invalid_anchor = [dict(valid[0], anchor=2)]
+    with pytest.raises(ValueError, match="outside"):
+        _build_inputs_from_saved_examples(model, invalid_anchor)
+
+
+def test_cache_validation_rejects_reordered_examples_and_bad_pos_mask(tmp_path: Path) -> None:
+    anchor_dir = tmp_path / "anchor"
+    sweep_dir = anchor_dir / "sweep"
+    sweep_dir.mkdir(parents=True)
+    examples = [
+        {"prompt_pos": "a", "prompt_neg": "b", "anchor": 0, "meta": {"a_pos": 7, "a_neg": 8, "g": 7}},
+        {"prompt_pos": "c", "prompt_neg": "d", "anchor": 0, "meta": {"a_pos": 14, "a_neg": 15, "g": 7}},
+    ]
+    prompts = ["a", "b", "c", "d"]
+    payload = {"prompts": prompts, "examples": examples, "layers": [0]}
+    (sweep_dir / "sweep_residuals.meta.json").write_text(
+        json.dumps({"version": 1, "hash": _stable_hash(payload), "payload": payload})
+    )
+    npz_path = sweep_dir / "sweep_residuals.npz"
+    np.savez(
+        npz_path,
+        prompts=np.array(prompts, dtype=object),
+        pos_mask=np.array([True, False, False, True]),
+        layers=np.array([0]),
+        H_L0=np.zeros((4, 3), dtype=np.float32),
+    )
+    with np.load(npz_path, allow_pickle=True) as npz:
+        with pytest.raises(ValueError, match="do not exactly match"):
+            _validate_sweep_cache_metadata(anchor_dir, [None] * 4, list(reversed(examples)), npz)
+        with pytest.raises(ValueError, match="pos_mask"):
+            _validate_sweep_cache_metadata(anchor_dir, [None] * 4, examples, npz)
+
+
+def test_plot_metadata_requires_one_consistent_complete_schema() -> None:
+    one_d = [
+        {"meta": {"a_pos": 7, "a_neg": 8, "g": 7}},
+        {"meta": {"a_pos": 14, "a_neg": 15, "g": 7}},
+    ]
+    two_d = [{"meta": {"a_pos": 1, "a_neg": 2, "b_pos": 3, "b_neg": 4}}]
+    assert _classify_plot_metadata(one_d) == "1d"
+    assert _classify_plot_metadata(two_d) == "2d"
+
+    with pytest.raises(ValueError, match="missing fields"):
+        _classify_plot_metadata(one_d + [{"meta": {"a_pos": 21, "g": 7}}])
+    with pytest.raises(ValueError, match="inconsistent moduli"):
+        _classify_plot_metadata(one_d + [{"meta": {"a_pos": 21, "a_neg": 22, "g": 5}}])
+    with pytest.raises(ValueError, match="Unsupported EDEC"):
+        _classify_plot_metadata([{"meta": {"value_pos": 1, "value_neg": 2}}])
+
+
+def _patch_synthetic_projection(monkeypatch: pytest.MonkeyPatch) -> None:
+    match = FeatureMatch(feature_id=0, projection=0.5, cos_sim=0.5, layer=0)
+    monkeypatch.setattr(dfp, "_resolve_top_k", lambda *args, **kwargs: ([match], []))
+    monkeypatch.setattr(
+        dfp,
+        "apply_transcoder_all",
+        lambda _model, _layer, residuals: np.ones((residuals.shape[0], 1), dtype=np.float32),
+    )
+
+
+def test_run_one_mode_rejects_explicitly_empty_display_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_synthetic_projection(monkeypatch)
+    examples = [{"meta": {"a_pos": 7, "a_neg": 8, "g": 7}}]
+    with pytest.raises(ValueError, match="explicitly requested display dataset is empty"):
+        dfp.run_one_mode(
+            anchor_dir=tmp_path,
+            model=SimpleNamespace(),
+            inputs=[([1], 0), ([2], 0)],
+            examples=examples,
+            active_features={0: {0}},
+            survival_set=None,
+            score_mode="dec",
+            top_k=1,
+            concept="gcd",
+            H_cached={0: np.zeros((2, 1), dtype=np.float32)},
+            display_inputs=[],
+            display_examples=[],
+        )
+
+
+def test_run_one_mode_requires_2d_plot_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_synthetic_projection(monkeypatch)
+    examples = [{"meta": {"a_pos": 1, "a_neg": 2, "b_pos": 3, "b_neg": 4}}]
+
+    def write_plot(*, out_path: Path, **_kwargs) -> None:
+        out_path.write_bytes(b"%PDF-1.4\n")
+
+    monkeypatch.setattr(dfp, "plot_feature_heatmap_grid", write_plot)
+    dfp.run_one_mode(
+        anchor_dir=tmp_path,
+        model=SimpleNamespace(),
+        inputs=[([1], 0), ([2], 0)],
+        examples=examples,
+        active_features={0: {0}},
+        survival_set=None,
+        score_mode="dec",
+        top_k=1,
+        concept="carry",
+        H_cached={0: np.zeros((2, 1), dtype=np.float32)},
+    )
+    plot_path = tmp_path / "sweep/delta_feature_projections_dec/edec_topk_grid.pdf"
+    assert plot_path.read_bytes().startswith(b"%PDF")
+
+    monkeypatch.setattr(dfp, "plot_feature_heatmap_grid", lambda **_kwargs: None)
+    with pytest.raises(RuntimeError, match="without writing a non-empty PDF"):
+        dfp.run_one_mode(
+            anchor_dir=tmp_path,
+            model=SimpleNamespace(),
+            inputs=[([1], 0), ([2], 0)],
+            examples=examples,
+            active_features={0: {0}},
+            survival_set=None,
+            score_mode="dec",
+            top_k=1,
+            concept="carry",
+            H_cached={0: np.zeros((2, 1), dtype=np.float32)},
+        )
