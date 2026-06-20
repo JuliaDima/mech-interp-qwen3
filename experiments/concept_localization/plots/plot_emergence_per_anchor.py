@@ -325,6 +325,9 @@ def _load_anchor_dir(anchor_dir: Path, template: str) -> dict | None:
         return None
     null_path = anchor_dir / "null" / "null_permutation.json"
     null = json.loads(null_path.read_text()) if null_path.exists() else None
+    edec_path = anchor_dir / "edec_features.json"
+    if edec_path.exists() and "top_features_by_layer" not in results:
+        results["top_features_by_layer"] = json.loads(edec_path.read_text())
     return {"results": results, "deltas": deltas, "null": null}
 
 

@@ -583,24 +583,73 @@ def _save_heatmap_grid(
 ) -> None:
     """Save an edec_topk_grid-style PDF for the modulated features.
 
-    Reuses plot_feature_heatmap_grid from visualize.py and _bin_to_heatmap
-    from delta_feature_projections.py.  Silently skips when examples lack
-    the per-operand digit metadata required for binning (non-carry concepts).
+    Reuses plot_feature_heatmap_grid (2D) or _plot_1d_grid (1D) from
+    delta_feature_projections.py.  Silently skips when examples lack
+    per-operand digit metadata.
     """
     if not sweep_examples or not all(
         "a_pos" in ex.get("meta", {}) for ex in sweep_examples[:3]
     ):
-        log.info("Sweep examples lack digit metadata (a_pos/b_pos) — skipping heatmap grid")
+        log.info("Sweep examples lack digit metadata — skipping heatmap grid")
         return
 
+    sample_meta = sweep_examples[0].get("meta", {})
+    is_1d = "b_pos" not in sample_meta
+
     try:
-        from experiments.concept_localization.plots.visualize import plot_feature_heatmap_grid
         from experiments.concept_localization.analyze import FeatureMatch
-        from experiments.concept_localization.pipeline.delta_feature_projections import _bin_to_heatmap
+        from experiments.concept_localization.pipeline.delta_feature_projections import (
+            _bin_to_heatmap, _bin_to_1d_bar, _get_modulus, _plot_1d_grid,
+        )
+        if not is_1d:
+            from experiments.concept_localization.plots.visualize import plot_feature_heatmap_grid
     except ImportError as exc:
         log.warning("Heatmap grid skipped (import error: %s)", exc)
         return
 
+    if is_1d:
+        # 1D bar plot path
+        acts_1d: dict[str, np.ndarray] = {}
+        rows_for_plot = []
+        projections: dict[int, list] = {}
+        for f in features:
+            if f.key not in sweep_npz:
+                continue
+            acts_col = sweep_npz[f.key]
+            if float(acts_col.max()) == 0:
+                continue
+            acts_1d[f.key] = acts_col
+            scores = (feature_scores or {}).get(f.key, {})
+            rows_for_plot.append({
+                "layer": f.layer,
+                "feature_id": f.feature_id,
+                "feature": f.key,
+                "dec_cos": scores.get("dec_cos", 0.0),
+                "enc_cos": scores.get("enc_cos", 0.0),
+            })
+            projections.setdefault(f.layer, []).append(FeatureMatch(
+                feature_id=f.feature_id,
+                projection=scores.get("score", 0.0),
+                cos_sim=scores.get("dec_cos", 0.0),
+                layer=f.layer,
+                enc_cos_sim=scores.get("enc_cos", 0.0),
+            ))
+        if not rows_for_plot:
+            log.info("No features with sweep activations — skipping 1D bar grid")
+            return
+        _plot_1d_grid(
+            rows=rows_for_plot,
+            acts_1d=acts_1d,
+            examples=sweep_examples,
+            projections=projections,
+            out_path=out_path,
+            concept=concept,
+            anchor_label=anchor_label,
+        )
+        log.info("Saved 1D bar grid → %s", out_path)
+        return
+
+    # 2D heatmap path
     coverage = np.zeros((10, 10), dtype=bool)
     for ex in sweep_examples:
         m = ex.get("meta", {})
@@ -614,11 +663,13 @@ def _save_heatmap_grid(
         if f.key not in sweep_npz:
             log.warning("Feature %s not in sweep_activations — skipping from heatmap", f.key)
             continue
-        acts = sweep_npz[f.key]  # (2*n_pairs,) interleaved pos/neg
-        grid = _bin_to_heatmap(acts, sweep_examples)  # (10, 10) mean activations
+        acts = sweep_npz[f.key]
+        grid = _bin_to_heatmap(acts, sweep_examples)
         max_val = float(grid.max())
-        if max_val > 0:
-            grid = grid / max_val  # normalise to [0, 1] for white→violet cmap
+        if max_val == 0:
+            log.debug("Feature %s never fires in sweep — skipping from heatmap", f.key)
+            continue
+        grid = grid / max_val
         matrices[(f.layer, f.feature_id)] = grid
 
         scores = (feature_scores or {}).get(f.key, {})

@@ -100,6 +100,17 @@ class AttributionModel(HookedTransformer):
         Returns:
             Configured AttributionModel
         """
+        # Qwen3Config stores rope_theta inside rope_scaling dict; TransformerLens
+        # expects a flat rope_theta attribute — patch it before from_pretrained runs.
+        try:
+            from transformers import Qwen3Config
+            if not hasattr(Qwen3Config, "rope_theta"):
+                Qwen3Config.rope_theta = property(
+                    lambda self: self.rope_scaling.get("rope_theta", 10000.0)
+                )
+        except Exception:
+            pass
+
         model = super().from_pretrained(
             model_name,
             fold_ln=False,
