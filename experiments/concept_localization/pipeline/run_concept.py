@@ -49,7 +49,7 @@ if str(_REPO_ROOT) not in sys.path:
 import numpy as np
 
 from experiments.concept_localization.analyze import (
-    collect_layer_residuals,
+    collect_layer_residuals_batched as collect_layer_residuals,
     compute_sharpness,
     project_onto_E_dec_model,
 )
@@ -327,7 +327,7 @@ def main() -> None:
     _run_single(args)
 
 
-def _run_single(args, base_subdir: str | None = None) -> None:
+def _run_single(args, base_subdir: str | None = None, model=None) -> None:
     device = get_default_device()
     dtype = parse_dtype(args.dtype)
     anchor_factory = None
@@ -348,15 +348,18 @@ def _run_single(args, base_subdir: str | None = None) -> None:
         if t_pairs:
             log.info("  %s (%d pairs)  e.g. pos=%r", t, len(t_pairs), t_pairs[0].prompt_pos)
 
-    # ── 2. Model (loaded once) ────────────────────────────────────────────────
-    log.info("Loading model %s", args.model)
-    transcoder_set, _ = load_transcoder_from_hub(
-        args.transcoder_set, dtype=dtype, lazy_encoder=True, lazy_decoder=True
-    )
-    model = AttributionModel.from_pretrained_and_transcoders(
-        args.model, transcoder_set, dtype=dtype, device=device
-    )
-    model.eval()
+    # ── 2. Model (loaded once, or reused if passed in) ───────────────────────
+    if model is None:
+        log.info("Loading model %s", args.model)
+        transcoder_set, _ = load_transcoder_from_hub(
+            args.transcoder_set, dtype=dtype, lazy_encoder=True, lazy_decoder=True
+        )
+        model = AttributionModel.from_pretrained_and_transcoders(
+            args.model, transcoder_set, dtype=dtype, device=device
+        )
+        model.eval()
+    else:
+        log.info("Reusing pre-loaded model")
 
     n_layers = model.cfg.n_layers
     layers = list(range(n_layers))

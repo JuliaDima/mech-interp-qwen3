@@ -461,3 +461,120 @@ def collect_layer_residuals(
             H[layer].append(vec)
 
     return {layer: torch.stack(vecs).float().cpu().numpy() for layer, vecs in H.items()}
+
+
+def collect_layer_residuals_batched(
+    model,
+    prompts_and_anchors: list[tuple[list[int], int]],
+    target_layers: list[int],
+    batch_size: int = 16,
+) -> dict[int, np.ndarray]:
+    """Same as collect_layer_residuals but runs same-length prompts in batches.
+
+    Groups prompts by tokenised length, then processes each group in chunks of
+    batch_size.  Anchor positions may differ within a batch (each row uses its
+    own anchor).  Returns dict layer → float32 (N, d_model).
+    """
+    from collections import defaultdict
+
+    N = len(prompts_and_anchors)
+    H_out: dict[int, np.ndarray] = {l: np.zeros((N, model.cfg.d_model), dtype=np.float32)
+                                     for l in target_layers}
+
+    # Group by tokenised length so all prompts in a batch fit the same tensor.
+    groups: dict[int, list[tuple[int, list[int], int]]] = defaultdict(list)
+    for orig_idx, (ids, anchor) in enumerate(prompts_and_anchors):
+        # +1 for the sink token prepended by tokenize_qwen_input
+        groups[len(ids) + 1].append((orig_idx, ids, anchor))
+
+    hook_name = model.feature_input_hook
+    device = model.cfg.device
+
+    for seq_len_group in tqdm(groups.values(), desc="Batched residual capture"):
+        for chunk_start in range(0, len(seq_len_group), batch_size):
+            chunk = seq_len_group[chunk_start: chunk_start + batch_size]
+            orig_idxs = [x[0] for x in chunk]
+            ids_list   = [x[1] for x in chunk]
+            anchors    = [x[2] + 1 for x in chunk]  # +1 for sink token
+
+            # Stack into (B, seq_len) — all same length within this group.
+            batch_tensor = torch.cat(
+                [tokenize_qwen_input(ids, model.tokenizer, device) for ids in ids_list],
+                dim=0,
+            )  # shape: (B, seq_len)
+
+            resid_cache: dict[int, torch.Tensor] = {}
+
+            def _make_hook(l: int):
+                def _hook(acts, hook):
+                    # acts: (B, seq_len, d_model)
+                    rows = []
+                    for b, sink_anchor in enumerate(anchors):
+                        if sink_anchor < acts.shape[1]:
+                            rows.append(acts[b, sink_anchor, :].detach())
+                        else:
+                            rows.append(torch.zeros(model.cfg.d_model, device=acts.device,
+                                                    dtype=acts.dtype))
+                    resid_cache[l] = torch.stack(rows)  # (B, d_model)
+                return _hook
+
+            fwd_hooks = [(f"blocks.{l}.{hook_name}", _make_hook(l)) for l in target_layers]
+            with torch.no_grad():
+                model.run_with_hooks(batch_tensor, fwd_hooks=fwd_hooks, return_type=None)
+
+            for l in target_layers:
+                mat = resid_cache[l].float().cpu().numpy()  # (B, d_model)
+                for b, orig_idx in enumerate(orig_idxs):
+                    H_out[l][orig_idx] = mat[b]
+
+    return H_out
+
+
+def collect_layer_residuals_multi_anchor(
+    model,
+    prompts_and_multi_anchors: list[tuple[list[int], list[int]]],
+    target_layers: list[int],
+) -> dict[int, np.ndarray]:
+    """Capture multiple anchor positions per prompt in a single forward pass.
+
+    prompts_and_multi_anchors: list of (token_id_list, [anchor1, anchor2, ...])
+    All prompts must have the same number of anchors.
+
+    Returns dict layer → float32 (N, n_anchors, d_model).
+    """
+    N = len(prompts_and_multi_anchors)
+    n_anchors = len(prompts_and_multi_anchors[0][1])
+    d = model.cfg.d_model
+    hook_name = model.feature_input_hook
+    device = model.cfg.device
+
+    H_out: dict[int, np.ndarray] = {l: np.zeros((N, n_anchors, d), dtype=np.float32)
+                                     for l in target_layers}
+
+    with torch.no_grad():
+        for i, (ids, anchors) in enumerate(
+            tqdm(prompts_and_multi_anchors, desc="Multi-anchor residual capture")
+        ):
+            sink_anchors = [a + 1 for a in anchors]  # +1 for sink token
+            resid_cache: dict[int, torch.Tensor] = {}
+
+            def _make_hook(l: int):
+                def _hook(acts, hook):
+                    # acts: (1, seq_len, d_model)
+                    vecs = []
+                    for sa in sink_anchors:
+                        if sa < acts.shape[1]:
+                            vecs.append(acts[0, sa, :].detach())
+                        else:
+                            vecs.append(torch.zeros(d, device=acts.device, dtype=acts.dtype))
+                    resid_cache[l] = torch.stack(vecs)  # (n_anchors, d_model)
+                return _hook
+
+            fwd_hooks = [(f"blocks.{l}.{hook_name}", _make_hook(l)) for l in target_layers]
+            input_ids = tokenize_qwen_input(ids, model.tokenizer, device).unsqueeze(0)
+            model.run_with_hooks(input_ids, fwd_hooks=fwd_hooks, return_type=None)
+
+            for l in target_layers:
+                H_out[l][i] = resid_cache[l].float().cpu().numpy()
+
+    return H_out

@@ -142,6 +142,45 @@ def make_shuffled_pairs(
 
 # ── Norm extraction ───────────────────────────────────────────────────────────
 
+def _null_norms_from_cache(
+    npz_path: Path,
+    layers: list[int],
+    k: int,
+    seed: int,
+) -> np.ndarray:
+    """Compute K null delta norms by re-pairing cached pos residuals — no model needed.
+
+    sweep_residuals.npz stores H_L{l} of shape (2N, d_model): even rows = pos,
+    odd rows = neg.  Null pairs both sides from the pos class, so we shuffle
+    pos rows among themselves and compute mean(H[perm1]) - mean(H[perm2]).
+
+    Returns null_raw_norms of shape (k, len(layers)).
+    """
+    data = np.load(str(npz_path), allow_pickle=True)
+    null_raw_norms = np.zeros((k, len(layers)), dtype=np.float32)
+    rng = np.random.default_rng(seed)
+
+    # pos rows: even indices 0,2,4,...
+    # We only need the H matrices for layers we care about.
+    for li, l in enumerate(layers):
+        key = f"H_L{l}"
+        if key not in data:
+            continue
+        H_l = data[key].astype(np.float32)          # (2N, d_model)
+        H_pos = H_l[0::2]                            # (N, d_model)
+        N = len(H_pos)
+        if N < 2:
+            continue
+        mid = N // 2
+        for ki in range(k):
+            perm = rng.permutation(N)
+            first  = H_pos[perm[:mid]].mean(axis=0)
+            second = H_pos[perm[mid: mid + mid]].mean(axis=0)
+            null_raw_norms[ki, li] = float(np.linalg.norm(first - second))
+
+    return null_raw_norms
+
+
 def _raw_act_norms(
     model,
     pairs: list[ConceptPair],
@@ -361,14 +400,21 @@ def run_null_permutation(
     # null_raw_norms[ki, li] = ||delta_l|| for null run ki at layer li
     null_raw_norms = np.zeros((k, len(layers)))
 
-    for ki in range(k):
-        log.info("Null permutation %d / %d", ki + 1, k)
-        null_pairs = make_shuffled_pairs(pairs, groups, rng)
-        log.info("  %d null pairs", len(null_pairs))
-        null_raw, _ = _raw_act_norms(
-            model, null_pairs, layers, device, dtype, anchor_mode
-        )
-        null_raw_norms[ki] = null_raw
+    # Fast path: if sweep_residuals.npz exists alongside the anchor dir, reuse
+    # the cached H matrices instead of re-running the model K times.
+    sweep_npz_path = out_dir.parent / "sweep" / "sweep_residuals.npz"
+    if sweep_npz_path.exists():
+        log.info("Using cached sweep residuals for null permutations: %s", sweep_npz_path)
+        null_raw_norms = _null_norms_from_cache(sweep_npz_path, layers, k, seed)
+    else:
+        for ki in range(k):
+            log.info("Null permutation %d / %d", ki + 1, k)
+            null_pairs = make_shuffled_pairs(pairs, groups, rng)
+            log.info("  %d null pairs", len(null_pairs))
+            null_raw, _ = _raw_act_norms(
+                model, null_pairs, layers, device, dtype, anchor_mode
+            )
+            null_raw_norms[ki] = null_raw
 
     # Activation-normalised null (original): same E[||h_l||] and real_scale_act as real.
     null_norms = np.zeros_like(null_raw_norms)
