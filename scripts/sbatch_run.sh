@@ -29,13 +29,9 @@
 ##SBATCH --mail-type=BEGIN
 ##SBATCH --mail-user=eid23@cam.ac.uk
 
-# ---- Repo root ----
-if [ -n "${SLURM_SUBMIT_DIR:-}" ]; then
-  REPO_ROOT="${SLURM_SUBMIT_DIR}"
-else
-  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-fi
+# ---- Repo root (always derived from script location, not submit dir) ----
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${REPO_ROOT}"
 
 # ---- Environment ----
