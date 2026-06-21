@@ -112,7 +112,7 @@ def main() -> None:
     )
     out_dir.mkdir(parents=True, exist_ok=True)
     log.info(
-        "Concept %s · anchor rank=%d pos=%d · out_dir=%s",
+        "Concept %s · anchor rank=%d pos=%s · out_dir=%s",
         args.concept, args.anchor_rank, args.anchor_pos, out_dir,
     )
 

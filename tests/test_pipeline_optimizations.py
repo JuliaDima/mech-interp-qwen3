@@ -30,8 +30,9 @@ if str(_REPO_ROOT) not in sys.path:
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
+_HUB = Path("/rds/user/eid23/hpc-work/p28/cache/hf/hub")
 _REQUIRES_RDS = pytest.mark.skipif(
-    not Path("/rds/user/eid23/hpc-work/p28/cache/hf/hub/models--mwhanna--qwen3-4b-transcoders").exists(),
+    not (_HUB / "models--mwhanna--qwen3-4b-transcoders").exists(),
     reason="RDS cache not mounted",
 )
 
@@ -41,6 +42,11 @@ _TC_ID = "mwhanna/qwen3-4b-transcoders"
 # Fixture: load model once per session so tests don't each pay the load cost.
 @pytest.fixture(scope="session")
 def model_bf16():
+    # Check inside the fixture so session-scoped setup is skipped correctly.
+    if not (_HUB / "models--mwhanna--qwen3-4b-transcoders").exists():
+        pytest.skip("RDS cache not mounted")
+    if not (_HUB / "models--Qwen--Qwen3-4B").exists():
+        pytest.skip("Qwen3-4B model not in RDS cache")
     from mechinterp_qwen3.attribution_model import AttributionModel
     from mechinterp_qwen3.utils.hf_utils import load_transcoder_from_hub
     from mechinterp_qwen3.utils.model_utils import get_default_device, parse_dtype
@@ -166,15 +172,16 @@ def test_bfloat16_transcoder_ok(model_bf16):
     tc = model_bf16.transcoders[layer]
     W_enc_f32 = tc.W_enc.detach().float()
     b_enc_f32 = tc.b_enc.detach().float()
-    H_t = torch.from_numpy(H_l)
+    dev = W_enc_f32.device
+    H_t = torch.from_numpy(H_l).to(dev)
     pre = H_t @ W_enc_f32.T + b_enc_f32
     from mechinterp_qwen3.transcoder.single_layer_transcoder import JumpReLU
     act_fn = tc.activation_function
     if isinstance(act_fn, JumpReLU):
         thr = act_fn.threshold.detach().float()
-        acts_f32 = (pre * (pre > thr)).numpy()
+        acts_f32 = (pre * (pre > thr)).cpu().numpy()
     else:
-        acts_f32 = torch.relu(pre).numpy()
+        acts_f32 = torch.relu(pre).cpu().numpy()
 
     # Active features in both
     active_f32  = (acts_f32  > 0).any(axis=0)
@@ -209,18 +216,19 @@ def test_float16_transcoder_warns(model_bf16):
     H_l = H[layer].astype(np.float32)
 
     tc = model_bf16.transcoders[layer]
+    dev = tc.W_enc.device
     results = {}
     for dtype_name, dtype in [("float32", torch.float32), ("float16", torch.float16)]:
         W = tc.W_enc.detach().to(dtype)
         b = tc.b_enc.detach().to(dtype)
-        H_t = torch.from_numpy(H_l).to(dtype)
+        H_t = torch.from_numpy(H_l).to(device=dev, dtype=dtype)
         pre = H_t @ W.T + b
         act_fn = tc.activation_function
         if isinstance(act_fn, JumpReLU):
             thr = act_fn.threshold.detach().to(dtype)
-            acts = (pre * (pre > thr)).float().numpy()
+            acts = (pre * (pre > thr)).float().cpu().numpy()
         else:
-            acts = torch.relu(pre).float().numpy()
+            acts = torch.relu(pre).float().cpu().numpy()
         results[dtype_name] = (acts > 0).any(axis=0)
 
     n_f32 = results["float32"].sum()

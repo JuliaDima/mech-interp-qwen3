@@ -143,6 +143,25 @@ def main() -> None:
             rank, anchor_idx, label, jid,
         )
 
+    # Submit a final grid job that runs after ALL anchor jobs complete.
+    real_jids = [jid for _, _, _, jid in submitted if jid != "0"]
+    if real_jids:
+        dep = "afterok:" + ":".join(real_jids)
+        grid_cmd = [
+            "sbatch", "--parsable",
+            f"--job-name=grid_{args.concept}",
+            "--time=00:05:00",
+            f"--dependency={dep}",
+            _SBATCH_RUN,
+            sys.executable, "-m",
+            "experiments.concept_localization.plots.plot_emergence_per_anchor",
+            "--concept", args.concept,
+            "--template", args.template,
+            "--grid_only",
+        ]
+        grid_jid = _submit(grid_cmd, args.dry_run)
+        log.info("  Submitted anchor_layer_grid → job %s  (after all anchor jobs)", grid_jid)
+
     print(f"\n{'Concept':<30} {'Rank':<6} {'Pos':<6} {'Token':<20} {'JobID'}")
     print("-" * 75)
     for rank, pos, label, jid in submitted:

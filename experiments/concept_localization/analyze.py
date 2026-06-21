@@ -498,7 +498,7 @@ def collect_layer_residuals_batched(
             anchors    = [x[2] + 1 for x in chunk]  # +1 for sink token
 
             # Stack into (B, seq_len) — all same length within this group.
-            batch_tensor = torch.cat(
+            batch_tensor = torch.stack(
                 [tokenize_qwen_input(ids, model.tokenizer, device) for ids in ids_list],
                 dim=0,
             )  # shape: (B, seq_len)
@@ -534,18 +534,21 @@ def collect_layer_residuals_multi_anchor(
     model,
     prompts_and_multi_anchors: list[tuple[list[int], list[int]]],
     target_layers: list[int],
+    hook_name: str | None = None,
 ) -> dict[int, np.ndarray]:
     """Capture multiple anchor positions per prompt in a single forward pass.
 
     prompts_and_multi_anchors: list of (token_id_list, [anchor1, anchor2, ...])
     All prompts must have the same number of anchors.
+    hook_name: suffix after 'blocks.{l}.' — defaults to model.feature_input_hook.
+      Pass "hook_resid_post" to capture the full post-block residual stream.
 
     Returns dict layer → float32 (N, n_anchors, d_model).
     """
     N = len(prompts_and_multi_anchors)
     n_anchors = len(prompts_and_multi_anchors[0][1])
     d = model.cfg.d_model
-    hook_name = model.feature_input_hook
+    hook_name = hook_name if hook_name is not None else model.feature_input_hook
     device = model.cfg.device
 
     H_out: dict[int, np.ndarray] = {l: np.zeros((N, n_anchors, d), dtype=np.float32)

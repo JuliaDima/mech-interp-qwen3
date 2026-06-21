@@ -100,13 +100,32 @@ class AttributionModel(HookedTransformer):
         Returns:
             Configured AttributionModel
         """
-        # Qwen3Config stores rope_theta inside rope_scaling dict; TransformerLens
-        # expects a flat rope_theta attribute — patch it before from_pretrained runs.
+        # Qwen3Config rope_theta compat: newer transformers defines rope_theta as
+        # a read-only property (possibly on a parent class), which makes
+        # `self.rope_theta = v` in __init__ raise AttributeError via
+        # PretrainedConfig.__setattr__ -> object.__setattr__.
+        # Fix: shadow with a property on Qwen3Config that has both getter+setter.
         try:
             from transformers import Qwen3Config
-            if not hasattr(Qwen3Config, "rope_theta"):
+            # Search the full MRO — vars() alone misses inherited descriptors.
+            prop = next(
+                (vars(c)["rope_theta"] for c in Qwen3Config.__mro__ if "rope_theta" in vars(c)),
+                None,
+            )
+            if prop is None:
+                # rope_theta not a class descriptor at all: __init__ sets it as
+                # a plain instance attr, which is fine UNLESS we add a no-setter
+                # property (the old bug). Add a consistent getter+setter pair.
+                fget = lambda self: getattr(self, "_rope_theta", 10000.0)
+            elif isinstance(prop, property) and prop.fset is None:
+                # Read-only property exists — keep its getter, add setter.
+                fget = prop.fget
+            else:
+                fget = None  # property already has a setter; nothing to do
+            if fget is not None:
                 Qwen3Config.rope_theta = property(
-                    lambda self: self.rope_scaling.get("rope_theta", 10000.0)
+                    fget,
+                    lambda self, v: object.__setattr__(self, "_rope_theta", v),
                 )
         except Exception:
             pass

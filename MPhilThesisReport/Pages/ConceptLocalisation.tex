@@ -907,9 +907,16 @@ Individual feature ablation has no measurable effect, indicating that the four
 features are functionally redundant: each alone is sufficient, and all must be
 removed simultaneously to degrade performance.
 As shown in Table~\ref{tab:carry_ablation}, the suppressed predictions
-shift by approximately $-8$ to $-10$ relative to the baseline, corresponding to the
-model predicting a sum without the expected carry increment — the units digit of the
-output rises by roughly 8 while the tens digit falls by one.
+shift by approximately $-8$ to $-10$ relative to the baseline.
+The consistent magnitude of these shifts is diagnostic of the features' computational
+role: the offsets are close to $b_0$, the units digit of the second operand, which is
+consistent with the carry features at the \texttt{ones\_b} anchor encoding the value of
+$b_0$ as a contribution to an internal running partial sum.
+When this contribution is removed, the model loses track of the digit-level value of $b$,
+and the error propagates to the final predicted output.
+The additional $\pm 1$ offset relative to $-b_0$ arises from carry propagation: ablating
+the feature simultaneously suppresses the carry bit forwarded to the tens column, compounding
+the digit error.
 In two examples involving hundreds-digit carries (\texttt{948+904} and
 \texttt{902+978}), ablation shifts the prediction by $-200$, suggesting that the
 same features also gate higher-order carry propagation.
@@ -919,12 +926,19 @@ same features also gate higher-order carry propagation.
 Injecting the four decoder directions at the \texttt{ones\_b} anchor position with
 fixed magnitude $\delta=5.0$ into 198 carry-negative prompts reduces prediction
 accuracy from 100\% to 22.2\%, with 154 of 198 predictions changing.
-Table~\ref{tab:carry_injection} shows representative examples: the predicted
-sum increases by $+7$ to $+8$, corresponding to the units digit of the output
-shifting from its correct value toward $9$ — the inverse of the ablation effect.
-The symmetry confirms that the decoder directions $w_{l,f}^{\mathrm{dec}}$ for
-these features causally encode the carry increment in the model's number
-representation.
+Crucially, the injection is applied unconditionally to prompts where $a_0 + b_0 < 10$
+and no carry should arise. Despite this, the model responds as though a carry has been
+detected: Table~\ref{tab:carry_injection} shows representative examples where the
+predicted sum increases by $+7$ to $+8$, shifting the units digit of the output
+toward $9$ regardless of the true operand values.
+The features therefore function as a carry-reminder signal in the model's
+internal arithmetic: their decoder directions encode an instruction to increment the
+running partial sum, and the model interprets their presence as evidence of a pending
+carry, even when the true digit sum does not warrant one.
+Bidirectional causal control is thereby established — ablation silences a real carry,
+injection manufactures a spurious one — and both shift the predicted output by a
+consistent magnitude, confirming that the decoder directions $w_{l,f}^{\mathrm{dec}}$
+are a direct handle on the carry-increment computation.
 
 An important observation is that the carry features fire on only 23 of 99 positive
 pairs, yet the model achieves 100\% accuracy on all 99. The identified features

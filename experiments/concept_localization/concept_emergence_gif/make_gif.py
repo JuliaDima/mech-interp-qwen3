@@ -32,13 +32,10 @@ _REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from experiments.concept_localization.extract_deltas_generic import (
-    _find_delimiter_anchor,
-    extract_layer_deltas_generic,
-)
+from experiments.concept_localization.extract_deltas_generic import _find_delimiter_anchor
+from experiments.concept_localization.analyze import collect_layer_residuals_multi_anchor
 from experiments.concept_localization.pipeline.run_concept import _load_concept
 from experiments.concept_localization.plots.plot_emergence_per_anchor import (
-    plot_anchor_layer_grid,
     plot_emergence_per_anchor,
 )
 from experiments.plot_style import GRAY, TEAL, VIOLET, apply
@@ -260,30 +257,50 @@ def make_emergence_gif(
     norms_raw = np.zeros((n_frames, n_layers))
     act_norms_raw = np.zeros((n_frames, n_layers))
     mean_cos = np.zeros(n_frames)   # mean pairwise cosine across layers, per anchor pos
+
+    # Single pass: capture all anchor positions at once (n_frames × n_layers × d_model).
+    all_anchors = list(range(n_frames))  # 0 … delimiter_pos (pre-sink-shift; multi_anchor adds +1)
+    prompts_and_multi_anchors = []
+    pos_mask = []
+    for pair in pairs:
+        ids_pos = model.tokenizer(pair.prompt_pos, add_special_tokens=False).input_ids
+        ids_neg = model.tokenizer(pair.prompt_neg, add_special_tokens=False).input_ids
+        if len(ids_pos) != seq_len or len(ids_neg) != seq_len:
+            continue
+        prompts_and_multi_anchors.append((ids_pos, all_anchors))
+        pos_mask.append(True)
+        prompts_and_multi_anchors.append((ids_neg, all_anchors))
+        pos_mask.append(False)
+
+    log.info(
+        "Running single multi-anchor pass (%d prompts × %d positions × %d layers)...",
+        len(prompts_and_multi_anchors), n_frames, n_layers,
+    )
+    # H[l]: (2*n_pairs, n_frames, d_model) — use post-block residual stream to match
+    # what extract_layer_deltas_generic captured (hook_resid_post), not mlp.hook_in.
+    H = collect_layer_residuals_multi_anchor(model, prompts_and_multi_anchors, layers,
+                                             hook_name="hook_resid_post")
+
+    pos_idx = np.array([i for i, m in enumerate(pos_mask) if m])
+    neg_idx = np.array([i for i, m in enumerate(pos_mask) if not m])
+
     for pos in range(n_frames):
-        log.info(
-            "Extracting deltas at position %d/%d (%r)...",
-            pos, seq_len - 1, token_labels_pos[pos],
-        )
-        results = extract_layer_deltas_generic(
-            model, pairs, layers, device, dtype,
-            per_template=False,
-            anchor_mode=str(pos),
-        )
-        ld = results["all"]
         vecs = []
         for li, l in enumerate(layers):
-            if l in ld.delta:
-                v = ld.delta[l].float()
-                raw = v.norm().item()
-                norms_raw[pos, li] = raw
-                scale = ld.mean_act_norm.get(l, 1.0) if ld.mean_act_norm else 1.0
-                act_norms_raw[pos, li] = raw / scale if scale > 0 else raw
-                if raw > 1e-8:
-                    vecs.append(torch.nn.functional.normalize(v.unsqueeze(0), dim=-1))
+            H_l = H[l]  # (2*n_pairs, n_frames, d_model)
+            delta = torch.from_numpy(
+                H_l[pos_idx, pos].mean(0) - H_l[neg_idx, pos].mean(0)
+            ).float()
+            raw = delta.norm().item()
+            norms_raw[pos, li] = raw
+            # mean_act_norm: mean ||h|| over all prompts at this position
+            mean_h_norm = float(np.linalg.norm(H_l[:, pos, :], axis=-1).mean())
+            act_norms_raw[pos, li] = raw / mean_h_norm if mean_h_norm > 0 else raw
+            if raw > 1e-8:
+                vecs.append(torch.nn.functional.normalize(delta.unsqueeze(0), dim=-1))
         if len(vecs) >= 2:
-            mat = torch.cat(vecs, dim=0)          # (L, d)
-            cos_mat = mat @ mat.T                  # (L, L)
+            mat = torch.cat(vecs, dim=0)
+            cos_mat = mat @ mat.T
             n = cos_mat.shape[0]
             idx = torch.triu_indices(n, n, offset=1)
             mean_cos[pos] = cos_mat[idx[0], idx[1]].mean().item()
@@ -341,8 +358,9 @@ def make_emergence_gif(
 
     log.info("Plotting emergence PDFs for concept=%s template=%s", concept, template)
     plot_emergence_per_anchor(concept)
-    plot_anchor_layer_grid(concept, template=template or "T0")
     log.info("Emergence PDFs saved.")
+    # anchor_layer_grid is NOT generated here — it requires all per-anchor pipeline
+    # jobs to complete first.  The coordinator submits it as a final dependent job.
 
 
 def regen_gif_from_npy(npy_path: Path, out_path: Path, fps: int = 2) -> None:
