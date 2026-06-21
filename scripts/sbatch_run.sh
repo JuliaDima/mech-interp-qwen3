@@ -29,10 +29,20 @@
 ##SBATCH --mail-type=BEGIN
 ##SBATCH --mail-user=eid23@cam.ac.uk
 
-# ---- Repo root (always derived from script location, not submit dir) ----
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# ---- Repo root ----
+# SLURM_SUBMIT_DIR is the directory sbatch was called from — trust it if it
+# contains miq-env.sh (i.e. was submitted from the repo root).
+# Fallback: MIQ_REPO_ROOT env var (useful when sbatch is called from within a job).
+if [ -f "${SLURM_SUBMIT_DIR:-}/scripts/miq-env.sh" ]; then
+  REPO_ROOT="${SLURM_SUBMIT_DIR}"
+elif [ -n "${MIQ_REPO_ROOT:-}" ] && [ -f "${MIQ_REPO_ROOT}/scripts/miq-env.sh" ]; then
+  REPO_ROOT="${MIQ_REPO_ROOT}"
+else
+  echo "ERROR: cannot find repo root. Submit from the repo directory or set MIQ_REPO_ROOT." >&2
+  exit 1
+fi
 cd "${REPO_ROOT}"
+export MIQ_REPO_ROOT="${REPO_ROOT}"  # propagate to child sbatch calls
 
 # ---- Environment ----
 module purge || true

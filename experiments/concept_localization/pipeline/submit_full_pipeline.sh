@@ -29,7 +29,7 @@
 #   ANCHOR_K=6             number of anchors to select        (default: 6)
 #   ANCHOR_TIME=01:30:00   time limit per anchor pipeline     (default: 01:30:00)
 #   N_PAIRS=100            pairs per template for run_concept (default: 100)
-#   NULL_K=50              null permutation count             (default: 50)
+#   NULL_K=20              null permutation count             (default: 20)
 #   TEMPLATE=T0            template for per-anchor analyses   (default: T0)
 set -euo pipefail
 
@@ -63,7 +63,7 @@ ANCHOR_CANDIDATES="${ANCHOR_CANDIDATES:-6}"   # pipeline jobs submitted (ranked 
 ANCHOR_K="${ANCHOR_K:-3}"                     # displayed anchors (top-k by combined score)
 ANCHOR_TIME="${ANCHOR_TIME:-01:30:00}"
 N_PAIRS="${N_PAIRS:-100}"
-NULL_K="${NULL_K:-50}"
+NULL_K="${NULL_K:-20}"
 TEMPLATE="${TEMPLATE:-T0}"
 # ── Arg parsing ─────────────────────────────────────────────────────────────
 DRY_RUN=false
