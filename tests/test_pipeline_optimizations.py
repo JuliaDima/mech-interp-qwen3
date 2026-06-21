@@ -45,8 +45,10 @@ def model_bf16():
     # Check inside the fixture so session-scoped setup is skipped correctly.
     if not (_HUB / "models--mwhanna--qwen3-4b-transcoders").exists():
         pytest.skip("RDS cache not mounted")
-    if not (_HUB / "models--Qwen--Qwen3-4B").exists():
-        pytest.skip("Qwen3-4B model not in RDS cache")
+    # Check that weight shards actually exist, not just the directory.
+    qwen_dir = _HUB / "models--Qwen--Qwen3-4B"
+    if not any(qwen_dir.rglob("*.safetensors")):
+        pytest.skip("Qwen3-4B weights not in RDS cache")
     from mechinterp_qwen3.attribution_model import AttributionModel
     from mechinterp_qwen3.utils.hf_utils import load_transcoder_from_hub
     from mechinterp_qwen3.utils.model_utils import get_default_device, parse_dtype
