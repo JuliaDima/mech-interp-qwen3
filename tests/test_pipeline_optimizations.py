@@ -55,7 +55,10 @@ def model_bf16():
     dtype = parse_dtype("bfloat16")
     device = get_default_device()
     tc_set, _ = load_transcoder_from_hub(_TC_ID, dtype=dtype, lazy_encoder=True, lazy_decoder=True)
-    m = AttributionModel.from_pretrained_and_transcoders(_MODEL_ID, tc_set, dtype=dtype, device=device)
+    try:
+        m = AttributionModel.from_pretrained_and_transcoders(_MODEL_ID, tc_set, dtype=dtype, device=device)
+    except OSError as e:
+        pytest.skip(f"Qwen3-4B model not loadable: {e}")
     m.eval()
     return m
 
