@@ -312,6 +312,11 @@ ROW_LABELS = [
     "causal overlay",
 ]
 
+# Thesis mode: 4 rows (no causal), larger panels
+PANEL_W_THESIS = 6.0
+PANEL_H_THESIS = 4.8
+N_ROWS_THESIS  = 4
+
 
 def _load_anchor_dir(anchor_dir: Path, template: str) -> dict | None:
     results_path = anchor_dir / "results.json"
@@ -608,6 +613,7 @@ def plot_anchor_layer_grid(
     top_k: int = 6,
     highlight_k: int = 3,
     out_path: Path | None = None,
+    thesis_mode: bool = False,
 ) -> Path | None:
     anchors = discover_anchors(concept, template, top_k)
     if not anchors:
@@ -619,10 +625,14 @@ def plot_anchor_layer_grid(
     template_str     = cd["template_str"]     if cd else template
     prompt_annotated = cd["prompt_annotated"] if cd else None
 
+    n_rows   = N_ROWS_THESIS  if thesis_mode else N_ROWS
+    panel_w  = PANEL_W_THESIS if thesis_mode else PANEL_W
+    panel_h  = PANEL_H_THESIS if thesis_mode else PANEL_H
+
     ps.apply()
     fig, axes = plt.subplots(
-        N_ROWS, K,
-        figsize=(PANEL_W * K, PANEL_H * N_ROWS),
+        n_rows, K,
+        figsize=(panel_w * K, panel_h * n_rows),
         gridspec_kw={"hspace": 0.22, "wspace": 0.35},
         squeeze=False,
     )
@@ -666,10 +676,11 @@ def plot_anchor_layer_grid(
         if leftmost:
             axes[3, col].set_title(ROW_LABELS[3], fontsize=8, pad=4)
 
-        extra = _draw_causal(axes[4, col], results, deltas, template, layers)
-        col_axes += [axes[4, col]] + extra
-        if leftmost:
-            axes[4, col].set_title(ROW_LABELS[4], fontsize=8, pad=4)
+        if not thesis_mode:
+            extra = _draw_causal(axes[4, col], results, deltas, template, layers)
+            col_axes += [axes[4, col]] + extra
+            if leftmost:
+                axes[4, col].set_title(ROW_LABELS[4], fontsize=8, pad=4)
 
         if not leftmost:
             for ax in col_axes:
@@ -678,27 +689,35 @@ def plot_anchor_layer_grid(
         if highlight:
             _apply_highlight(col_axes)
 
-        for row in range(N_ROWS):
+        for row in range(n_rows):
             ax = axes[row, col]
             ax.set_xlim(min(layers) - 0.5, max(layers) + 0.5)
-            if row == N_ROWS - 1:
+            if row == n_rows - 1:
                 ax.set_xlabel("layer", fontsize=7)
             ax.set_xticks(ticks)
             ax.tick_params(axis="x", labelsize=6, labelbottom=True)
             ax.tick_params(axis="y", labelsize=6, labelleft=True, labelright=False)
             ax.grid(False)
 
-    fig_h    = PANEL_H * N_ROWS
-    y1       = 0.995
-    y2       = y1 - 0.23 / fig_h
-    y3       = y2 - 0.21 / fig_h
-    rect_top = y3 - 0.55 / fig_h
-
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         fig.tight_layout()
-    fig.subplots_adjust(top=rect_top)
 
+    # Post-process font sizes for thesis mode
+    if thesis_mode:
+        for ax in fig.get_axes():
+            ax.tick_params(axis="both", labelsize=10)
+            if ax.get_xlabel():
+                ax.xaxis.label.set_fontsize(12)
+            if ax.get_ylabel():
+                ax.yaxis.label.set_fontsize(12)
+            leg = ax.get_legend()
+            if leg:
+                for text in leg.get_texts():
+                    text.set_fontsize(10)
+
+    # Column headers
+    header_fs = 17 if thesis_mode else 8
     for col, entry in enumerate(anchors):
         combined_rank = entry.get("combined_rank", col + 1)
         pr        = entry.get("peak_result")
@@ -706,46 +725,60 @@ def plot_anchor_layer_grid(
         highlight = combined_rank <= highlight_k and not is_null
         hdr_color = ps.RED if highlight else (ps.GRAY if is_null else "black")
 
-        init_rank  = entry.get("init_rank", "?")
-        col_header = (
-            f"pos {entry['pos']} '{entry['token']}'  "
-            f"(init {init_rank} → rank {combined_rank})  score={entry['combined_score']:.2f}"
-        )
+        if thesis_mode:
+            col_header = (
+                f"pos {entry['pos']}  ‘{entry['token']}’\n"
+                f"score = {entry['combined_score']:.2f}"
+            )
+        else:
+            init_rank  = entry.get("init_rank", "?")
+            col_header = (
+                f"pos {entry['pos']} '{entry['token']}'  "
+                f"(init {init_rank} → rank {combined_rank})  score={entry['combined_score']:.2f}"
+            )
         axes[0, col].annotate(
             col_header,
             xy=(0.5, 1), xycoords="axes fraction",
-            xytext=(0, 18), textcoords="offset points",
-            ha="center", va="bottom", fontsize=8,
+            xytext=(0, 22 if thesis_mode else 18), textcoords="offset points",
+            ha="center", va="bottom", fontsize=header_fs,
             fontweight="bold" if highlight else "normal",
             color=hdr_color,
             annotation_clip=False,
         )
 
-    fig.text(
-        0.5, y1,
-        f"{concept} — anchor layer summary  "
-        f"(top {top_k} anchors by position;  top {highlight_k} by rank highlighted)",
-        ha="center", va="top", fontsize=10, fontweight="bold",
-        transform=fig.transFigure,
-    )
-    fig.text(
-        0.5, y2,
-        f"template {template}:  {template_str}",
-        ha="center", va="top", fontsize=8, color=ps.GRAY, style="italic",
-        transform=fig.transFigure,
-    )
-    y3_text = (f"prompt:  {prompt_annotated}  — bracketed tokens are variables"
-               if prompt_annotated else
-               "  ".join(f"pos {e['pos']} '{e['token']}'" for e in anchors))
-    fig.text(0.5, y3, y3_text, ha="center", va="top", fontsize=8, color=ps.NAVY,
-             transform=fig.transFigure)
+    if not thesis_mode:
+        fig_h    = panel_h * n_rows
+        y1       = 0.995
+        y2       = y1 - 0.23 / fig_h
+        y3       = y2 - 0.21 / fig_h
+        rect_top = y3 - 0.55 / fig_h
+        fig.subplots_adjust(top=rect_top)
+        fig.text(
+            0.5, y1,
+            f"{concept} — anchor layer summary  "
+            f"(top {top_k} anchors by position;  top {highlight_k} by rank highlighted)",
+            ha="center", va="top", fontsize=10, fontweight="bold",
+            transform=fig.transFigure,
+        )
+        fig.text(
+            0.5, y2,
+            f"template {template}:  {template_str}",
+            ha="center", va="top", fontsize=8, color=ps.GRAY, style="italic",
+            transform=fig.transFigure,
+        )
+        y3_text = (f"prompt:  {prompt_annotated}  — bracketed tokens are variables"
+                   if prompt_annotated else
+                   "  ".join(f"pos {e['pos']} '{e['token']}'" for e in anchors))
+        fig.text(0.5, y3, y3_text, ha="center", va="top", fontsize=8, color=ps.NAVY,
+                 transform=fig.transFigure)
 
     for ax in fig.get_axes():
         for sp in ax.spines.values():
             sp.set_visible(False)
 
     if out_path is None:
-        out_path = BASE / concept / f"anchor_layer_grid_{template}_top{top_k}.pdf"
+        suffix = "_thesis" if thesis_mode else ""
+        out_path = BASE / concept / f"anchor_layer_grid_{template}_top{top_k}{suffix}.pdf"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, bbox_inches="tight")
     plt.close(fig)
@@ -770,6 +803,8 @@ def main() -> None:
                         help="Skip the anchor-layer grid plot")
     parser.add_argument("--grid_only",      action="store_true",
                         help="Skip the emergence per-anchor plot")
+    parser.add_argument("--thesis",         action="store_true",
+                        help="Thesis mode: 4 rows (no causal), larger panels, clean headers")
     args = parser.parse_args()
 
     if args.all:
@@ -782,7 +817,8 @@ def main() -> None:
         if not args.grid_only:
             plot_emergence_per_anchor(concept)
         if not args.emergence_only:
-            plot_anchor_layer_grid(concept, args.template, args.top_k, args.highlight_k)
+            plot_anchor_layer_grid(concept, args.template, args.top_k, args.highlight_k,
+                                   thesis_mode=args.thesis)
 
 
 if __name__ == "__main__":

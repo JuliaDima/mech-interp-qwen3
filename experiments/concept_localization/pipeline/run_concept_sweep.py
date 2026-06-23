@@ -154,6 +154,8 @@ def _build_inputs(model, pairs, anchor_mode, max_pairs):
                 "template": pair.template,
                 "meta": pair.meta,
                 "label_pos": pair.label_pos,
+                "predict_pos": pair.predict_pos,
+                "predict_neg": pair.predict_neg,
                 "prompt_pos": pair.prompt_pos,
                 "prompt_neg": pair.prompt_neg,
                 "anchor": anchor,

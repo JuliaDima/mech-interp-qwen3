@@ -567,27 +567,55 @@ though the measured probability is attached to its first predicted subtoken.
     \toprule
     Intervention & Case & Representative probability shift & Interpretation \\
     \midrule
+    Operation & English & $P(\mathrm{big})$: $0.68\to{\approx}0$; $P(\mathrm{tiny})$ peak $0.35$ & partial crossover \\
+    Operation & Chinese & $P(\text{d\`{a}})$: $0.99\to{\approx}0$; $P(\text{w\=ei})$ peak $0.75$ & crossover \\
+    Operation & French  & $P(\textit{grand})$: $0.43\to{\approx}0$; $P(\textit{petit})$ peak $0.80$ & crossover \\
+    \midrule
     Operand & English & $P(\mathrm{cold})$: $2.1\!\times\!10^{-7}\to 0.994$ & crossover \\
-    Operand & Chinese & $P(\text{冷})$: $1.5\!\times\!10^{-7}\to 0.986$ & crossover \\
+    Operand & Chinese & $P(\text{l\v{e}ng})$: $1.5\!\times\!10^{-7}\to 0.986$ & crossover \\
     Operand & French & $P(\textit{froid})$: $1.5\!\times\!10^{-7}\to 0.037$; peak $0.998$ & crossover \\
-    Language & EN$\to$ZH & $P(\text{大})$: $2.3\!\times\!10^{-4}\to 0.044$ & weak transfer \\
+    \midrule
+    Language & EN$\to$ZH & $P(\text{d\`{a}})$: $2.3\!\times\!10^{-4}\to 0.044$ & weak transfer \\
     Language & ZH$\to$FR & $P(\textit{grand})$: $2.1\!\times\!10^{-7}\to 2.3\!\times\!10^{-7}$ & no transfer \\
     Language & FR$\to$EN & $P(\textit{large})$: $1.3\!\times\!10^{-5}\to 9.5\!\times\!10^{-6}$ & no transfer \\
     \bottomrule
   \end{tabular}
-  \caption{Summary of the multilingual intervention outcomes in Qwen3-4B.  The
-  operand intervention transfers across languages, whereas the language
-  intervention is weak or absent under the final-token transcoder edit.}
+  \caption{Summary of the multilingual intervention outcomes in Qwen3-4B.
+  Probability shifts are read at the crossover point or at the peak synonym
+  probability, whichever is more informative.
+  The operation intervention suppresses the antonym relation across all three
+  languages, with synonym probability rising in Chinese and French but only
+  partially in English.
+  The operand intervention transfers across all three languages.
+  The language intervention is weak or absent.}
   \label{tab:multilingual-summary}
 \end{table}
 
 The operation and operand interventions support a partially factorised account
-of the computation.  Changing the semantic relation, or changing the adjective
-whose antonym is requested, can redirect the model's answer while leaving the
-surrounding prompt fixed.  The operand result suggests that the same
-English-derived small-to-hot intervention produces the appropriate cold antonym
-in English, Chinese, and French once the relevant token spans are treated
-consistently.
+of the computation.  The operation intervention, which suppresses antonym-selective
+features in the middle layers and injects synonym-selective ones, reduces the
+probability of the antonym response across all three languages.  In Chinese and
+French the probability mass transfers cleanly to synonym tokens, with the
+Chinese antonym (大, dà) falling from 0.99 to near zero while the synonym
+candidate 微 (wēi) peaks at 0.75, and the French antonym \textit{grand} showing
+a corresponding fall while \textit{petit} peaks at 0.80.  The English case is
+qualitatively different: the antonym tokens \textit{large} and \textit{big}
+are suppressed but the released probability disperses across the vocabulary
+rather than concentrating on a single synonym, so \textit{tiny} peaks at only
+0.35 before falling.  This asymmetry between English and the other two languages
+reflects the broader tokenisation and probability distribution for English
+synonyms of ``small'', where no single token dominates the way 微 and
+\textit{petit} do in the respective other languages.  The antonym-suppression
+effect is consistent across languages, indicating that the middle-layer features
+encode the antonym relation in a representation that is not specific to English
+syntax.
+
+The operand intervention transfers with similar fidelity across all three
+languages.  The same English-derived small-to-hot partition, applied at the
+divergence position in each language-specific prompt, produces a crossover from
+the ``small'' antonym to the ``hot'' antonym in English, Chinese, and French,
+with peak probabilities above 0.98 in English and Chinese and a lower but
+still substantial peak in French where the operand spans two subtokens.
 
 For the language intervention, The English-to-Chinese
 edit weakly increases probability on the Chinese answer token, but the effect
