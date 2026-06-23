@@ -40,6 +40,22 @@ from experiments.concept_localization.peak_layers import select_peak_layers, Pea
 
 BASE = _REPO_ROOT / "runs" / "concept_localization"
 
+# ── safetensors transcoder encoder (lightweight, no model load) ────────────────
+import pathlib as _pathlib
+_TC_DIR = _pathlib.Path(
+    "/rds/user/eid23/hpc-work/p28/cache/hf/hub/"
+    "models--mwhanna--qwen3-4b-transcoders/snapshots/"
+    "94d176260ac39ce2f882b8b09aba8c118df29bb3"
+)
+
+def _tc_encode(layer: int, H: np.ndarray) -> np.ndarray:
+    from safetensors import safe_open
+    with safe_open(str(_TC_DIR / f"layer_{layer}.safetensors"),
+                   framework="pt", device="cpu") as f:
+        W = f.get_tensor("W_enc").float()
+        b = f.get_tensor("b_enc").float()
+    return torch.relu(torch.from_numpy(H).float() @ W.T + b).numpy()
+
 
 def _non_monotonicity(curve: np.ndarray) -> float:
     """Prominence of the most prominent local peak.
@@ -312,10 +328,107 @@ ROW_LABELS = [
     "causal overlay",
 ]
 
-# Thesis mode: 4 rows (no causal), larger panels
+# Thesis mode: 6 rows (4 diagnostics + top-1 pos edec + top-1 neg edec), larger panels
 PANEL_W_THESIS = 6.0
 PANEL_H_THESIS = 4.8
-N_ROWS_THESIS  = 4
+N_ROWS_THESIS  = 6
+
+_CMAP_HEAT     = matplotlib.colors.LinearSegmentedColormap.from_list(
+    "wn", ["#f8f8f8", ps.NAVY], N=256
+)
+_CMAP_HEAT_NEG = matplotlib.colors.LinearSegmentedColormap.from_list(
+    "wr", ["#f8f8f8", "#c0392b"], N=256
+)
+
+
+def _draw_top1_edec(ax, anchor_dir: Path, concept: str, polarity: str = "pos") -> None:
+    """Row 5/6 in thesis mode: top-1 enc+dec feature, plotted over all examples."""
+    edec_path = anchor_dir / "sweep" / "delta_feature_projections_enc_dec" / "edec_features.json"
+    npz_path  = anchor_dir / "sweep" / "sweep_residuals.npz"
+    meta_path = anchor_dir / "sweep" / "sweep_residuals.meta.json"
+
+    if not edec_path.exists() or not npz_path.exists():
+        ax.text(0.5, 0.5, "no edec", ha="center", va="center",
+                transform=ax.transAxes, fontsize=7, color=ps.GRAY)
+        ax.axis("off")
+        return
+
+    edec = json.loads(edec_path.read_text())
+    feat_list = edec.get(polarity, [])
+    if not feat_list:
+        ax.text(0.5, 0.5, f"no {polarity} feat", ha="center", va="center",
+                transform=ax.transAxes, fontsize=7, color=ps.GRAY)
+        ax.axis("off")
+        return
+
+    # top-1 by combined enc+dec score
+    feat    = max(feat_list, key=lambda r: abs(float(r.get("score", 0))))
+    layer   = int(feat["layer"])
+    fid     = int(feat["feature_id"])
+    score   = float(feat.get("score", 0))
+    dec_cos = float(feat.get("dec_cos", 0))
+    enc_cos = float(feat.get("enc_cos", 0))
+
+    npz   = np.load(str(npz_path))
+    h_key = f"H_L{layer}"
+    if h_key not in npz:
+        ax.text(0.5, 0.5, f"L{layer} missing", ha="center", va="center",
+                transform=ax.transAxes, fontsize=7, color=ps.GRAY)
+        return
+
+    acts = _tc_encode(layer, npz[h_key].astype(np.float32))[:, fid]  # (2N,)
+
+    meta     = json.loads(meta_path.read_text())
+    examples = meta["payload"]["examples"]  # N entries; 2*i=pos, 2*i+1=neg in acts
+
+    ex0   = examples[0]["meta"] if examples else {}
+    has_b = "b_pos" in ex0
+
+    title = f"dec={dec_cos:+.2f}  enc={enc_cos:+.2f}"
+    cmap  = _CMAP_HEAT if polarity == "pos" else _CMAP_HEAT_NEG
+
+    if has_b:
+        # 2D heatmap: mirror _bin_to_heatmap — both pos (a_pos,b_pos) and neg (a_neg,b_neg)
+        # contribute to the same 10×10 grid so the full digit-pair space is covered.
+        sums = np.zeros((10, 10)); cnt = np.zeros((10, 10))
+        for i, ex in enumerate(examples):
+            m = ex["meta"]
+            a_p, b_p = int(m["a_pos"]) % 10, int(m["b_pos"]) % 10
+            a_n, b_n = int(m["a_neg"]) % 10, int(m["b_neg"]) % 10
+            sums[a_p, b_p] += acts[2 * i];     cnt[a_p, b_p] += 1
+            sums[a_n, b_n] += acts[2 * i + 1]; cnt[a_n, b_n] += 1
+        grid = np.where(cnt > 0, sums / cnt, np.nan)
+        lo, hi = np.nanmin(grid), np.nanmax(grid)
+        if hi - lo > 1e-10:
+            grid = (grid - lo) / (hi - lo)
+        ax.imshow(np.nan_to_num(grid).T, origin="lower", aspect="equal", cmap=cmap,
+                  vmin=0, vmax=1, interpolation="nearest")
+        ax.set_xticks(range(0, 10, 2)); ax.set_yticks(range(0, 10, 2))
+        ax.tick_params(labelsize=13, length=0)
+        ax.set_xlabel(r"$a_0$", fontsize=14, labelpad=1)
+        ax.set_ylabel(r"$b_0$", fontsize=14, labelpad=1)
+    else:
+        # 1D bars: mirror _bin_to_1d_bar — pos examples binned by a_pos%mod (blue),
+        # neg examples binned by a_neg%mod (orange), side by side.
+        mod    = int(ex0.get("m", ex0.get("g", 7)))
+        sp     = np.zeros(mod); cp = np.zeros(mod)
+        sn     = np.zeros(mod); cn = np.zeros(mod)
+        for i, ex in enumerate(examples):
+            m = ex["meta"]
+            sp[int(m["a_pos"]) % mod] += acts[2 * i];     cp[int(m["a_pos"]) % mod] += 1
+            sn[int(m["a_neg"]) % mod] += acts[2 * i + 1]; cn[int(m["a_neg"]) % mod] += 1
+        mp = np.divide(sp, cp, out=np.zeros_like(sp), where=cp > 0)
+        mn = np.divide(sn, cn, out=np.zeros_like(sn), where=cn > 0)
+        x  = np.arange(mod); w = 0.38
+        ax.bar(x - w/2, mp, w, color="#4c72b0", alpha=0.85, label="pos")
+        ax.bar(x + w/2, mn, w, color="#dd8452", alpha=0.85, label="neg")
+        ax.set_xticks(x); ax.tick_params(labelsize=13)
+        ax.set_xlabel(f"a mod {mod}", fontsize=14, labelpad=1)
+        ax.set_ylabel("act.", fontsize=14)
+
+    ax.set_title(title, fontsize=18, pad=3)
+    for sp in ["top", "right"]:
+        ax.spines[sp].set_visible(False)
 
 
 def _load_anchor_dir(anchor_dir: Path, template: str) -> dict | None:
@@ -633,7 +746,7 @@ def plot_anchor_layer_grid(
     fig, axes = plt.subplots(
         n_rows, K,
         figsize=(panel_w * K, panel_h * n_rows),
-        gridspec_kw={"hspace": 0.22, "wspace": 0.35},
+        gridspec_kw={"hspace": 0.30, "wspace": 0.35},
         squeeze=False,
     )
 
@@ -656,31 +769,36 @@ def plot_anchor_layer_grid(
                                           show_colorbar=leftmost)
         col_axes += [axes[0, col]] + extra
         if leftmost:
-            axes[0, col].set_title(ROW_LABELS[0], fontsize=8, pad=4)
+            axes[0, col].set_title(ROW_LABELS[0], fontsize=18 if thesis_mode else 8, pad=4)
 
         extra = _draw_delta_trajectory(axes[1, col], norms_raw_i, act_normed_i,
                                        layers, show_legend=leftmost, null=null,
                                        peak_result=entry.get("peak_result"))
         col_axes += [axes[1, col]] + extra
         if leftmost:
-            axes[1, col].set_title(ROW_LABELS[1], fontsize=8, pad=4)
+            axes[1, col].set_title(ROW_LABELS[1], fontsize=18 if thesis_mode else 8, pad=4)
 
         extra = _draw_layer_cosine(axes[2, col], deltas, layers,
                                     show_colorbar=leftmost)
         col_axes += [axes[2, col]] + extra
         if leftmost:
-            axes[2, col].set_title(ROW_LABELS[2], fontsize=8, pad=4)
+            axes[2, col].set_title(ROW_LABELS[2], fontsize=18 if thesis_mode else 8, pad=4)
 
         extra = _draw_null(axes[3, col], null, layers, show_legend=leftmost)
         col_axes += [axes[3, col]] + extra
         if leftmost:
-            axes[3, col].set_title(ROW_LABELS[3], fontsize=8, pad=4)
+            axes[3, col].set_title(ROW_LABELS[3], fontsize=18 if thesis_mode else 8, pad=4)
 
         if not thesis_mode:
             extra = _draw_causal(axes[4, col], results, deltas, template, layers)
             col_axes += [axes[4, col]] + extra
             if leftmost:
-                axes[4, col].set_title(ROW_LABELS[4], fontsize=8, pad=4)
+                axes[4, col].set_title(ROW_LABELS[4], fontsize=18 if thesis_mode else 8, pad=4)
+        else:
+            # Row 4 (thesis): top-1 positively correlated E_dec feature
+            _draw_top1_edec(axes[4, col], entry["dir"], concept, polarity="pos")
+            # Row 5 (thesis): top-1 negatively correlated E_dec feature
+            _draw_top1_edec(axes[5, col], entry["dir"], concept, polarity="neg")
 
         if not leftmost:
             for ax in col_axes:
@@ -691,12 +809,17 @@ def plot_anchor_layer_grid(
 
         for row in range(n_rows):
             ax = axes[row, col]
-            ax.set_xlim(min(layers) - 0.5, max(layers) + 0.5)
-            if row == n_rows - 1:
-                ax.set_xlabel("layer", fontsize=7)
-            ax.set_xticks(ticks)
-            ax.tick_params(axis="x", labelsize=6, labelbottom=True)
-            ax.tick_params(axis="y", labelsize=6, labelleft=True, labelright=False)
+            # rows 0-3 share the layer x-axis; rows 4-5 (edec) have their own axes
+            last_layer_row = 3 if thesis_mode else n_rows - 1
+            if row <= last_layer_row:
+                ax.set_xlim(min(layers) - 0.5, max(layers) + 0.5)
+                ax.set_xticks(ticks)
+                ax.tick_params(axis="x", labelsize=6, labelbottom=(row == last_layer_row))
+                ax.tick_params(axis="y", labelsize=6, labelleft=True, labelright=False)
+                if row == last_layer_row:
+                    ax.set_xlabel("layer", fontsize=7)
+            else:
+                ax.tick_params(labelsize=6)
             ax.grid(False)
 
     with warnings.catch_warnings():
@@ -706,15 +829,16 @@ def plot_anchor_layer_grid(
     # Post-process font sizes for thesis mode
     if thesis_mode:
         for ax in fig.get_axes():
-            ax.tick_params(axis="both", labelsize=10)
+            ax.tick_params(axis="both", labelsize=13)
             if ax.get_xlabel():
-                ax.xaxis.label.set_fontsize(12)
+                ax.xaxis.label.set_fontsize(14)
             if ax.get_ylabel():
-                ax.yaxis.label.set_fontsize(12)
+                ax.yaxis.label.set_fontsize(14)
             leg = ax.get_legend()
             if leg:
                 for text in leg.get_texts():
-                    text.set_fontsize(10)
+                    text.set_fontsize(13)
+                leg.get_title() and leg.get_title().set_fontsize(13)
 
     # Column headers
     header_fs = 17 if thesis_mode else 8

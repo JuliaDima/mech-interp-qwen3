@@ -28,11 +28,12 @@ RUN  = REPO / "runs/concept_localization"
 def load_anchor(concept, template, anchor):
     adir = RUN / concept / template / anchor
     null_data = json.loads((adir / "null/null_permutation.json").read_text())
-    # real_norms      = D̃_l^act = D_l^act / max_l D_l^act  (double-normalised)
-    # real_norms_maxnorm = raw D_l / max_l(raw D_l)         (peak-scaled raw)
+    # real_norms   = D̃_l^act = (D_l / ||h_l||) / max_l(D_l / ||h_l||)  (double-norm)
+    # null_norms   = same formula applied to null permutations — correct comparison for dn
+    # real_norms_maxnorm = raw D_l / max_l(raw D_l)  (peak-scaled raw, for context)
     real_dn   = np.array(null_data["real_norms"])
     raw_norms = np.array(null_data["real_norms_maxnorm"])
-    null_mat  = np.array(null_data["null_norms_maxnorm"])
+    null_mat  = np.array(null_data["null_norms"])   # double-norm null, same scale as real_dn
     null_mean = null_mat.mean(axis=0)
     null_lo   = np.percentile(null_mat, 5,  axis=0)
     null_hi   = np.percentile(null_mat, 95, axis=0)
@@ -49,8 +50,8 @@ CASES = [
 
 RAW_COLOR = "#aaaaaa"
 DN_COLOR  = "#2c7bb6"
-NULL_BAND = "#f4a08a"
-NULL_LINE = "#d7191c"
+NULL_BAND = "#888888"
+NULL_LINE = "#888888"
 LAYERS    = np.arange(36)
 
 def clean_axes(ax):
@@ -70,9 +71,9 @@ for ax, (concept, template, anchor, title, subtitle) in zip(axes, CASES):
     raw_scaled = raw / (raw.max() + 1e-8)
 
     ax.fill_between(LAYERS, null_lo, null_hi,
-                    color=NULL_BAND, alpha=0.55, zorder=1, label="null 5–95%")
-    ax.plot(LAYERS, null_mean, color=NULL_LINE, lw=0.9, ls="--",
-            zorder=2, label="null mean")
+                    color=NULL_BAND, alpha=0.13, zorder=0, label="null 5–95%")
+    ax.plot(LAYERS, null_mean, color=NULL_LINE, lw=1.0, ls="--", alpha=0.55,
+            zorder=1, label="null mean")
     ax.plot(LAYERS, raw_scaled, color=RAW_COLOR, lw=1.5, ls="-",
             zorder=3, label=r"$D_l / \max D_l$ (raw)")
     ax.plot(LAYERS, dn, color=DN_COLOR, lw=2.0, ls="-",
