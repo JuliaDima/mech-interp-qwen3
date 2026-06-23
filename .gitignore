@@ -48,7 +48,6 @@ scripts/sweeps/closest_features.py
 scripts/sweeps/find_closest_all_feature_grid.py
 scripts/sweeps/fourier_feature_analysis.py
 scripts/sweeps/plot_closest_all_feature_grids.py
-data/concept_datasets/*.txt
 specs.md
 experiments/concept_localization/check_top_tokens.py
 docs/anchor_layer_grid_formulas.md
@@ -62,3 +61,4 @@ experiments/multilingual_circuits/multilingual_circuits.md
 scripts/sweeps/find_and_plot_closest_csvs_all_anchors.py
 scripts/sweeps/submit_find_plot_closest_csvs_all_anchors.sh
 MPhilThesisReport/thesis.synctex.gz
+MPhilThesisReport/texput.log
