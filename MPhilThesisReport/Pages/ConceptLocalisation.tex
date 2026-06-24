@@ -1,4 +1,4 @@
-\chapter{Concept Localisation via Contrastive Residual-Stream Analysis}
+\chapter{Concept Emergence via Contrastive Residual-Stream Analysis}
 \label{sec:concept_localisation}
 
 This chapter aims to analyse where and how arithmetic concepts are represented inside
@@ -530,9 +530,17 @@ characterises the direction of the feature's output. We rank features by their s
 Same-sign terms reinforce one another, whereas opposing terms reduce the score.
 The sign of $\sigma_{l,f}$ corresponds to overall alignment with concept presence and concept absence,
 respectively. Both pools are ranked by $|\sigma_{l,f}|$, merged, and deduplicated.
-Features that remain inactive are removed. Optionally, we also require a 
+Features that remain inactive are removed. Optionally, we also require a
 feature to occur in at least $5\%$ of the attribution graphs.
 
+The distinction between the two projections reflects a distinction between correlation and contribution.
+A feature with high $\operatorname{cos}_{l,f}^{\mathrm{enc}}$ has greater linear pre-activation on concept-positive examples,
+but whether that difference has any effect on the concept representation depends on the direction in which the feature writes to the residual stream.
+A feature may fire more on the positive class yet contribute nothing to the concept direction if its decoder vector is nearly orthogonal to $\delta_l$.
+A feature with high $\operatorname{cos}_{l,f}^{\mathrm{dec}}$, by contrast, contributes a component aligned with the concept direction whenever it activates,
+regardless of how large the mean activation difference between the two classes happens to be.
+Such features are the natural targets for causal validation, as suppressing them removes a directional component aligned with the concept
+and amplifying them moves the representation toward the concept-positive mean.
 
 Figures~\ref{fig:anchor_layer_grid_carry}--\ref{fig:anchor_layer_grid_residue} show
 the per-anchor summary grids for the six top-ranked anchors of each concept, selected
