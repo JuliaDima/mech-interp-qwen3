@@ -27,7 +27,7 @@ from mechinterp_qwen3.attribution_model import AttributionModel
 from mechinterp_qwen3.utils.hf_utils import load_transcoder_from_hub
 from mechinterp_qwen3.utils.model_utils import get_default_device
 
-_MODEL = "Qwen/Qwen3-4B"
+_MODEL = default_model()
 _ROUTER_PATH = Path("runs/fsm_router/router.pt")
 _SVEC_DIR = Path("runs/fsm_router/svecs")
 _BEST_LAYER = 11
@@ -94,7 +94,7 @@ def main():
 
     print("Loading model...")
     transcoder_set, _ = load_transcoder_from_hub(
-        "mwhanna/qwen3-4b-transcoders", dtype=torch.bfloat16, lazy_encoder=True, lazy_decoder=True
+        default_transcoder_set(), dtype=torch.bfloat16, lazy_encoder=True, lazy_decoder=True
     )
     model = AttributionModel.from_pretrained_and_transcoders(
         _MODEL, transcoder_set, dtype=torch.bfloat16, device=device

@@ -670,13 +670,14 @@ def fig_architecture(out: Path) -> None:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-def _load_embedding_matrix(model_name: str = "Qwen/Qwen3-4B") -> tuple[np.ndarray, list[str]]:
+def _load_embedding_matrix(model_name: str | None = None) -> tuple[np.ndarray, list[str]]:
     """Load only the embedding weight and tokenizer — no GPU needed."""
     import os
 
     from transformers import AutoTokenizer
 
     # Try loading just the embed_tokens weight via safetensors (much lighter)
+    model_name = model_name or default_model()
     cache_root = os.environ.get("HF_HOME", os.path.expanduser("~/.cache/huggingface"))
     # Find safetensors shards in cache
     import glob as _glob
@@ -707,7 +708,7 @@ def _load_embedding_matrix(model_name: str = "Qwen/Qwen3-4B") -> tuple[np.ndarra
 
 
 def fig_prefix_nn(
-    ckpt_path: Path, out: Path, model_name: str = "Qwen/Qwen3-4B", top_k: int = 8
+    ckpt_path: Path, out: Path, model_name: str | None = None, top_k: int = 8
 ) -> None:
     ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
     P = ckpt["state_dict"]["prefix"].float().numpy()  # (k, d_model)
@@ -715,7 +716,7 @@ def fig_prefix_nn(
 
     print("  Loading embedding matrix (CPU only, safetensors)…")
     try:
-        W_E, tokenizer = _load_embedding_matrix(model_name)
+        W_E, tokenizer = _load_embedding_matrix(model_name or default_model())
     except RuntimeError as e:
         print(f"  SKIP fig7: {e}")
         fig, ax = plt.subplots(figsize=(5, 3))
@@ -818,7 +819,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Template key within the concept dataset")
     p.add_argument("--n_per_template", type=int, default=500)
     p.add_argument("--mode", default="soft_prompt", choices=["soft_prompt", "prefix_tuning"])
-    p.add_argument("--model", default="Qwen/Qwen3-4B")
+    p.add_argument("--model", default=default_model())
     p.add_argument(
         "--figures",
         nargs="+",

@@ -13,6 +13,7 @@ Example usage:
 import argparse
 from pathlib import Path
 
+from scripts.model_config import default_model
 from mechinterp_qwen3.utils.config_utils import (
     add_config_args,
     load_config,
@@ -40,8 +41,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--model",
         type=str,
-        default="Qwen/Qwen3-4B",
-        help="HuggingFace model name (default: Qwen/Qwen3-4B)",
+        default=default_model(),
+        help="HuggingFace model name (defaults to scripts/model_config.yaml)",
     )
     parser.add_argument(
         "--device",

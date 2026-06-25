@@ -235,8 +235,8 @@ def main() -> None:
 
     p = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     p.add_argument("--graph_json", default="runs/addition/graph/focus_36_59.json")
-    p.add_argument("--model", default="Qwen/Qwen3-4B")
-    p.add_argument("--transcoder_set", default="mwhanna/qwen3-4b-transcoders")
+    p.add_argument("--model", default=default_model())
+    p.add_argument("--transcoder_set", default=default_transcoder_set())
     p.add_argument("--dtype", default="bfloat16", choices=["float32","bfloat16","float16"])
     p.add_argument("--ctx_positions", nargs="+", type=int, default=[5, 8, 9],
                    help="ctx_idx values (1-indexed) from the graph to sweep")
@@ -255,7 +255,7 @@ def main() -> None:
     transcoder, config = load_transcoder_from_hub(
         args.transcoder_set, dtype=dtype, lazy_decoder=True
     )
-    model_name = args.model or config.get("model_name", "Qwen/Qwen3-4B")
+    model_name = args.model or config.get("model_name", default_model())
     model = AttributionModel.from_pretrained_and_transcoders(model_name, transcoder, dtype=dtype)
     model.eval()
 

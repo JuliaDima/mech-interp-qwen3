@@ -1,0 +1,12 @@
+# Default model/transcoder pair for benchmark and concept scripts.
+#
+# To benchmark another pair, edit this file or pass:
+#   --model_config path/to/another_model_config.yaml
+#
+# You can also define named profiles and select one with active_profile.
+active_profile: qwen3_4b
+
+profiles:
+  qwen3_4b:
+    model: Qwen/Qwen3-4B
+    transcoder_set: mwhanna/qwen3-4b-transcoders

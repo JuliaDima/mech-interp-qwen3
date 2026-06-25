@@ -66,6 +66,7 @@ from experiments.plot_style import GRAY, VIOLET, apply
 from mechinterp_qwen3.attribution_model import AttributionModel
 from mechinterp_qwen3.utils.hf_utils import load_transcoder_from_hub
 from mechinterp_qwen3.utils.model_utils import get_default_device, parse_dtype
+from scripts.model_config import add_model_config_arg, default_model, default_transcoder_set, resolve_model_args
 
 logging.basicConfig(
     level=logging.INFO,
@@ -74,8 +75,8 @@ logging.basicConfig(
 )
 log = logging.getLogger("null_permutation")
 
-_MODEL = "Qwen/Qwen3-4B"
-_TRANSCODER_SET = "mwhanna/qwen3-4b-transcoders"
+_MODEL = default_model()
+_TRANSCODER_SET = default_transcoder_set()
 
 
 # ── Null pair construction ────────────────────────────────────────────────────
@@ -502,8 +503,9 @@ def main() -> None:
         choices=CONCEPTS + ["all"],
         help="Concept name or 'all' to run every registered concept.",
     )
-    parser.add_argument("--model",           default=_MODEL)
-    parser.add_argument("--transcoder_set",  default=_TRANSCODER_SET)
+    add_model_config_arg(parser)
+    parser.add_argument("--model",           default=None)
+    parser.add_argument("--transcoder_set",  default=None)
     parser.add_argument("--n",    type=int,  default=100, help="Pairs per template")
     parser.add_argument("--template", default="T0",
                         help="Single template for per-anchor null permutation")
@@ -545,6 +547,7 @@ def main() -> None:
         ),
     )
     args = parser.parse_args()
+    resolve_model_args(args)
 
     concepts = CONCEPTS if args.concept == "all" else [args.concept]
     ctx_keys = [k.strip() for k in args.context_keys.split(",")] if args.context_keys else None

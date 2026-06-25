@@ -38,6 +38,7 @@ from experiments.concept_localization.extract_deltas_generic import (
 from mechinterp_qwen3.attribution_model import AttributionModel
 from mechinterp_qwen3.utils.hf_utils import load_transcoder_from_hub
 from mechinterp_qwen3.utils.model_utils import get_default_device, parse_dtype
+from scripts.model_config import add_model_config_arg, default_model, default_transcoder_set, resolve_model_args
 
 logging.basicConfig(
     level=logging.INFO,
@@ -46,8 +47,8 @@ logging.basicConfig(
 )
 log = logging.getLogger("run_concept_sweep")
 
-_MODEL = "Qwen/Qwen3-4B"
-_TRANSCODER_SET = "mwhanna/qwen3-4b-transcoders"
+_MODEL = default_model()
+_TRANSCODER_SET = default_transcoder_set()
 
 CONCEPTS = [
     "carry",
@@ -194,8 +195,9 @@ def cache_sweep_residuals(
 def main() -> None:
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("--concept", required=True, choices=CONCEPTS)
-    parser.add_argument("--model", default=_MODEL)
-    parser.add_argument("--transcoder_set", default=_TRANSCODER_SET)
+    add_model_config_arg(parser)
+    parser.add_argument("--model", default=None)
+    parser.add_argument("--transcoder_set", default=None)
     parser.add_argument("--dtype", default="bfloat16")
     parser.add_argument(
         "--layers",
@@ -216,6 +218,7 @@ def main() -> None:
         "--out_dir", default=None, help="Output dir (default: runs/concept_localization/<concept>)"
     )
     args = parser.parse_args()
+    resolve_model_args(args)
 
     if args.layers == "all":
         target_layers = list(range(36))

@@ -59,6 +59,7 @@ from experiments.fsm_router.primitives import FSM_SPECS, PRIMITIVE_DEFS  # noqa:
 from mechinterp_qwen3.attribution_model import AttributionModel  # noqa: E402
 from mechinterp_qwen3.utils.hf_utils import load_transcoder_from_hub  # noqa: E402
 from mechinterp_qwen3.utils.model_utils import get_default_device, parse_dtype  # noqa: E402
+from scripts.model_config import default_model, default_transcoder_set
 from mechinterp_qwen3.utils.token_utils import tokenize_qwen_input  # noqa: E402
 
 logging.basicConfig(
@@ -68,8 +69,8 @@ logging.basicConfig(
 )
 log = logging.getLogger("extract_svec")
 
-_MODEL = "Qwen/Qwen3-4B"
-_TRANSCODER_SET = "mwhanna/qwen3-4b-transcoders"
+_MODEL = default_model()
+_TRANSCODER_SET = default_transcoder_set()
 _ROUTER_PATH = "runs/fsm_router/router.pt"
 _OUT_DIR = "runs/fsm_router/svecs"
 _SWEEP_LAYERS = list(range(36))  # all layers — extraction is cheap, let evaluation pick the best

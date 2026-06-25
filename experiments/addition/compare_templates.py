@@ -1,3 +1,4 @@
+from scripts.model_config import default_model, default_transcoder_set
 """
 usage: python experiments/addition/compare_templates.py
 """
@@ -25,8 +26,8 @@ from mechinterp_qwen3.utils.hf_utils import load_transcoder_from_hub  # noqa: E4
 from mechinterp_qwen3.utils.token_utils import tokenize_qwen_input  # noqa: E402
 
 # 2. Configuration
-model_name = "Qwen/Qwen3-4B"
-transcoder_set = "mwhanna/qwen3-4b-transcoders"
+model_name = default_model()
+transcoder_set = default_transcoder_set()
 n_samples = 100  # Number of random prompts to test per template
 device = "cuda" if torch.cuda.is_available() else "cpu"
 

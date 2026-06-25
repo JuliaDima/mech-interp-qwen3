@@ -60,6 +60,7 @@ def _apply_style() -> None:
 from mechinterp_qwen3.attribution_model import AttributionModel
 from mechinterp_qwen3.utils.hf_utils import load_transcoder_from_hub
 from mechinterp_qwen3.utils.model_utils import get_default_device, parse_dtype
+from scripts.model_config import default_model, default_transcoder_set
 from mechinterp_qwen3.utils.token_utils import tokenize_qwen_input
 
 logging.basicConfig(
@@ -69,8 +70,8 @@ logging.basicConfig(
 )
 log = logging.getLogger("multilingual_circuits")
 
-_MODEL = "Qwen/Qwen3-4B"
-_TRANSCODER_SET = "mwhanna/qwen3-4b-transcoders"
+_MODEL = default_model()
+_TRANSCODER_SET = default_transcoder_set()
 
 # ── Prompts ────────────────────────────────────────────────────────────────────
 

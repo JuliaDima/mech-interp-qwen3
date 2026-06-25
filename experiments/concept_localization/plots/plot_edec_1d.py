@@ -37,12 +37,16 @@ REPO = pathlib.Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO))
 
 import experiments.plot_style as ps
+from scripts.model_config import transcoder_snapshot_dir
 
-TC_DIR = pathlib.Path(
-    "/rds/user/eid23/hpc-work/p28/cache/hf/hub/"
-    "models--mwhanna--qwen3-4b-transcoders/snapshots/"
-    "94d176260ac39ce2f882b8b09aba8c118df29bb3"
-)
+TC_DIR: pathlib.Path | None = None
+
+
+def _tc_dir() -> pathlib.Path:
+    global TC_DIR
+    if TC_DIR is None:
+        TC_DIR = transcoder_snapshot_dir()
+    return TC_DIR
 
 
 # ── Transcoder helpers ──────────────────────────────────────────────────────
@@ -50,7 +54,7 @@ TC_DIR = pathlib.Path(
 def _encode_layer(layer: int, H_l: np.ndarray) -> np.ndarray:
     """Load W_enc+b_enc for one layer and apply ReLU. CPU-friendly."""
     import torch
-    with safe_open(str(TC_DIR / f"layer_{layer}.safetensors"),
+    with safe_open(str(_tc_dir() / f"layer_{layer}.safetensors"),
                    framework="pt", device="cpu") as f:
         W_enc = f.get_tensor("W_enc").float()
         b_enc = f.get_tensor("b_enc").float()

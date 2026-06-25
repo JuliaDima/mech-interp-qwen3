@@ -69,12 +69,12 @@ def build_parser() -> argparse.ArgumentParser:
     model_args = p.add_argument_group("Model")
     model_args.add_argument(
         "--model",
-        default="Qwen/Qwen3-4B",
+        default=default_model(),
         help="HuggingFace model name",
     )
     model_args.add_argument(
         "--transcoder_set",
-        default="mwhanna/qwen3-4b-transcoders",
+        default=default_transcoder_set(),
         help="HuggingFace transcoder set (repo id or local path)",
     )
     model_args.add_argument(
@@ -200,7 +200,7 @@ def _load_model(args: argparse.Namespace):
         lazy_decoder=True,
     )
 
-    model_name = args.model or config.get("model_name") or "Qwen/Qwen3-4B"
+    model_name = args.model or config.get("model_name") or default_model()
     log.info("Loading model %r (dtype=%s) …", model_name, args.dtype)
     model = AttributionModel.from_pretrained_and_transcoders(model_name, transcoder, dtype=dtype)
     return model

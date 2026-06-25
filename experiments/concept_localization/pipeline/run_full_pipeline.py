@@ -37,6 +37,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from experiments.concept_localization.plots.plot_emergence_per_anchor import load_concept_anchor_data
+from scripts.model_config import add_model_config_arg, resolve_model_args
 
 logging.basicConfig(
     level=logging.INFO,
@@ -95,12 +96,14 @@ def main() -> None:
     parser.add_argument("--n_clusters", type=int, default=6)
 
     # Model / dtype
-    parser.add_argument("--model", default="Qwen/Qwen3-4B")
-    parser.add_argument("--transcoder_set", default="mwhanna/qwen3-4b-transcoders")
+    add_model_config_arg(parser)
+    parser.add_argument("--model", default=None)
+    parser.add_argument("--transcoder_set", default=None)
     parser.add_argument("--dtype", default="bfloat16")
     parser.add_argument("--seed", type=int, default=42)
 
     args = parser.parse_args()
+    resolve_model_args(args)
 
     concept_dir = _BASE / args.concept
     concept_dir.mkdir(parents=True, exist_ok=True)
@@ -181,6 +184,8 @@ def main() -> None:
             "--null_k", str(args.null_k),
             "--cluster_top_k", str(args.cluster_top_k),
             "--n_clusters", str(args.n_clusters),
+            "--model", args.model,
+            "--transcoder_set", args.transcoder_set,
         ]
 
         _run(anchor_args)

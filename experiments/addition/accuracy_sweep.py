@@ -459,10 +459,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     # Model
     model_args = p.add_argument_group("Model")
-    model_args.add_argument("--model", default="Qwen/Qwen3-4B", help="HuggingFace model name")
+    model_args.add_argument("--model", default=default_model(), help="HuggingFace model name")
     model_args.add_argument(
         "--transcoder_set",
-        default="mwhanna/qwen3-4b-transcoders",
+        default=default_transcoder_set(),
         help="HuggingFace transcoder set",
     )
     model_args.add_argument(

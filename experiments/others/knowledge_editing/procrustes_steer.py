@@ -56,6 +56,7 @@ from mechinterp_qwen3.attribution_model import AttributionModel  # noqa: E402
 from mechinterp_qwen3.probe.label_utils import compute_carry_label  # noqa: E402
 from mechinterp_qwen3.utils.hf_utils import load_transcoder_from_hub  # noqa: E402
 from mechinterp_qwen3.utils.model_utils import get_default_device, parse_dtype  # noqa: E402
+from scripts.model_config import default_model, default_transcoder_set
 from mechinterp_qwen3.utils.token_utils import tokenize_qwen_input  # noqa: E402
 
 _OTHERS_DIR = str(Path(__file__).parent.parent)
@@ -545,8 +546,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     # Models
-    p.add_argument("--model", default="Qwen/Qwen3-4B")
-    p.add_argument("--transcoder_set", default="mwhanna/qwen3-4b-transcoders")
+    p.add_argument("--model", default=default_model())
+    p.add_argument("--transcoder_set", default=default_transcoder_set())
     p.add_argument(
         "--small_model_path",
         default="models/small_addition_model.pt",

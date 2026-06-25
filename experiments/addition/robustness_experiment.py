@@ -13,6 +13,7 @@ import csv
 import json
 import random
 import subprocess
+from scripts.model_config import default_transcoder_set
 from collections import defaultdict
 from pathlib import Path
 
@@ -59,7 +60,7 @@ def generate_prompt_pairs(num_carry=20, num_no_carry=20, seed=42):
     return carry_pairs + no_carry_pairs
 
 
-def run_pipeline(pairs, transcoder_set="mwhanna/qwen3-4b-transcoders"):
+def run_pipeline(pairs, transcoder_set=None):
     for idx, pair in enumerate(pairs):
         a, b, b_perturb = pair["a"], pair["b"], pair["b_perturb"]
         slug = f"addition_{a}_{b}"

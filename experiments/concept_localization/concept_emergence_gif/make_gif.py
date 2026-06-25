@@ -46,6 +46,7 @@ _STEP_COLOR = "#D4A017"   # amber — steepest-step markers
 from mechinterp_qwen3.attribution_model import AttributionModel
 from mechinterp_qwen3.utils.hf_utils import load_transcoder_from_hub
 from mechinterp_qwen3.utils.model_utils import get_default_device, parse_dtype
+from scripts.model_config import add_model_config_arg, default_model, default_transcoder_set, resolve_model_args
 
 logging.basicConfig(
     level=logging.INFO,
@@ -54,8 +55,8 @@ logging.basicConfig(
 )
 log = logging.getLogger("make_gif")
 
-_MODEL = "Qwen/Qwen3-4B"
-_TRANSCODER_SET = "mwhanna/qwen3-4b-transcoders"
+_MODEL = default_model()
+_TRANSCODER_SET = default_transcoder_set()
 
 
 def _decode_tokens(tokenizer, ids: list[int]) -> list[str]:
@@ -408,8 +409,9 @@ def regen_gif_from_npy(npy_path: Path, out_path: Path, fps: int = 2) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("--concept", default="carry")
-    parser.add_argument("--model", default=_MODEL)
-    parser.add_argument("--transcoder_set", default=_TRANSCODER_SET)
+    add_model_config_arg(parser)
+    parser.add_argument("--model", default=None)
+    parser.add_argument("--transcoder_set", default=None)
     parser.add_argument("--n", type=int, default=50, help="Pairs per template")
     parser.add_argument("--template", default="T0",
                         help="Template to use (default T0). Pass '' to use all templates "
@@ -430,6 +432,7 @@ def main() -> None:
         help="Regenerate GIF from an existing .npy file without reloading the model.",
     )
     args = parser.parse_args()
+    resolve_model_args(args)
 
     out = Path(args.out or f"runs/concept_localization/{args.concept}/emergence.gif")
 
