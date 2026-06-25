@@ -75,11 +75,18 @@ def main() -> None:
     parser.add_argument("--null_k", type=int, default=20)
     parser.add_argument("--dry_run", action="store_true",
                         help="Print sbatch commands without submitting")
+    parser.add_argument("--out_concept", default=None,
+                        help="Output directory name override (defaults to --concept). Dataset loading still uses --concept.")
+    parser.add_argument("--model_config", default=None,
+                        help="Path to model config YAML (passed through to anchor pipeline jobs)")
+    parser.add_argument("--profile", default=None,
+                        help="Profile name to activate from model config YAML")
     args = parser.parse_args()
 
+    out_concept = args.out_concept or args.concept
     n_candidates = args.candidates
 
-    data = load_concept_anchor_data(args.concept)
+    data = load_concept_anchor_data(out_concept)
     if data is None:
         log.error(
             "emergence.npy not found for concept '%s'. "
@@ -108,9 +115,9 @@ def main() -> None:
         sys.exit(1)
 
     log.info(
-        "Concept '%s': submitting %d candidate anchor jobs ranked by mean_cos "
+        "Concept '%s' (out_concept='%s'): submitting %d candidate anchor jobs ranked by mean_cos "
         "(will display top %d by combined score)",
-        args.concept, len(candidates), args.k,
+        args.concept, out_concept, len(candidates), args.k,
     )
     for rank, pos_idx in enumerate(candidates, start=1):
         label = labels[pos_idx] if pos_idx < len(labels) else str(pos_idx)
@@ -120,7 +127,7 @@ def main() -> None:
 
     for rank, anchor_idx in enumerate(candidates, start=1):
         label = labels[anchor_idx] if anchor_idx < len(labels) else str(anchor_idx)
-        job_name = f"anchor_{args.concept}_r{rank}"
+        job_name = f"anchor_{out_concept}_r{rank}"
         cmd = [
             "sbatch", "--parsable",
             f"--job-name={job_name}",
@@ -128,6 +135,7 @@ def main() -> None:
             _SBATCH_RUN,
             sys.executable, _PIPELINE_SCRIPT,
             "--concept", args.concept,
+            "--out_concept", out_concept,
             "--anchor_pos", str(anchor_idx),
             "--anchor_rank", str(rank),
             "--template", args.template,
@@ -136,6 +144,10 @@ def main() -> None:
             "--causal_pairs", str(args.causal_pairs),
             "--null_k", str(args.null_k),
         ]
+        if args.model_config:
+            cmd += ["--model_config", args.model_config]
+        if args.profile:
+            cmd += ["--profile", args.profile]
         jid = _submit(cmd, args.dry_run)
         submitted.append((rank, anchor_idx, label, jid))
         log.info(
@@ -149,13 +161,13 @@ def main() -> None:
         dep = "afterok:" + ":".join(real_jids)
         grid_cmd = [
             "sbatch", "--parsable",
-            f"--job-name=grid_{args.concept}",
+            f"--job-name=grid_{out_concept}",
             "--time=00:05:00",
             f"--dependency={dep}",
             _SBATCH_RUN,
             sys.executable, "-m",
             "experiments.concept_localization.plots.plot_emergence_per_anchor",
-            "--concept", args.concept,
+            "--concept", out_concept,
             "--template", args.template,
             "--grid_only",
         ]

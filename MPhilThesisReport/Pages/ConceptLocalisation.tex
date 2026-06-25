@@ -597,7 +597,9 @@ GCD membership is a binary predicate with a single discriminatory output token
 
 \begin{figure}[p]
 \centering
-\includegraphics[width=\textwidth]{../runs/concept_localization/residue_class/anchor_layer_grid_T0_top6_thesis}
+\IfFileExists{../runs/concept_localization/residue_class/anchor_layer_grid_T0_top6_thesis.pdf}%
+  {\includegraphics[width=\textwidth]{../runs/concept_localization/residue_class/anchor_layer_grid_T0_top6_thesis}}%
+  {\fbox{\parbox{\textwidth}{\centering\vspace{4cm}[figure not yet generated: residue\_class anchor\_layer\_grid]\vspace{4cm}}}}
 \caption{Per-anchor layer summary for the six top-scoring residue class anchors (same
 six-row layout; template: \texttt{calc: \{a\}\%7=}; positive: $a \equiv 1 \pmod{7}$;
 negative: $a \not\equiv 1 \pmod{7}$). Rows 5 and 6 show mean feature activation binned

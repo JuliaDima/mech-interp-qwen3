@@ -1,10 +1,10 @@
 """Residue class concept dataset.
 
-Fixed modulus m=7, fixed positive residue r_pos=1.  The negative residue
-r_neg is sampled uniformly from {2, 3, 4, 5, 6} per pair so that the numeric
-offset (a_neg - a_pos = r_neg - 1 ∈ {1,...,5}) varies across pairs.  This
+Fixed modulus m=7, fixed positive residue r_pos=0.  The negative residue
+r_neg is sampled uniformly from {1, 2, 3, 4, 5, 6} per pair so that the numeric
+offset (a_neg - a_pos = r_neg - 1 ∈ {1,...,6}) varies across pairs.  This
 decorrelates residue-class membership from a fixed arithmetic magnitude
-difference, making the mean delta a genuine "residue class 1 mod 7" direction
+difference, making the mean delta a genuine "residue class 0 mod 7" direction
 rather than a proxy for a constant numeric offset.
 
 a varies freely over 2-4 digit numbers for statistical diversity.
@@ -17,13 +17,13 @@ import random
 from experiments.concept_localization.concept_pair import ConceptPair
 
 M = 7
-R_POS = 1
-_R_NEG_CHOICES = [2, 3, 4, 5, 6]  # sampled per pair to vary the offset
+R_POS = 0
+_R_NEG_CHOICES = [1, 2, 3, 4, 5, 6]  # sampled per pair to vary the offset
 
 TEMPLATES: dict[str, tuple[str, str, str | None]] = {
     "T0": ("calc: {a}%7= ", str(R_POS), None),       # predict_pos fixed; neg varies per pair
     "T1": ("What is the remainder of {a} divided by 7? Answer: ", str(R_POS), None),
-    "T2": ("Is {a} mod 7 equal to 1? Answer yes or no: ", "yes", "no"),  # pos: r_pos=1→yes, neg: r_neg≠1→no
+    "T2": ("Is {a} mod 7 equal to 0? Answer yes or no: ", "yes", "no"),  # pos: r_pos=0→yes, neg: r_neg≠0→no
 
 }
 
@@ -33,10 +33,10 @@ def generate_residue_pairs(
     templates: list[str] | None = None,
     seed: int = 42,
 ) -> list[ConceptPair]:
-    """Pairs a_pos ≡ 1 (mod 7) vs a_neg ≡ r_neg (mod 7), r_neg ∈ {2,...,6}.
+    """Pairs a_pos ≡ 0 (mod 7) vs a_neg ≡ r_neg (mod 7), r_neg ∈ {1,...,6}.
 
-    a_pos = 7k + 1.  r_neg is drawn uniformly from {2,3,4,5,6} per pair so
-    the offset a_neg - a_pos = r_neg - 1 ∈ {1,...,5} varies, decorrelating
+    a_pos = 7k.  r_neg is drawn uniformly from {1,...,6} per pair so
+    the offset a_neg - a_pos = r_neg ∈ {1,...,6} varies, decorrelating
     the magnitude difference from the residue-class signal.
     """
     if templates is None:

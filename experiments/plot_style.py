@@ -36,6 +36,7 @@ PHASE_BOUNDS = [(0, 4), (5, 18), (19, 35)]
 # ── rcParams ─────────────────────────────────────────────────────────────────
 RC = {
     "font.family": "serif",
+    "mathtext.fontset": "cm",
     "font.size": 11,
     "axes.titlesize": 12,
     "axes.titleweight": "bold",

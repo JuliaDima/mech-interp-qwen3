@@ -105,15 +105,18 @@ def main() -> None:
     parser.add_argument("--dtype", default="bfloat16")
     parser.add_argument("--compile", action="store_true",
                         help="torch.compile the model for faster inference (first call is slow)")
+    parser.add_argument("--out_concept", default=None,
+                        help="Output directory name override (defaults to --concept). Dataset loading still uses --concept.")
     args = parser.parse_args()
     resolve_model_args(args)
 
+    out_concept = args.out_concept or args.concept
     out_dir = (
         _REPO_ROOT
         / "runs"
         / "concept_localization"
-        / args.concept
-        / f"{args.concept}_{args.template}"
+        / out_concept
+        / f"{out_concept}_{args.template}"
         / f"anchor_rank{args.anchor_rank}_pos{args.anchor_pos}"
     )
     out_dir.mkdir(parents=True, exist_ok=True)
