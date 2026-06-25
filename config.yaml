@@ -11,8 +11,6 @@ batch_size: 64
 verbose: false
 
 # --- Model & Transcoder ---
-model: "Qwen/Qwen3-4B"
-transcoder_set: "mwhanna/qwen3-4b-transcoders"
 lazy_encoder: false
 lazy_decoder: true
 
