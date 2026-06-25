@@ -36,6 +36,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from scripts.model_config import add_model_config_arg, default_model, default_transcoder_set, resolve_model_args
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s  %(name)s — %(message)s",
@@ -44,8 +46,8 @@ logging.basicConfig(
 log = logging.getLogger("run_anchor_pipeline")
 
 _N_LAYERS = 36
-_MODEL = "Qwen/Qwen3-4B"
-_TRANSCODER_SET = "mwhanna/qwen3-4b-transcoders"
+_MODEL = default_model()
+_TRANSCODER_SET = default_transcoder_set()
 
 
 def _subprocess(cmd: list[str]) -> None:
@@ -53,7 +55,7 @@ def _subprocess(cmd: list[str]) -> None:
     subprocess.run(cmd, check=True)
 
 
-def _load_model(dtype_str: str = "bfloat16", compile: bool = False):
+def _load_model(model_name: str, transcoder_set: str, dtype_str: str = "bfloat16", compile: bool = False):
     import torch
     from mechinterp_qwen3.attribution_model import AttributionModel
     from mechinterp_qwen3.utils.hf_utils import load_transcoder_from_hub
@@ -61,10 +63,10 @@ def _load_model(dtype_str: str = "bfloat16", compile: bool = False):
     dtype = parse_dtype(dtype_str)
     device = get_default_device()
     tc_set, _ = load_transcoder_from_hub(
-        _TRANSCODER_SET, dtype=dtype, lazy_encoder=True, lazy_decoder=True
+        transcoder_set, dtype=dtype, lazy_encoder=True, lazy_decoder=True
     )
     model = AttributionModel.from_pretrained_and_transcoders(
-        _MODEL, tc_set, dtype=dtype, device=device
+        model_name, tc_set, dtype=dtype, device=device
     )
     model.eval()
     if compile:
@@ -97,10 +99,14 @@ def main() -> None:
     parser.add_argument("--feature_score_modes", nargs="+", default=["enc+dec", "dec"],
                         choices=["dec", "enc", "enc+dec"],
                         help="Edec score modes for delta_feature_projections (each gets its own subdir)")
+    add_model_config_arg(parser)
+    parser.add_argument("--model", default=None)
+    parser.add_argument("--transcoder_set", default=None)
     parser.add_argument("--dtype", default="bfloat16")
     parser.add_argument("--compile", action="store_true",
                         help="torch.compile the model for faster inference (first call is slow)")
     args = parser.parse_args()
+    resolve_model_args(args)
 
     out_dir = (
         _REPO_ROOT
@@ -118,15 +124,15 @@ def main() -> None:
 
     # Load model once — reused across all stages that need it.
     log.info("=== Loading model (once) ===")
-    model = _load_model(args.dtype, compile=args.compile)
+    model = _load_model(args.model, args.transcoder_set, args.dtype, compile=args.compile)
 
     # ── Stage 1: run_concept ──────────────────────────────────────────────
     log.info("=== Stage 1: run_concept ===")
     from experiments.concept_localization.pipeline.run_concept import _run_single
     concept_args = Namespace(
         concept=args.concept,
-        model=_MODEL,
-        transcoder_set=_TRANSCODER_SET,
+        model=args.model,
+        transcoder_set=args.transcoder_set,
         dtype=args.dtype,
         n=args.n,
         top_k=args.top_k,
@@ -160,8 +166,8 @@ def main() -> None:
     null_dir.mkdir(parents=True, exist_ok=True)
     run_null_permutation(
         concept=args.concept,
-        model_name=_MODEL,
-        transcoder_set=_TRANSCODER_SET,
+        model_name=args.model,
+        transcoder_set=args.transcoder_set,
         n_per_template=args.n,
         k=args.null_k,
         out_dir=null_dir,
@@ -221,8 +227,8 @@ def main() -> None:
     # Build sweep metadata using a minimal args namespace for _sweep_cache_metadata
     sweep_meta_args = Namespace(
         concept=args.concept,
-        model=_MODEL,
-        transcoder_set=_TRANSCODER_SET,
+        model=args.model,
+        transcoder_set=args.transcoder_set,
         dtype=args.dtype,
         layers=target_layers,
         anchor=str(args.anchor_pos),
@@ -251,6 +257,8 @@ def main() -> None:
         attr_survival_file=None,
         graphs_dir=None,
         template=args.template,
+        model=args.model,
+        transcoder_set=args.transcoder_set,
     )
     run_for_anchor(out_dir, model, dfp_args)
 

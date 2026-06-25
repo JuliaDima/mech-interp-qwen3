@@ -65,6 +65,7 @@ from experiments.concept_localization.plots.plot_anchor_analysis import (
 from mechinterp_qwen3.attribution_model import AttributionModel
 from mechinterp_qwen3.utils.hf_utils import load_transcoder_from_hub
 from mechinterp_qwen3.utils.model_utils import get_default_device, parse_dtype
+from scripts.model_config import add_model_config_arg, default_model, default_transcoder_set, resolve_model_args
 
 logging.basicConfig(
     level=logging.INFO,
@@ -73,8 +74,8 @@ logging.basicConfig(
 )
 log = logging.getLogger("run_concept")
 
-_MODEL = "Qwen/Qwen3-4B"
-_TRANSCODER_SET = "mwhanna/qwen3-4b-transcoders"
+_MODEL = default_model()
+_TRANSCODER_SET = default_transcoder_set()
 
 
 # ── concept registry ──────────────────────────────────────────────────────────
@@ -238,18 +239,21 @@ def _run_feature_projection_plots(
 
     for score_mode in _FEATURE_PROJECTION_SCORE_MODES:
         log.info("delta_feature_projections: score_mode=%s …", score_mode)
-        run_one_mode(
-            anchor_dir=out_dir,
-            model=model,
-            inputs=inputs,
-            examples=examples,
-            active_features=active_features,
-            survival_set=None,
-            score_mode=score_mode,
-            top_k=top_k,
-            concept=concept,
-            H_cached=H_scan,
-        )
+        try:
+            run_one_mode(
+                anchor_dir=out_dir,
+                model=model,
+                inputs=inputs,
+                examples=examples,
+                active_features=active_features,
+                survival_set=None,
+                score_mode=score_mode,
+                top_k=top_k,
+                concept=concept,
+                H_cached=H_scan,
+            )
+        except ValueError as e:
+            log.warning("delta_feature_projections skipped grid plot (unsupported meta schema): %s", e)
         mode_suffix = score_mode.replace("+", "_")
         log.info(
             "Saved → %s",
@@ -265,8 +269,9 @@ def main() -> None:
         choices=CONCEPTS + ["all", "symbolic"],
         help="Concept name, 'all' to run every concept, or 'symbolic' for the symbolic subset",
     )
-    parser.add_argument("--model", default=_MODEL)
-    parser.add_argument("--transcoder_set", default=_TRANSCODER_SET)
+    add_model_config_arg(parser)
+    parser.add_argument("--model", default=None)
+    parser.add_argument("--transcoder_set", default=None)
     parser.add_argument("--dtype", default="bfloat16")
     parser.add_argument("--n", type=int, default=100, help="Pairs per template")
     parser.add_argument("--top_k", type=int, default=15, help="Top-k features per layer")
@@ -311,6 +316,7 @@ def main() -> None:
         help="Max pairs for causal analysis (default: all, but 50 is usually enough)",
     )
     args = parser.parse_args()
+    resolve_model_args(args)
 
     if args.concept in ("all", "symbolic"):
         batch = CONCEPTS if args.concept == "all" else SYMBOLIC_SUBSET

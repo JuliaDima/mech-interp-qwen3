@@ -55,6 +55,7 @@ from steer import (
 from mechinterp_qwen3.attribution_model import AttributionModel
 from mechinterp_qwen3.utils.hf_utils import load_transcoder_from_hub
 from mechinterp_qwen3.utils.model_utils import get_default_device, parse_dtype
+from scripts.model_config import default_model, default_transcoder_set, transcoder_snapshot_dir
 
 logging.basicConfig(
     level=logging.INFO,
@@ -339,8 +340,8 @@ def main() -> None:
     parser.add_argument(
         "--jsonl_path", "--dataset", dest="jsonl_path", default="data/addition_grid.jsonl"
     )
-    parser.add_argument("--model", default="Qwen/Qwen3-4B")
-    parser.add_argument("--transcoder_set", default="mwhanna/qwen3-4b-transcoders")
+    parser.add_argument("--model", default=default_model())
+    parser.add_argument("--transcoder_set", default=default_transcoder_set())
     parser.add_argument("--dtype", default="bfloat16")
     parser.add_argument("--layer", type=int, default=16)
     parser.add_argument("--alpha", type=float, default=5.0)
@@ -356,13 +357,13 @@ def main() -> None:
     parser.add_argument("--out_dir", default="runs/knowledge_editing/plots")
     parser.add_argument(
         "--tc_snap_path",
-        default=(
-            "/local/eid23/hf/hub/models--mwhanna--qwen3-4b-transcoders"
-            "/snapshots/94d176260ac39ce2f882b8b09aba8c118df29bb3"
-        ),
+        default=None,
         help="Local snapshot directory containing transcoder layer safetensors for feature maps.",
     )
     args = parser.parse_args()
+
+    if args.tc_snap_path is None:
+        args.tc_snap_path = str(transcoder_snapshot_dir(args.transcoder_set))
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

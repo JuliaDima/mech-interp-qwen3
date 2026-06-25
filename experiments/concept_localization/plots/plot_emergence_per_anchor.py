@@ -41,16 +41,20 @@ from experiments.concept_localization.peak_layers import select_peak_layers, Pea
 BASE = _REPO_ROOT / "runs" / "concept_localization"
 
 # ── safetensors transcoder encoder (lightweight, no model load) ────────────────
-import pathlib as _pathlib
-_TC_DIR = _pathlib.Path(
-    "/rds/user/eid23/hpc-work/p28/cache/hf/hub/"
-    "models--mwhanna--qwen3-4b-transcoders/snapshots/"
-    "94d176260ac39ce2f882b8b09aba8c118df29bb3"
-)
+from scripts.model_config import transcoder_snapshot_dir
+_TC_DIR: Path | None = None
+
+
+def _tc_dir() -> Path:
+    global _TC_DIR
+    if _TC_DIR is None:
+        _TC_DIR = transcoder_snapshot_dir()
+    return _TC_DIR
+
 
 def _tc_encode(layer: int, H: np.ndarray) -> np.ndarray:
     from safetensors import safe_open
-    with safe_open(str(_TC_DIR / f"layer_{layer}.safetensors"),
+    with safe_open(str(_tc_dir() / f"layer_{layer}.safetensors"),
                    framework="pt", device="cpu") as f:
         W = f.get_tensor("W_enc").float()
         b = f.get_tensor("b_enc").float()

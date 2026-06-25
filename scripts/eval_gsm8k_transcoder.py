@@ -30,9 +30,10 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from mechinterp_qwen3.attribution_model import AttributionModel
 from mechinterp_qwen3.utils.hf_utils import load_transcoder_from_hub
 from mechinterp_qwen3.utils.model_utils import get_default_device, parse_dtype
+from scripts.model_config import add_model_config_arg, default_model, default_transcoder_set, resolve_model_args
 
-_MODEL = "Qwen/Qwen3-4B"
-_TRANSCODER_SET = "mwhanna/qwen3-4b-transcoders"
+_MODEL = default_model()
+_TRANSCODER_SET = default_transcoder_set()
 
 _SYSTEM_PROMPT = (
     "You are a math problem solver. Think step by step. "
@@ -180,6 +181,9 @@ def _save_partial(out_path: Path, mode: str, results: list[dict]) -> None:
 
 def main():
     ap = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    add_model_config_arg(ap)
+    ap.add_argument("--model", default=None)
+    ap.add_argument("--transcoder_set", default=None)
     ap.add_argument("--mode", choices=["baseline", "substituted", "both"], default="both")
     ap.add_argument("--n_examples", type=int, default=100)
     ap.add_argument("--max_new_tokens", type=int, default=512)
@@ -190,6 +194,7 @@ def main():
     ap.add_argument("--out", type=Path, default=None,
                     help="JSON file for partial + final results. Auto-detects start_idx if file exists.")
     args = ap.parse_args()
+    resolve_model_args(args)
 
     out_path = args.out or (
         Path("runs") / "gsm8k" / f"gsm8k_{args.mode}_{args.n_examples}.json"
@@ -217,21 +222,21 @@ def main():
 
     device = get_default_device()
     dtype  = parse_dtype(args.dtype)
-    print(f"Loading {_MODEL} on {device} ({dtype})…")
+    print(f"Loading {args.model} on {device} ({dtype})…")
 
     # HF model used for baseline (has KV cache via generate())
-    hf_tokenizer = AutoTokenizer.from_pretrained(_MODEL)
+    hf_tokenizer = AutoTokenizer.from_pretrained(args.model)
     hf_model     = AutoModelForCausalLM.from_pretrained(
-        _MODEL, torch_dtype=dtype, device_map=device)
+        args.model, torch_dtype=dtype, device_map=device)
     hf_model.eval()
 
     # AttributionModel needed only for substituted mode
     model = None
     if args.mode in ("substituted", "both"):
-        tc_set, _ = load_transcoder_from_hub(_TRANSCODER_SET, dtype=dtype,
+        tc_set, _ = load_transcoder_from_hub(args.transcoder_set, dtype=dtype,
                                              lazy_encoder=False, lazy_decoder=False)
         model = AttributionModel.from_pretrained_and_transcoders(
-            _MODEL, tc_set, dtype=dtype, device=device)
+            args.model, tc_set, dtype=dtype, device=device)
         model.eval()
 
     modes = ["baseline", "substituted"] if args.mode == "both" else [args.mode]

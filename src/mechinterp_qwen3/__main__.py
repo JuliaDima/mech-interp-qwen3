@@ -11,6 +11,7 @@ from mechinterp_qwen3.utils.config_utils import (  # noqa: E402
     print_config,
     set_parser_defaults_from_config,
 )
+from scripts.model_config import load_model_config
 
 log = logging.getLogger(__name__)
 
@@ -35,8 +36,8 @@ def main():
     gen_parser.add_argument(
         "--model",
         type=str,
-        default="Qwen/Qwen3-4B",
-        help="HuggingFace model name (default: Qwen/Qwen3-4B)",
+        default=None,
+        help="HuggingFace model name (defaults to scripts/model_config.yaml or config.yaml)",
     )
     gen_parser.add_argument(
         "--device",
@@ -352,8 +353,12 @@ def main():
     config_file = pre_args.config or pos_config
     config = load_config(config_file)
 
+    model_defaults = load_model_config()
+    config.setdefault("model", model_defaults.model)
+    config.setdefault("transcoder_set", model_defaults.transcoder_set)
+
     if config:
-        log.info("Configuration loaded from %s", config_file or "root config.yaml")
+        log.info("Configuration loaded from %s", config_file or "root config.yaml/scripts/model_config.yaml")
         # Alias graph_output_path → graph_path so intervene can find it
         if "graph_path" not in config and "graph_output_path" in config:
             config["graph_path"] = config["graph_output_path"]
@@ -649,7 +654,7 @@ def run_intervene(args, parser):
         lazy_encoder=False,
         lazy_decoder=True,
     )
-    model_name = args.model or config.get("model") or "Qwen/Qwen3-4B"
+    model_name = args.model or config.get("model") or load_model_config().model
     print(f"loading model {model_name!r}  dtype={args.dtype}")
     model = AttributionModel.from_pretrained_and_transcoders(model_name, transcoder, dtype=dtype)
 

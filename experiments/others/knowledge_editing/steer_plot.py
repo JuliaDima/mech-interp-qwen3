@@ -50,6 +50,7 @@ from steer import (
 from mechinterp_qwen3.attribution_model import AttributionModel
 from mechinterp_qwen3.utils.hf_utils import load_transcoder_from_hub
 from mechinterp_qwen3.utils.model_utils import get_default_device, parse_dtype
+from scripts.model_config import default_model, default_transcoder_set
 
 logging.basicConfig(
     level=logging.INFO,
@@ -61,8 +62,8 @@ log = logging.getLogger("steer_plot")
 _RESULTS_PATH = "runs/knowledge_editing/steer_results.json"
 _DATASET = "data/addition_grid.jsonl"
 _OUT_DIR = "runs/knowledge_editing/plots"
-_LARGE_MODEL = "Qwen/Qwen3-4B"
-_TRANSCODER_SET = "mwhanna/qwen3-4b-transcoders"
+_LARGE_MODEL = default_model()
+_TRANSCODER_SET = default_transcoder_set()
 
 _METRIC_SPECS = [
     (

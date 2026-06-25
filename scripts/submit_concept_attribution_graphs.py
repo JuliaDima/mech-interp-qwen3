@@ -15,7 +15,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from experiments.concept_localization.run_concept import CONCEPTS, _load_concept
+from experiments.concept_localization.pipeline.run_concept import CONCEPTS, _load_concept
+from scripts.model_config import add_model_config_arg, resolve_model_args
 
 
 def _q(value: object) -> str:
@@ -48,13 +49,15 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--scratch-base", default=os.environ.get("MIQ_SCRATCH_BASE", f"/rds/user/{os.environ.get('USER', '$USER')}/hpc-work/p28"))
     parser.add_argument("--chunk-size", type=int, default=10, help="Prompts per chunk script")
-    parser.add_argument("--model", default="Qwen/Qwen3-4B")
-    parser.add_argument("--transcoder-set", default="mwhanna/qwen3-4b-transcoders")
+    add_model_config_arg(parser)
+    parser.add_argument("--model", default=None)
+    parser.add_argument("--transcoder-set", dest="transcoder_set", default=None)
     parser.add_argument("--node-threshold", type=float, default=0.9)
     parser.add_argument("--dtype", default="bfloat16")
     parser.add_argument("--submit", action="store_true", help="Submit generated chunks with sbatch")
     parser.add_argument("--dry-run", action="store_true", help="Print sbatch commands without submitting")
     args = parser.parse_args()
+    resolve_model_args(args)
 
     pairs = [p for p in _load_concept(args.concept, args.n_per_class, args.seed) if p.template == args.template]
     if not pairs:

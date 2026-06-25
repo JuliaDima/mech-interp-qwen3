@@ -296,7 +296,7 @@ def run_lookup_validation(
     transcoder_set: str,
     out_dir: Path,
     *,
-    model_name: str = "Qwen/Qwen3-4B",
+    model_name: str | None = None,
     dtype: str = "float32",
     ones_a: int = 6,
     ones_b: int = 9,
@@ -392,7 +392,7 @@ def run_lookup_validation(
     transcoder, config = load_transcoder_from_hub(
         transcoder_set, dtype=dtype_obj, lazy_decoder=True
     )
-    resolved_model = model_name or config.get("model_name", "Qwen/Qwen3-4B")
+    resolved_model = model_name or config.get("model_name", default_model())
     log.info("Loading model %r  dtype=%s", resolved_model, dtype)
     model = AttributionModel.from_pretrained_and_transcoders(
         resolved_model, transcoder, dtype=dtype_obj
@@ -512,13 +512,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "-t",
         "--transcoder_set",
-        default="mwhanna/qwen3-4b-transcoders",
+        default=default_transcoder_set(),
         help="HuggingFace repo id for the transcoder set.",
     )
     p.add_argument(
         "-m",
         "--model",
-        default="Qwen/Qwen3-4B",
+        default=default_model(),
         help="HuggingFace model name.",
     )
     p.add_argument(

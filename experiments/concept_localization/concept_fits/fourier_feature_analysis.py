@@ -730,16 +730,17 @@ def _score_grids_batch(grids: np.ndarray, N: int = 10, subtract_mean: bool = Tru
     }
 
 
-def load_transcoder_model(device: str | None, dtype: str):
+def load_transcoder_model(device: str | None, dtype: str, transcoder_set: str | None = None):
     import torch
     from types import SimpleNamespace
     from mechinterp_qwen3.utils.hf_utils import load_transcoder_from_hub
     from mechinterp_qwen3.utils.model_utils import get_default_device, parse_dtype
+    from scripts.model_config import default_transcoder_set
 
     torch_device = torch.device(device) if device is not None else get_default_device()
     torch_dtype = parse_dtype(dtype)
     transcoders, _ = load_transcoder_from_hub(
-        "mwhanna/qwen3-4b-transcoders",
+        transcoder_set or default_transcoder_set(),
         device=torch_device,
         dtype=torch_dtype,
         lazy_encoder=False,
@@ -771,6 +772,7 @@ def scan_from_residuals(
     device: str | None = None,
     dtype: str = "bfloat16",
     top_k_grids: int = 0,
+    transcoder_set: str | None = None,
 ) -> tuple[list[dict], list[tuple[float, str, np.ndarray]]]:
     """Score every transcoder feature in sweep_residuals.npz by Fourier structure.
 
@@ -786,7 +788,7 @@ def scan_from_residuals(
     layers = _parse_layer_sel(layer_sel, available)
     print(f"Scanning {len(layers)} layers from {residuals_path.name}")
 
-    model = load_transcoder_model(device, dtype)
+    model = load_transcoder_model(device, dtype, transcoder_set=transcoder_set)
     examples_path = residuals_path.parent / "sweep_dataset_examples.pkl"
     a_vals, b_vals = load_examples_ab(examples_path)
     a_mod = (a_vals % 10).astype(np.int64)
@@ -1099,6 +1101,7 @@ def main():
                         help="Output path for the top-k PDF")
     parser.add_argument("--device", default=None)
     parser.add_argument("--dtype", default="bfloat16")
+    parser.add_argument("--transcoder_set", default=None)
     args = parser.parse_args()
 
     subtract_mean = not args.no_mean_subtract
@@ -1112,6 +1115,7 @@ def main():
             device=args.device,
             dtype=args.dtype,
             top_k_grids=args.scan_top_k_pdf,
+            transcoder_set=args.transcoder_set,
         )
         csv_path = args.scan_out_csv or args.scan_residuals.parent / "fourier_scan.csv"
         pd.DataFrame(rows).to_csv(csv_path, index=False)

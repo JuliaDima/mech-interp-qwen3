@@ -9,6 +9,7 @@ from pathlib import Path
 
 import torch
 from transformers import AutoTokenizer
+from scripts.model_config import default_model
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -18,7 +19,7 @@ from experiments.fsm_router.predicates import N_PREDICATES
 from experiments.fsm_router.primitives import FSM_SPECS
 from experiments.fsm_router.steer_with_router import build_A_tok
 
-_MODEL = "Qwen/Qwen3-4B"
+_MODEL = default_model()
 _ROUTER_PATH = Path("runs/fsm_router/router.pt")
 
 PRIM_NAMES = [name for name, _ in FSM_SPECS]

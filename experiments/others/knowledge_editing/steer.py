@@ -39,6 +39,7 @@ if str(_REPO_ROOT) not in sys.path:
 from mechinterp_qwen3.attribution_model import AttributionModel
 from mechinterp_qwen3.utils.hf_utils import load_transcoder_from_hub
 from mechinterp_qwen3.utils.model_utils import get_default_device, parse_dtype
+from scripts.model_config import default_model, default_transcoder_set
 
 logging.basicConfig(
     level=logging.INFO,
@@ -47,8 +48,8 @@ logging.basicConfig(
 )
 log = logging.getLogger("steer")
 
-_LARGE_MODEL = "Qwen/Qwen3-4B"
-_TRANSCODER_SET = "mwhanna/qwen3-4b-transcoders"
+_LARGE_MODEL = default_model()
+_TRANSCODER_SET = default_transcoder_set()
 _DATASET = "data/addition_3digit.jsonl"
 _SWEEP_LAYERS = [16, 20, 24, 28, 32]
 _SWEEP_ALPHAS = [0.5, 1.0, 2.0, 5.0, 10.0]
