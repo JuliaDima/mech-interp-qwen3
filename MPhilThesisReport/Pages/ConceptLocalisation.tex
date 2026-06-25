@@ -542,76 +542,84 @@ regardless of how large the mean activation difference between the two classes h
 Such features are the natural targets for causal validation, as suppressing them removes a directional component aligned with the concept
 and amplifying them moves the representation toward the concept-positive mean.
 
-Figures~\ref{fig:anchor_layer_grid_carry}--\ref{fig:anchor_layer_grid_residue} show
-the per-anchor summary grids for the six top-ranked anchors of each concept, selected
-by the combined score $S_l$ (Equation~\ref{eq:combined_peak_score}) and ordered by
-token position within the prompt. Each column header gives the anchor token position
-and the combined score for that anchor. The six rows are, from top to bottom:
-decoder cosine scatter (Section~\ref{sec:feature_projection}), delta-norm trajectory
-(raw and double-normalised, Section~\ref{sec:delta_metrics}), inter-layer cosine
-heatmap, null-permutation comparison (Section~\ref{sec:null_permutation}), activation
-grid for the top positively correlated transcoder feature per anchor (highest
-$\operatorname{cos}_{l,f}^{\mathrm{dec}}$), and the analogous grid for the top
-negatively correlated feature.
+Figures~\ref{fig:concept_summary_carry}--\ref{fig:concept_summary_residue} show
+the transcoder feature projections and top decoder activations for the top-ranked anchors
+of each concept.
+The top row shows side-by-side decoder cosine $\operatorname{cos}_{l,f}^{\mathrm{dec}}$ and
+encoder cosine $\operatorname{cos}_{l,f}^{\mathrm{enc}}$ scatters across all transcoder features
+for one representative anchor
+(the units digit $a_0$ for carry, the token \texttt{7} for GCD, and the tens digit $a_1$
+for residue class): each point is one feature at one layer, coloured by its cosine
+similarity with the concept direction $\hat\delta_l$, with the top-5 features by
+absolute cosine labelled by their identifier.
+The middle and bottom rows show the mean activation of the top positively and negatively
+decoder-aligned feature, respectively, for each of the top-ranked anchors, binned by
+the relevant operand value.
 
-% \clearpage
 \begin{figure}[p]
 \centering
-\includegraphics[width=\textwidth]{../runs/concept_localization/carry/anchor_layer_grid_T0_top6_thesis}
-\caption{Per-anchor layer summary for the six top-scoring carry anchors
-(template: \texttt{what is \{a\}+\{b\}? Answer:}; positive: ones digits sum to
-$\geq 10$; negative: sum $<10$).
-Each column is one anchor token position within the prompt; the column header gives
-the position index, the literal token, and the combined score.
-\textbf{Row 1:} decoder cosine scatter --- $x$-axis is layer, $y$-axis is feature
-index, colour encodes $\operatorname{cos}_{l,f}^{\mathrm{dec}}$ on a diverging scale.
-\textbf{Row 2:} delta-norm trajectory --- violet is $D_l/\max D_l$ (raw),
-teal is the double-normalised $\tilde{D}_l^{\mathrm{act}}$; dotted vertical lines
-mark the peak layers selected by the combined score; mauve fill shows the
-activation-normalised excess above the null.
-\textbf{Row 3:} inter-layer cosine heatmap $C_{l,m} = \cos(\delta_l, \delta_m)$.
-\textbf{Row 4:} null-permutation comparison ---
-solid line is the real double-normalised delta norm; shaded band is the 5--95th
-percentile of the permutation null; dotted line is the null mean.
-\textbf{Row 5:} mean activation of the top positively correlated transcoder feature
-(highest $\operatorname{cos}_{l,f}^{\mathrm{dec}}$) over the positive examples,
-binned by ones-digit pair $(a_0, b_0)$.
-\textbf{Row 6:} same for the top negatively correlated feature, binned over negative examples.
-Carry is a binary predicate, so the concept direction is well-defined and several
-anchors show delta norms that exceed the null band.}
-\label{fig:anchor_layer_grid_carry}
+\includegraphics[width=\textwidth]{../runs/concept_localization/carry/concept_summary_T0_thesis}
+\caption{Transcoder feature projections for the carry concept
+(template: \texttt{"what is \{a\}+\{b\}? Answer:"}; positive: $a_0+b_0\geq 10$; negative: $a_0+b_0<10$,
+where $a_0$ and $b_0$ are the units digits of $a$ and $b$ respectively).
+\textbf{Top row:} decoder cosine scatter $\operatorname{cos}_{l,f}^{\mathrm{dec}}$ (left) and
+encoder cosine scatter $\operatorname{cos}_{l,f}^{\mathrm{enc}}$ (right) at the anchor $a_0$;
+each point is one transcoder feature at one layer, coloured by alignment with $\hat\delta_l$.
+\textbf{Middle:} mean activation of the top positively decoder-aligned feature for each of the
+four top-ranked anchors, displayed as a heatmap over $(a_0,b_0)\in\{0,\ldots,9\}^2$.
+L4\_F126502 (anchor $a_0$, $\cos^{\mathrm{dec}}=+0.58$) concentrates entirely on the column
+$a_0=9$ across all values of $b_0$, acting as a threshold detector for the maximum units digit of $a$.
+L6\_F57977 (anchor \texttt{`+'}, $\cos^{\mathrm{dec}}=+0.34$) activates over the upper-right region
+$\{(a_0,b_0):a_0+b_0\geq 10\}$, directly approximating the carry condition in operand space.
+\textbf{Bottom:} analogous plot for the top negatively decoder-aligned features.
+L19\_F60022 (anchor $a_0$, $\cos^{\mathrm{dec}}=-0.45$) is the complementary counterpart to
+L4\_F126502, concentrating on the column $a_0=0$; L3\_F42217 (anchor \texttt{`+'}, $\cos^{\mathrm{dec}}=-0.74$)
+fires for small-digit pairs, thus encoding the absence of carry.}
+\label{fig:concept_summary_carry}
 \end{figure}
 
 \begin{figure}[p]
 \centering
-\includegraphics[width=\textwidth]{../runs/concept_localization/gcd/anchor_layer_grid_T0_top6_thesis}
-\caption{Per-anchor layer summary for the six top-scoring GCD anchors (same six-row
-layout as Figure~\ref{fig:anchor_layer_grid_carry};
-template: \texttt{the gcd of \{a\} and 7 is:}; positive: $\gcd(a,7)=7$; negative:
-$\gcd(a,7)=1$). Rows 5 and 6 show mean feature activation binned by $a \bmod 7$;
-blue bars are positive examples, grey bars negative.
-GCD membership is a binary predicate with a single discriminatory output token
-(\texttt{1} vs.\ \texttt{7}), and several anchors produce delta norms above the null permutation band.}
-\label{fig:anchor_layer_grid_gcd}
+\includegraphics[width=\textwidth]{../runs/concept_localization/gcd/concept_summary_T0_thesis}
+\caption{Transcoder feature projections for the GCD divisibility concept
+(template: \texttt{the gcd of \{a\} and 7 is:}; positive: $\gcd(a,7)=7$; negative: $\gcd(a,7)=1$).
+\textbf{Top row:} decoder cosine scatter $\operatorname{cos}_{l,f}^{\mathrm{dec}}$ (left) and
+encoder cosine scatter $\operatorname{cos}_{l,f}^{\mathrm{enc}}$ (right) at the anchor \texttt{`7'};
+labelled points are the top-5 features by absolute cosine.
+\textbf{Middle:} mean activation of the top positively decoder-aligned feature for each of the
+four top-ranked anchors ($a_1$, $a_0$, \texttt{`7'}, \texttt{` is'}), binned by $a\bmod 7$.
+L22\_F88709 (anchor $a_0$, $\cos^{\mathrm{dec}}=+0.62$) and L13\_F138782 (anchors \texttt{`7'} and
+\texttt{` is'}, $\cos^{\mathrm{dec}}=+0.70$ and $+0.48$) are near-pure divisibility detectors,
+activating at $a\equiv 0\pmod{7}$ with near-zero activation at all other residues; notably,
+L13\_F138782 ranks first at two distinct anchor positions. L4\_F126500 (anchor $a_1$,
+$\cos^{\mathrm{dec}}=+0.44$) exhibits a diffuse multi-residue profile.
+\textbf{Bottom:} top negatively decoder-aligned features. L10\_F74500 (anchor $a_0$,
+$\cos^{\mathrm{dec}}=-0.82$) achieves the highest alignment magnitude of any feature shown and
+is itself a divisibility detector, activating only for $a\equiv 0\pmod{7}$, and writes a
+contribution opposing the concept direction. L13\_F12887 (anchors \texttt{`7'} and \texttt{` is'},
+$\cos^{\mathrm{dec}}=-0.64$ and $-0.46$) activates broadly across all residues.}
+\label{fig:concept_summary_gcd}
 \end{figure}
 
 \begin{figure}[p]
 \centering
-\IfFileExists{../runs/concept_localization/residue_class/anchor_layer_grid_T0_top6_thesis.pdf}%
-  {\includegraphics[width=\textwidth]{../runs/concept_localization/residue_class/anchor_layer_grid_T0_top6_thesis}}%
-  {\fbox{\parbox{\textwidth}{\centering\vspace{4cm}[figure not yet generated: residue\_class anchor\_layer\_grid]\vspace{4cm}}}}
-\caption{Per-anchor layer summary for the six top-scoring residue class anchors (same
-six-row layout; template: \texttt{calc: \{a\}\%7=}; positive: $a \equiv 1 \pmod{7}$;
-negative: $a \not\equiv 1 \pmod{7}$). Rows 5 and 6 show mean feature activation binned
-by $a \bmod 7$ (blue: positive examples, grey: negative). In contrast to carry and GCD,
-no anchor position produces a delta norm that consistently exceeds the null permutation
-band across layers. This is consistent with the greater output degrees of freedom for
-this concept: carry and GCD each reduce to a binary decision over one output token,
-whereas the answer for $a\bmod 7$ ranges over seven values $\{0,\ldots,6\}$. A circular
-embedding that distributes all seven residues over distinct ring directions would produce
-a contrastive direction that is geometrically diffuse and unlikely to concentrate norm
-excess at any single anchor.}
-\label{fig:anchor_layer_grid_residue}
+\includegraphics[width=\textwidth]{../runs/concept_localization/residue_class/concept_summary_T0_thesis}
+\caption{Transcoder feature projections for the congruence class concept modulo 7
+(template: \texttt{calc: \{a\}\%7=}; positive: $a \equiv 1 \pmod{7}$; negative: $a \not\equiv 1 \pmod{7}$).
+\textbf{Top row:} decoder cosine scatter $\operatorname{cos}_{l,f}^{\mathrm{dec}}$ (left) and
+encoder cosine scatter $\operatorname{cos}_{l,f}^{\mathrm{enc}}$ (right) at the anchor $a_1$
+(tens digit of $a$); labelled points are the top-5 features by absolute cosine.
+\textbf{Middle and bottom:} mean activation of the top positively and negatively
+decoder-aligned features for each of the top-ranked anchors, binned by $a \bmod 7$.
+Three of the eight displayed features are almost pure divisibility detectors: the two
+positively aligned features at $a_0$ (L22\_F88709) and \texttt{`7'} (L13\_F138782) both activate at
+$a \equiv 0 \pmod{7}$, and the negatively aligned $a_0$ feature (L10\_F74500) does likewise while
+opposing the concept direction.
+The remaining positively aligned feature at $a_1$ (L19\_F23877) shows a more diverse multi-residue profile,
+and the negatively aligned \texttt{`7'} feature (L13\_F12887) activates across all residues.
+The prevalence of divisibility-detecting features in the residue class projection reflects a shared
+computational substrate with the GCD concept.}
+\label{fig:concept_summary_residue}
 \end{figure}
 
 \section{Feature-Direction Interventions}
