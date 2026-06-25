@@ -36,12 +36,14 @@ def _profile(config: dict) -> dict:
     return config
 
 
-def load_model_config(path: str | Path | None = None) -> ModelConfig:
+def load_model_config(path: str | Path | None = None, profile: str | None = None) -> ModelConfig:
     config_path = Path(path or os.environ.get(MODEL_CONFIG_ENV, DEFAULT_MODEL_CONFIG))
     config = _load_yaml(config_path)
-    profile = _profile(config)
-    model = profile.get("model") or config.get("model")
-    transcoder_set = profile.get("transcoder_set") or config.get("transcoder_set")
+    if profile:
+        config = dict(config, active_profile=profile)
+    profile_data = _profile(config)
+    model = profile_data.get("model") or config.get("model")
+    transcoder_set = profile_data.get("transcoder_set") or config.get("transcoder_set")
     if not model or not transcoder_set:
         raise ValueError(
             f"{config_path} must define model and transcoder_set, either at top level "
@@ -56,10 +58,18 @@ def add_model_config_arg(parser: argparse.ArgumentParser) -> None:
         default=None,
         help=f"YAML file with model/transcoder defaults (env: {MODEL_CONFIG_ENV})",
     )
+    parser.add_argument(
+        "--profile",
+        default=None,
+        help="Profile name to activate from the model config YAML (overrides active_profile)",
+    )
 
 
 def resolve_model_args(args: argparse.Namespace) -> ModelConfig:
-    defaults = load_model_config(getattr(args, "model_config", None))
+    defaults = load_model_config(
+        getattr(args, "model_config", None),
+        profile=getattr(args, "profile", None),
+    )
     if getattr(args, "model", None) is None:
         args.model = defaults.model
     if getattr(args, "transcoder_set", None) is None:

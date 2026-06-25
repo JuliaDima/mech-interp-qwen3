@@ -202,6 +202,7 @@ def make_emergence_gif(
     fps: int = 4,
     template: str | None = "T0",
     max_pairs: int | None = None,
+    out_concept: str | None = None,
 ) -> None:
     # The GIF iterates over fixed integer token positions (0 … delimiter_pos), which
     # requires every pair to share the same tokenization length.  Because templates
@@ -358,7 +359,7 @@ def make_emergence_gif(
     log.info("Saved GIF (%d frames, %d fps, 7 s hold at delimiter) → %s", len(frames), fps, out_path)
 
     log.info("Plotting emergence PDFs for concept=%s template=%s", concept, template)
-    plot_emergence_per_anchor(concept)
+    plot_emergence_per_anchor(out_concept or concept)
     log.info("Emergence PDFs saved.")
     # anchor_layer_grid is NOT generated here — it requires all per-anchor pipeline
     # jobs to complete first.  The coordinator submits it as a final dependent job.
@@ -423,7 +424,12 @@ def main() -> None:
     parser.add_argument(
         "--out",
         default=None,
-        help="Output GIF path (default: runs/concept_localization/<concept>/emergence.gif)",
+        help="Output GIF path (default: runs/concept_localization/<out_concept>/emergence.gif)",
+    )
+    parser.add_argument(
+        "--out_concept",
+        default=None,
+        help="Output directory name override (defaults to --concept). Dataset loading still uses --concept.",
     )
     parser.add_argument(
         "--from_npy",
@@ -434,7 +440,8 @@ def main() -> None:
     args = parser.parse_args()
     resolve_model_args(args)
 
-    out = Path(args.out or f"runs/concept_localization/{args.concept}/emergence.gif")
+    out_concept = args.out_concept or args.concept
+    out = Path(args.out or f"runs/concept_localization/{out_concept}/emergence.gif")
 
     if args.from_npy:
         regen_gif_from_npy(Path(args.from_npy), out, fps=args.fps)
@@ -451,6 +458,7 @@ def main() -> None:
         fps=args.fps,
         template=args.template or None,
         max_pairs=args.max_pairs,
+        out_concept=out_concept,
     )
 
 

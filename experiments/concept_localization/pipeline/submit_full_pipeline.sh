@@ -65,6 +65,9 @@ ANCHOR_TIME="${ANCHOR_TIME:-01:30:00}"
 N_PAIRS="${N_PAIRS:-100}"
 NULL_K="${NULL_K:-20}"
 TEMPLATE="${TEMPLATE:-T0}"
+MODEL_CONFIG="${MODEL_CONFIG:-}"              # path to model config YAML; empty = default
+MODEL_PROFILE="${MODEL_PROFILE:-}"            # profile name to activate (e.g. qwen3_0_6b_lowl0)
+CONCEPT_SUFFIX="${CONCEPT_SUFFIX:-}"          # appended to concept name in output dirs only (e.g. _qwen3_0_6b)
 # ── Arg parsing ─────────────────────────────────────────────────────────────
 DRY_RUN=false
 CONCEPTS=()
@@ -103,39 +106,50 @@ echo "Submitting full pipeline for ${#CONCEPTS[@]} concept(s)"
 echo "  GIF_N=${GIF_N}  ANCHOR_K=${ANCHOR_K}  ANCHOR_TIME=${ANCHOR_TIME}"
 echo "  N_PAIRS=${N_PAIRS}  NULL_K=${NULL_K}"
 echo "  TEMPLATE=${TEMPLATE}"
+[[ -n "$MODEL_CONFIG" ]]   && echo "  MODEL_CONFIG=${MODEL_CONFIG}"
+[[ -n "$MODEL_PROFILE" ]]  && echo "  MODEL_PROFILE=${MODEL_PROFILE}"
+[[ -n "$CONCEPT_SUFFIX" ]] && echo "  CONCEPT_SUFFIX=${CONCEPT_SUFFIX}"
 $DRY_RUN && echo "  *** DRY RUN — no jobs submitted ***"
 echo "========================================================"
 
 for CONCEPT in "${CONCEPTS[@]}"; do
+    OUT_CONCEPT="${CONCEPT}${CONCEPT_SUFFIX}"
     echo ""
-    echo "--- ${CONCEPT} ---"
+    echo "--- ${CONCEPT} → ${OUT_CONCEPT} ---"
 
     # ── 1. make_gif (T0, GIF_N pairs) ──────────────────────────────────────
+    GIF_ARGS=(--concept "$CONCEPT" --n "$GIF_N" --template T0 --out_concept "$OUT_CONCEPT")
+    [[ -n "$MODEL_CONFIG" ]]  && GIF_ARGS+=(--model_config "$MODEL_CONFIG")
+    [[ -n "$MODEL_PROFILE" ]] && GIF_ARGS+=(--profile "$MODEL_PROFILE")
     GIF_JID=$(submit \
-        --job-name="gif_${CONCEPT}" \
+        --job-name="gif_${OUT_CONCEPT}" \
         --time=00:20:00 \
         scripts/sbatch_run.sh \
             python -m experiments.concept_localization.concept_emergence_gif.make_gif \
-                --concept "$CONCEPT" \
-                --n "$GIF_N" \
-                --template T0)
+                "${GIF_ARGS[@]}")
     echo "  make_gif            → job ${GIF_JID}"
 
     # ── 2. coordinator: select anchors + submit per-anchor jobs ────────────
     #    Runs after make_gif, reads emergence.npy, submits anchor_pipeline jobs.
+    COORD_ARGS=(
+        --concept "$CONCEPT"
+        --out_concept "$OUT_CONCEPT"
+        --candidates "$ANCHOR_CANDIDATES"
+        --k "$ANCHOR_K"
+        --template "$TEMPLATE"
+        --anchor_time "$ANCHOR_TIME"
+        --n "$N_PAIRS"
+        --null_k "$NULL_K"
+    )
+    [[ -n "$MODEL_CONFIG" ]]  && COORD_ARGS+=(--model_config "$MODEL_CONFIG")
+    [[ -n "$MODEL_PROFILE" ]] && COORD_ARGS+=(--profile "$MODEL_PROFILE")
     COORD_JID=$(submit \
-        --job-name="coord_${CONCEPT}" \
+        --job-name="coord_${OUT_CONCEPT}" \
         --time=00:10:00 \
         --dependency=afterok:"${GIF_JID}" \
         scripts/sbatch_run.sh \
             python experiments/concept_localization/pipeline/select_and_submit_anchors.py \
-                --concept "$CONCEPT" \
-                --candidates "$ANCHOR_CANDIDATES" \
-                --k "$ANCHOR_K" \
-                --template "$TEMPLATE" \
-                --anchor_time "$ANCHOR_TIME" \
-                --n "$N_PAIRS" \
-                --null_k "$NULL_K")
+                "${COORD_ARGS[@]}")
     echo "  coordinator         → job ${COORD_JID}  (after ${GIF_JID})"
     echo "  anchor_pipeline x${ANCHOR_CANDIDATES} (display top ${ANCHOR_K})  → submitted by coordinator after it runs"
 done
