@@ -294,6 +294,14 @@ for the degree of MPhil Data Intensive Science%
 %%%%%
 \newcommand{\frontmatter}{
 
+\IfFileExists{Pages/Figures/CollegeShields/CUni.pdf}%
+  {\def\cam@CUniPath{Pages/Figures/CollegeShields/CUni.pdf}}%
+  {\def\cam@CUniPath{Pages/Figures/CollegeShields/CUni.pdf}}
+
+\IfFileExists{Pages/Figures/dis_logo.pdf}%
+  {\def\cam@DisLogoPath{Pages/Figures/dis_logo.pdf}}%
+  {\def\cam@DisLogoPath{MPhilThesisReport/Pages/Figures/dis_logo.pdf}}
+
 \pagestyle{empty}
 
 
@@ -314,7 +322,7 @@ for the degree of MPhil Data Intensive Science%
 \newsavebox{\cam@logo}
 \begin{lrbox}{\cam@logo}
 \begin{minipage}{.98\textwidth}
-\includegraphics[width=45mm]{Pages/Figures/CollegeShields/CUni}\hfill\raisebox{-0.5mm}{\includegraphics[height=10mm]{Pages/Figures/dis_logo.pdf}}
+\includegraphics[width=45mm]{\cam@CUniPath}\hfill\raisebox{-0.5mm}{\includegraphics[height=10mm]{\cam@DisLogoPath}}
 \end{minipage}
 \end{lrbox}
 

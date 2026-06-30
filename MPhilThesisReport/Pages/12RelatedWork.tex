@@ -1,50 +1,33 @@
 \chapter{Related Work}
 \label{sec:related}
 
-\textit{Arithmetic algorithms in transformers}
+Mechanistic interpretability work on arithmetic has focused on \textit{how} transformers solve 
+these tasks internally. \citet{nanda2023progress} studied a one-layer transformer trained on 
+modular addition and found that grokking corresponds to the emergence of a Fourier-based 
+algorithm, given that the model encodes operands as superpositions of trigonometric features and composes 
+them across layers. Related work on pretrained language models finds similarly structured 
+numerical representations, suggesting frequency-domain arithmetic features are not limited to 
+small synthetic settings~\citep{zhou2024fourier}.
 
-A productive line of mechanistic interpretability research has asked not merely whether transformers
-can perform arithmetic, but \textit{how} they do so: what internal representations they form and
-what computational steps those representations support.
+\citet{zhong2023clock} showed that modular addition admits two distinct solutions --- a 
+Fourier-based \textit{clock} algorithm and a lookup-table \textit{pizza} algorithm --- with which emerges 
+depending on training configuration. This demonstrates that identical supervision can produce 
+structurally different circuits. For standard integer addition, \citet{quirke2024understanding} 
+identified a carry-propagation circuit across attention and MLP layers resembling long addition, 
+and \citet{musat2024clustering} showed that such algorithmic structure emerges through sharp 
+phase transitions rather than gradual accumulation.
 
-\citet{nanda2023progress} studied a one-layer transformer trained on modular addition and found
-that grokking, the phenomenon whereby generalisation appears suddenly after extended training on
-memorised data, corresponds to the emergence of a Fourier-based algorithm.
-The trained model encodes operands as superpositions of trigonometric features and composes them
-across layers to compute the result. The emergence of this structure can be tracked
-through interpretable progress measures even before the accuracy curve improves significantly.
-Related work on pretrained language models similarly finds Fourier-structured numerical
-representations, suggesting that frequency-domain arithmetic features are not limited to
-small synthetic models~\citep{zhou2024fourier}.
+On the representation domain, \citet{park2023linear} formalise the linear representation 
+hypothesis, under which concepts correspond to directions in the residual stream. 
+\citet{zou2025representationengineeringtopdownapproach} implement this through 
+representation engineering, extracting concept directions from contrastive prompt sets and 
+applying them as targeted interventions. \citet{engels2024notall} show that not all features 
+are one-dimensional, motivating the use of broader localisation methods beyond single directions.
 
-\citet{zhong2023clock} revisited modular addition and showed that the same task admits two
-qualitatively distinct algorithmic solutions: a Fourier-based strategy they term the ``clock''
-algorithm, and a lookup-table strategy they term the ``pizza'' algorithm.
-Which solution emerges depends on training configuration, demonstrating that identical supervision
-can produce structurally different circuits and that mechanistic diversity is not solely an
-artefact of random initialisation.
+On knowledge editing, \citet{meng2023locatingeditingfactualassociations} locate factual 
+associations within specific MLP layers and edit them directly. Soft prompting 
+\citep{panickssery2024steeringllama2contrastive} offers a parameter-free alternative as learned 
+prefix vectors shift model behaviour without modifying weights, making it appropriate for concepts resistant to layer-level localisation.
 
-For standard integer addition, \citet{quirke2024understanding} identified a carry-propagation
-circuit distributed across attention and MLP layers, bearing a structural resemblance to the
-long-addition algorithm familiar from elementary arithmetic.
-\citet{quirkeneo2025understanding} extended this account to subtraction, characterising how the
-same underlying circuit adapts to accommodate sign. Complementary work on compositional
-arithmetic studies how transformers combine variable assignment with modular addition,
-connecting arithmetic generalisation to composable internal mechanisms~\citep{exoo2026assign}.
-
-\citet{musat2024clustering} approached the problem from the perspective of training dynamics,
-tracing how the internal representations of operands and results cluster and align over the course
-of training on modular addition.
-Their analysis shows that organised algorithmic structure is not installed gradually but emerges
-through identifiable phase transitions, reinforcing the view that grokking marks a qualitative
-change in the model's internal organisation rather than a smooth accumulation of generalising
-evidence. Recent work also explores targeted updates to sparse task-relevant subnetworks as
-a way to improve mathematical reasoning, linking circuit localisation to controlled model
-modification~\citep{prakash2025constructive}.
-
-The present work asks whether comparable structure is recoverable in \texttt{Qwen3}, a
-multi-billion-parameter instruction-tuned model trained on a broad natural-language corpus with
-no explicit arithmetic curriculum. This question is sharpened by evidence that transformers can
-fail systematically on compositional tasks even when their surface behaviour appears
-competent~\citep{dziri2023faith}, making mechanism-level analysis necessary rather than
-optional.
+The present work asks whether mechanistic structure comparable to that found in small or 
+proprietary models is recoverable in \texttt{Qwen3-4B-Instruct}. 

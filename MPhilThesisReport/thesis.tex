@@ -1,15 +1,47 @@
 \documentclass[withindex,oneside,openany]{cam-thesis}
 \usepackage[T1]{fontenc}
-\usepackage{mathpazo}
+% \usepackage{mathpazo}
+% \usepackage{palatino}
+\usepackage{lmodern}
+
 \usepackage[numbers]{natbib} % Citations using numbers
 \usepackage{amsmath}
 \usepackage{amssymb}
 \usepackage{graphicx}
+\graphicspath{{./}{MPhilThesisReport/}}
 \usepackage{booktabs}
 \usepackage{array}
 \usepackage{longtable}
 \usepackage{tikz}
 \usepackage{xcolor}
+\usepackage[most]{tcolorbox}
+
+\usepackage[most]{tcolorbox}
+\usepackage[scaled=0.92]{helvet} % clean sans font, works with pdfLaTeX
+
+\DeclareUnicodeCharacter{5927}{\textit{da}}
+\DeclareUnicodeCharacter{5FAE}{\textit{wei}}
+\DeclareUnicodeCharacter{0113}{\=e}
+\DeclareUnicodeCharacter{2014}{---}
+
+\newtcolorbox{promptbox}{
+  enhanced,
+  colback=black!2,
+  colframe=black!25,
+  boxrule=0.35pt,
+  arc=2pt,
+  left=6pt,
+  right=6pt,
+  top=5pt,
+  bottom=5pt,
+  before skip=6pt,
+  after skip=6pt,
+  fontupper=\sffamily\small,
+}
+
+\newcommand{\promptinline}[1]{%
+  {\sffamily\small\itshape ''#1''}%
+}
 
 \definecolor{heraldicred}{HTML}{BD2C2E}
 \definecolor{softviolet}{HTML}{8F80BA}
@@ -34,8 +66,7 @@
   {\normalfont\normalsize\itshape}}
 \makeatother
 
-\title{Title}
-\reportsubtitle{The Geometry of Concept Representation in Open-Source Language Models}
+\title{The Geometry of Concept Representation in Open-Source Language Models}
 \author{Elisabeta-Iulia (Julia) Dima}
 
 \college{King's College}
@@ -54,11 +85,13 @@ Department of Physics}
 \subjectline{Data Science}
 \keywords{mechanistic interpretability, Large Language Models}
 
+\submissionnotice{This dissertation is submitted for the degree of MPhil Data Intensive Science\\[4pt] Word count: 6{,}700}
+
 
 \abstract{%
-  Whether a language model that produces correct answers to an arbitrary problem has genuinely 
-  internalised the underlying concept, or simply reproduces surface patterns from training, 
-  is a question that evaluation metrics cannot resolve. This thesis addresses that question 
+  Whether a language model that produces correct answers to an arbitrary problem genuinely 
+  internalises its underlying computation, or simply reproduces surface patterns from training, 
+  is a question that evaluation metrics cannot resolve. This thesis addresses this question 
   through two complementary directions. The first reproduces Anthropic's circuit-tracing methodology 
   from \textit{On the Biology of a Large Language Model}, 
   analysing whether analogous interpretable circuits occur in an instruction-tuned language model, Qwen3-4B. 
@@ -66,27 +99,13 @@ Department of Physics}
   and applies it to three structured arithmetic tasks of increasing representational complexity, 
   namely carry detection in single-step addition, greatest common divisor divisibility, 
   and residue class modulo problems. 
-  Additionally, this method aims to generalise to non-arithmetic scientific domains, 
+  By its contrastive nature, this method generalises to other scientific domains, 
   provided concepts encoded through a set of contrastive prompt pairs.
 
-  We aim to prove that robust and substantial analysis of concept emergence, rotation, 
-  and propagation can arise from analysing contrastive pairs of prompts that differ only 
-  in whether 
-  a given concept holds, then computes the mean difference in residual-stream activations 
-  across layers and token positions. These layerwise delta trajectories, normalised against a 
-  null permutation baseline, expose where in the network the concept evolves. 
-  The analysis then projects the delta vector onto the encoder and decoder directions of per-layer 
-  transcoders, sparse autoencoders trained to reconstruct each MLP layer's output, to retrieve features
-  contributing positively or negatively towards a concept.
-
-  \dots
+  We show that concept emergence, propagation, and representational rotation can be studied through contrastive residual-stream geometry. For each concept, we compute layerwise \textit{delta} trajectories from matched prompt pairs and compare them against null permutation baselines to identify where the concept becomes geometrically and causally salient. We then project these dense concept directions into sparse autoencoder feature space, retrieving features that both activate contrastively and write along the concept direction. Their joint activation geometry defines a candidate concept manifold, while attribution-graph connections among them form a feature \textit{constellation} that describes how the model routes and transforms concept-relevant information during computation.
   
-  The thesis also investigates soft prompt optimisation as a mechanism for targeted knowledge editing, 
-  examining whether gradient-based modifications to the input embedding space can alter specific internal 
-  representations without degrading broader model behaviour. Together, these results suggest that the 
-  geometry of concept representation in large language models is not uniform, with some concepts 
-  crystallising into low-rank directional structure susceptible to mechanistic analysis and others
-   encoded in higher-dimensional arrangements that resist such decomposition.
+  In this thesis, we also study the optimisation of learned prefix embedding as a method for knowledge editing, 
+  examining whether gradient-based modifications to the input embedding space can adapt specific internal representations without affecting broader model behaviour. We find that while this method generally improves model predictions, the learned embeddings are not interpretable. Instead of encoding identifiable concepts, they appear to encode, in a continuous form, an approximation of the quantity of information the model requires to produce the target output, without correspondence to structured semantic content.
 }
 
 \begin{document}
@@ -94,14 +113,14 @@ Department of Physics}
 %% Title page, abstract, declaration etc.:
 \frontmatter{}
 
-\input{Pages/11Introduction} \label{sec:introduction}
-\input{Pages/12RelatedWork} \label{sec:RelatedWork}
+\input{Pages/11Introduction}
+\input{Pages/12RelatedWork}
 \input{Pages/13_Reproducibility}
 \input{Pages/ConceptLocalisation}
 \input{Pages/KnowledgeEditing}
+\input{Pages/Conclusion}
 
-\cleardoublepage
-\phantomsection
+% \phantomsection
 \addcontentsline{toc}{chapter}{Bibliography}
 \bibliographystyle{plainnat}
 \bibliography{thesis}
@@ -109,6 +128,6 @@ Department of Physics}
 \appendix
 \input{Pages/Glossary}
 
-\printthesisindex
+% \printthesisindex
 
 \end{document}
