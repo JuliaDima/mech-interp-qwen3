@@ -10,6 +10,7 @@
 \usepackage{amsmath}
 \usepackage{amssymb}
 \usepackage{graphicx}
+\graphicspath{{MPhilThesisReport/Pages/Figures/}}
 \usepackage{booktabs}
 \usepackage{xcolor}
 \usepackage{titlesec}
@@ -107,7 +108,14 @@ A soft-prompt (learned prefix) experiment serves as a diagnostic control, testin
 
 \textbf{Carry} exhibits the clearest and strongest geometric structure. A stable concept direction emerges at layers 4--5 at the final-operand token. The inter-layer cosine-similarity matrix shows a single high-similarity block, indicating the direction is \emph{maintained} rather than rotating across layers. Activation patching from positive to negative examples restores near-perfect accuracy, confirming causal sufficiency. Transcoder analysis at this anchor recovers features with structured activation patterns over the operand grid — iso-sum detectors, parity detectors, operand-comparison features — consistent with a Fourier-like arithmetic substrate. Ablating all Fourier-structured features jointly leaves accuracy unchanged, indicating that this feature set is geometrically present but not part of the causal bottleneck under the tested intervention.
 
-\textbf{GCD divisibility} shows a qualitatively different structure: the inter-layer cosine matrix exhibits a sharp block transition at a specific layer, indicating that the concept direction \emph{rotates} rather than persists. Concept-relevant features are localisable but more distributed across transcoder feature space than for carry.
+\textbf{GCD divisibility} shows a qualitatively different structure: the inter-layer cosine matrix exhibits a sharp block transition at a specific layer, indicating that the concept direction \emph{rotates} rather than persists. Concept-relevant features are localisable but more distributed across transcoder feature space than for carry. Figure~\ref{fig:gcd_summary} illustrates the concept summary for GCD at the primary anchor, including the top transcoder features projected along the delta direction.
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=\linewidth]{gcd/concept_summary_T0_thesis.pdf}
+  \caption{\small Concept summary for GCD divisibility ($\gcd(a,7)=7$) at the primary anchor. Each panel shows a top transcoder feature's activation pattern projected along the contrastive delta direction, with positive values (blue) indicating features that activate more strongly on divisible inputs.}
+  \label{fig:gcd_summary}
+\end{figure}
 
 \textbf{Residue class} produces no stable direction above the null permutation band at any tested anchor or layer. This is consistent with the model's low first-token accuracy (12\%) and suggests the model does not linearly encode modular residue membership in a form accessible to contrastive analysis — a negative result that itself characterises the limits of the model's arithmetic representations.
 
