@@ -61,4 +61,4 @@ experiments/multilingual_circuits/multilingual_circuits.md
 scripts/sweeps/find_and_plot_closest_csvs_all_anchors.py
 scripts/sweeps/submit_find_plot_closest_csvs_all_anchors.sh
 MPhilThesisReport/thesis.synctex.gz
-MPhilThesisReport/texput.log
+MPhilThesisReport/texput.log.vscode/
