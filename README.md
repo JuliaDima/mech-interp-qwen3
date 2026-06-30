@@ -5,7 +5,7 @@
 
 ## Description
 
-This project is associated with the submission of the MPhil Data Intensive Science research project at the University of Cambridge. The associated project report can be found under [Report](MPhilThesisReport/thesis.pdf). The associated executive summary can be found under [Executive Summary](MPhilThesisReport/ExecutiveSummary.pdf).
+This project is associated with the submission of the MPhil Data Intensive Science research project at the University of Cambridge. The associated project report can be found under [Report](Report/thesis.pdf). The associated executive summary can be found under [Executive Summary](Report/ExecutiveSummary.pdf).
 
 **Visualisation**: [https://mechinterp-viz-94c364.uniofcam.dev/](https://mechinterp-viz-94c364.uniofcam.dev/)
 
@@ -154,17 +154,17 @@ Results are saved as a summary table and per-task checkpoint under `runs/soft_pr
 
 ### Compile the Report
 
-The thesis is written in LaTeX and compiled from `MPhilThesisReport/`:
+The thesis is written in LaTeX and compiled from `Report/`:
 
 ```bash
-cd MPhilThesisReport
+cd Report
 make all
 ```
 
-The executive summary compiles as a standalone document from `MPhilThesisReport/`:
+The executive summary compiles as a standalone document from `Report/`:
 
 ```bash
-cd MPhilThesisReport
+cd Report
 pdflatex ExecutiveSummary && bibtex ExecutiveSummary && \
 pdflatex ExecutiveSummary && pdflatex ExecutiveSummary
 ```
@@ -193,7 +193,7 @@ scripts/
   sbatch_run.sh                  # universal Slurm wrapper
   submit_concept_attribution_graphs.py
 
-MPhilThesisReport/               # LaTeX report source
+Report/               # LaTeX report source
   thesis.tex                     # main document
   Pages/                         # chapter .tex files and figures
   cam-thesis.cls                 # Cambridge thesis class
@@ -267,7 +267,7 @@ All core experiment design, model analysis code, and result interpretation were 
 ```latex
 \IfFileExists{Pages/Figures/CollegeShields/CUni.pdf}%
   {\def\cam@CUniPath{Pages/Figures/CollegeShields/CUni.pdf}}%
-  {\def\cam@CUniPath{MPhilThesisReport/Pages/Figures/CollegeShields/CUni.pdf}}
+  {\def\cam@CUniPath{Report/Pages/Figures/CollegeShields/CUni.pdf}}
 ```
 
 **Modification used:** The suggestion was adopted directly and integrated into `cam-thesis.cls` alongside an equivalent block for `dis_logo.pdf`.

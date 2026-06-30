@@ -1,0 +1,55 @@
+\thispagestyle {empty}
+\contentsline {chapter}{\numberline {1}Introduction}{5}{chapter.1}%
+\contentsline {section}{\numberline {1.1}Mechanistic Interpretability}{5}{section.1.1}%
+\contentsline {section}{\numberline {1.2}Notation and Methods}{6}{section.1.2}%
+\contentsline {section}{\numberline {1.3}Structure of Thesis}{7}{section.1.3}%
+\contentsline {chapter}{\numberline {2}Related Work}{9}{chapter.2}%
+\contentsline {chapter}{\numberline {3}Reproducibility}{10}{chapter.3}%
+\contentsline {section}{\numberline {3.1}Two-Digit Addition Circuit Reproduction in Qwen3-4B}{10}{section.3.1}%
+\contentsline {subsection}{\numberline {3.1.1}Operand-Residue Feature Discovery}{10}{subsection.3.1.1}%
+\contentsline {paragraph}{Token-position feature localisation.}{11}{section*.3}%
+\contentsline {subsection}{\numberline {3.1.2}Addition Prompt Grid and Focus Case}{11}{subsection.3.1.2}%
+\contentsline {subsection}{\numberline {3.1.3}Teacher-Forced Accuracy Scan}{11}{subsection.3.1.3}%
+\contentsline {paragraph}{Entropy and carry-class analysis.}{12}{section*.4}%
+\contentsline {paragraph}{Addition circuit interpretation.}{12}{section*.5}%
+\contentsline {section}{\numberline {3.2}Multilingual Antonym Circuit Reproduction in Qwen3-4B}{14}{section.3.2}%
+\contentsline {subsection}{\numberline {3.2.1}Contrastive Feature Set Construction}{14}{subsection.3.2.1}%
+\contentsline {subsection}{\numberline {3.2.2}Feature Suppression and Injection Protocol}{14}{subsection.3.2.2}%
+\contentsline {subsection}{\numberline {3.2.3}Operation, Operand, and Language Interventions}{15}{subsection.3.2.3}%
+\contentsline {paragraph}{Semantic-operation edit.}{15}{section*.6}%
+\contentsline {paragraph}{Operand-concept edit.}{15}{section*.7}%
+\contentsline {paragraph}{Output-language edit.}{15}{section*.8}%
+\contentsline {subsection}{\numberline {3.2.4}Multilingual Intervention Outcomes}{15}{subsection.3.2.4}%
+\contentsline {subsection}{\numberline {3.2.5}Attribution Graph Analysis}{17}{subsection.3.2.5}%
+\contentsline {section}{\numberline {3.3}Reproduction Findings}{17}{section.3.3}%
+\contentsline {chapter}{\numberline {4}Concept Emergence via Contrastive Residual-Stream Analysis}{19}{chapter.4}%
+\contentsline {section}{\numberline {4.1}Contrastive Dataset}{19}{section.4.1}%
+\contentsline {section}{\numberline {4.2}Residual-Stream Concept Delta}{20}{section.4.2}%
+\contentsline {section}{\numberline {4.3}Layer and Anchor Metrics}{20}{section.4.3}%
+\contentsline {subsection}{\numberline {4.3.1}Permutation Null}{22}{subsection.4.3.1}%
+\contentsline {section}{\numberline {4.4}Causal Tests of the Residual Direction}{22}{section.4.4}%
+\contentsline {subsection}{\numberline {4.4.1}Positive-to-Negative Activation Patching}{22}{subsection.4.4.1}%
+\contentsline {subsection}{\numberline {4.4.2}First-Order Causal Approximation}{23}{subsection.4.4.2}%
+\contentsline {section}{\numberline {4.5}Peak-Layer Scoring}{24}{section.4.5}%
+\contentsline {section}{\numberline {4.6}Transcoder Feature Projection}{24}{section.4.6}%
+\contentsline {paragraph}{Decoder output alignment.}{24}{section*.9}%
+\contentsline {paragraph}{Encoder input alignment.}{25}{section*.10}%
+\contentsline {paragraph}{Combined feature score.}{25}{section*.11}%
+\contentsline {section}{\numberline {4.7}Feature-Direction Interventions}{25}{section.4.7}%
+\contentsline {subsection}{\numberline {4.7.1}Feature-Output Ablation}{25}{subsection.4.7.1}%
+\contentsline {subsection}{\numberline {4.7.2}Decoder-Direction Injection}{25}{subsection.4.7.2}%
+\contentsline {section}{\numberline {4.8}Empirical Results}{29}{section.4.8}%
+\contentsline {subsection}{\numberline {4.8.1}Carry Detection in Three-Digit Addition}{29}{subsection.4.8.1}%
+\contentsline {subsection}{\numberline {4.8.2}Fourier Structure in Carry Feature Grids}{29}{subsection.4.8.2}%
+\contentsline {paragraph}{Fourier-feature ablation.}{30}{section*.14}%
+\contentsline {subsection}{\numberline {4.8.3}GCD Divisibility by Seven}{30}{subsection.4.8.3}%
+\contentsline {subsection}{\numberline {4.8.4}Residue-Class Membership Modulo Seven}{32}{subsection.4.8.4}%
+\contentsline {chapter}{\numberline {5}Soft Prompting as a Residual-Stream Intervention}{33}{chapter.5}%
+\contentsline {section}{\numberline {5.1}Continuous Prefix Parameterisation}{33}{section.5.1}%
+\contentsline {section}{\numberline {5.2}Training Objective}{33}{section.5.2}%
+\contentsline {section}{\numberline {5.3}Alignment with Concept Directions}{34}{section.5.3}%
+\contentsline {section}{\numberline {5.4}Validation Results}{34}{section.5.4}%
+\contentsline {chapter}{\numberline {6}Conclusion}{35}{chapter.6}%
+\contentsline {chapter}{Bibliography}{36}{chapter.6}%
+\contentsline {chapter}{Glossary}{40}{appendix*.16}%
+\contentsline {chapter}{Appendix: Use of Auto-generation Tools}{43}{appendix*.17}%

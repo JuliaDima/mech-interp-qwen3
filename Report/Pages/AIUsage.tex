@@ -1,0 +1,22 @@
+\chapter*{Appendix: Use of Auto-generation Tools}
+\addcontentsline{toc}{chapter}{Appendix: Use of Auto-generation Tools}
+
+\noindent
+\textbf{Report.} Claude Code (Anthropic, model \texttt{claude-sonnet-4-6}) was used as an AI writing assistant during the preparation of this report. Its use fell into the following categories:
+
+\begin{itemize}
+  \item \textbf{Editing and restructuring.} Claude Code was used to trim overlong sections (approximately 35\% reduction of the Fourier Structure subsection in Chapter~\ref{sec:concept_localisation}), to condense and remove redundant paragraphs in Chapter~\ref{sec:k_e} (prefix tuning training objective and alignment delta content), and to draft an introductory paragraph for the Fourier Structure subsection.
+
+  \item \textbf{Mathematical notation.} Claude Code was used to assist in typesetting the decoder output alignment derivation (Gram matrix formulation) in Chapter~\ref{sec:concept_localisation}, based on handwritten notes provided by the author. All mathematical content was written and verified by the author.
+
+  \item \textbf{Proofreading and alternative wordings.} Claude Code was occasionally used to suggest alternative phrasings for clarity. All scientific claims, interpretations, and conclusions are the author's own.
+
+  \item \textbf{LaTeX debugging.} Claude Code was used to resolve compilation errors including Unicode character declarations, a \texttt{\textbackslash middle} scoping issue in Chapter~\ref{sec:repro}, and figure path resolution in \texttt{cam-thesis.cls}.
+\end{itemize}
+
+\noindent
+The executive summary was drafted with the assistance of Claude Code, based on content from this report, and subsequently reviewed and edited by the author.
+
+\bigskip
+\noindent
+\textbf{Code.} Claude Code was used for minor debugging assistance (LaTeX toolchain only). All experiment design, data analysis pipeline, and research code were written independently by the author. No AI tool was used to generate any Python code committed to the repository.
