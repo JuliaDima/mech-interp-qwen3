@@ -1,0 +1,19 @@
+{
+    "latex-workshop.latex.recipes": [
+        {
+            "name": "Make",
+            "tools": ["make-thesis"]
+        }
+    ],
+    "latex-workshop.latex.tools": [
+        {
+            "name": "make-thesis",
+            "command": "make",
+            "args": ["all"],
+            "env": {},
+            "cwd": "%WORKSPACE_FOLDER%/Report"
+        }
+    ],
+    "latex-workshop.latex.outDir": "%WORKSPACE_FOLDER%/Report",
+    "latex-workshop.view.pdf.viewer": "tab"
+}
