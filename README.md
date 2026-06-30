@@ -5,7 +5,7 @@
 
 ## Description
 
-This project is associated with the submission of the MPhil Data Intensive Science research project at the University of Cambridge. The associated project report can be found under [Report](MPhilThesisReport/thesis.pdf). The associated executive summary can be found under [Executive Summary](ExecutiveSummary.pdf).
+This project is associated with the submission of the MPhil Data Intensive Science research project at the University of Cambridge. The associated project report can be found under [Report](MPhilThesisReport/thesis.pdf). The associated executive summary can be found under [Executive Summary](MPhilThesisReport/ExecutiveSummary.pdf).
 
 **Visualisation**: [https://mechinterp-viz-94c364.uniofcam.dev/](https://mechinterp-viz-94c364.uniofcam.dev/)
 
@@ -161,10 +161,10 @@ cd MPhilThesisReport
 make all
 ```
 
-The executive summary compiles as a standalone document from the project root:
+The executive summary compiles as a standalone document from `MPhilThesisReport/`:
 
 ```bash
-cd eid23
+cd MPhilThesisReport
 pdflatex ExecutiveSummary && bibtex ExecutiveSummary && \
 pdflatex ExecutiveSummary && pdflatex ExecutiveSummary
 ```
