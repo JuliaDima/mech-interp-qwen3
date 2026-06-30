@@ -62,3 +62,16 @@ scripts/sweeps/find_and_plot_closest_csvs_all_anchors.py
 scripts/sweeps/submit_find_plot_closest_csvs_all_anchors.sh
 MPhilThesisReport/thesis.synctex.gz
 MPhilThesisReport/texput.log.vscode/
+
+# LaTeX build artefacts
+Report/*.aux
+Report/*.bbl
+Report/*.blg
+Report/*.fdb_latexmk
+Report/*.fls
+Report/*.idx
+Report/*.ilg
+Report/*.ind
+Report/*.log
+Report/*.out
+Report/*.toc
