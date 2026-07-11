@@ -1,21 +1,24 @@
 \chapter{Soft Prompting as a Residual-Stream Intervention}
 \label{sec:k_e}
 
-\section{Continuous Prefix Parameterisation}
-\label{sec:soft_prompting}
+\paragraph{Continuous Prefix Parameterisation.}
+We use soft prompting as a control intervention experiment, to test whether a small 
+input-side perturbation can improve first-token arithmetic or judgement behaviour,
+ and whether that perturbation is interpretable relative to the task. 
 
-We use soft prompting as a control intervention. The base Qwen3-4B weights remain fixed, and only a short learned prefix is trained. The question is limited. We test whether a small input-side perturbation can improve first-token arithmetic or judgement behaviour, and whether that perturbation aligns with the concept directions found in Chapter~\ref{sec:concept_localisation}.
-
-Let $x=(t_1,\ldots,t_T)$ be a tokenised prompt and let $E\in\mathbb{R}^{V\times d}$ be the embedding matrix. A soft prompt learns $P\in\mathbb{R}^{k\times d}$ and prepends it to the real token embeddings,
+Let $x=(t_1,\ldots,t_T)$ be a tokenised prompt and let $E\in\mathbb{R}^{V\times d}$ 
+be the embedding matrix. A soft prompt learns $P\in\mathbb{R}^{k\times d}$ and 
+prepends it to the real token embeddings,
 \begin{equation}
 \bigl(P_1,\ldots,P_k,e_{t_1},\ldots,e_{t_T}\bigr)
 \in \mathbb{R}^{(k+T)\times d}.
 \label{eq:soft_prompt_seq}
 \end{equation}
-Only $P$ is updated via hooks that overwrite pad-extended positions with learned vectors; no base-model parameter is changed.
+We prepend $k$ pad-token positions to the input and replace them with the rows of $P$
+at the embedding layer before the forward pass, so the prefix enters the residual
+stream while all base-model parameters remain frozen and only $P$ is updated during training.
 
-\section{Training Objective}
-\label{sec:soft_prompt_training}
+\paragraph{Training Objective.}
 
 The objective is cross-entropy on the first answer token at the final prompt position,
 \begin{equation}
@@ -27,17 +30,13 @@ The objective is cross-entropy on the first answer token at the final prompt pos
      {\sum_v \exp f_v(x_b)}.
 \label{eq:soft_prompt_loss}
 \end{equation}
-We train with AdamW ($\mathrm{lr}=10^{-3}$, weight decay $10^{-4}$), cosine annealing, and unit-norm gradient clipping on a $90/10$ train--validation split, retaining the lowest validation-loss checkpoint.
+We train with AdamW ($\mathrm{lr}=10^{-3}$, weight decay $10^{-4}$), 
+cosine annealing, and unit-norm gradient clipping on a $90/10$ train--validation
+ split, retaining the lowest validation-loss checkpoint.
 
-\section{Prefix Alignment with Concept Directions}
-\label{sec:soft_prompt_alignment}
+\paragraph{Results.}
 
-After training, we measure the mean residual-stream shift induced by the prefix at each layer and compare it against the concept directions from Chapter~\ref{sec:concept_localisation}, and project it through each layer's transcoder to identify which features it activates.
-
-\section{Results}
-\label{sec:soft_prompt_results}
-
-We evaluate one prefix length, $k=10$, on three tasks. The residue task tests modular arithmetic. The bracket and causal-direction tasks test whether the prefix can repair a response-format failure.
+We evaluate one prefix length, $k=10$, on three tasks. The residue-class task uses prompts of the form \promptinline{calc: \{a\}\%7=}, where the model must predict the single-digit remainder modulo~7. The balanced-parentheses and causal-direction tasks use binary yes/no prompts of the form \promptinline{Is \{seq\} a valid bracket string? Answer yes or no:} and \promptinline{Does \{A\} lead to \{B\}? Answer yes or no:}, and test whether the prefix can correct a response-format failure.
 
 \begin{table}[ht!]
 \centering
@@ -55,6 +54,19 @@ Causal direction     &  0.0 & 53.8 & $+53.8$ & $+0.236$ \\
 \label{tab:sp_summary}
 \end{table}
 
-For residue class completion, the prefix does not improve the task. Accuracy moves from $15\%$ to $16\%$, while the mean probability of the correct token decreases. The model often follows a leading-digit heuristic in prompts of the form {\sffamily\small calc \{a\}\%7=}. The prefix weakens this bias in some examples but does not replace it with a reliable residue computation.
-
-Balanced parentheses and causal direction behave differently. In both tasks, the baseline usually predicts the token \texttt{1}, so the main failure is response format rather than only task knowledge. The prefix redirects probability toward yes/no tokens. This gives a modest gain for brackets and a stronger gain for causal direction. A learned prefix can redirect the response format when the model already holds the relevant computation but fails to express it. It does not create a missing computation. In this chapter, soft prompting is therefore a diagnostic control rather than a primary knowledge-editing method.
+Table~\ref{tab:sp_summary} shows that for residue-class completion 
+the prefix does not improve performance, 
+as the mean probability of the correct 
+token decreases despite a negligible accuracy change, 
+suggesting the model follows a leading-digit heuristic 
+that the prefix weakens without substituting a reliable 
+modular computation. For balanced parentheses and causal
+ direction, the baseline consistently predicts the token
+  \texttt{1}, so the primary failure is response format 
+  rather than task knowledge, and the prefix redirects 
+  probability mass toward yes/no tokens. We conclude that
+   a learned prefix can correct an output-format 
+   failure when the model already encodes the relevant 
+   computation, but cannot introduce a computation that
+    is absent, placing soft prompting here in a diagnostic
+     rather than a knowledge-editing role.

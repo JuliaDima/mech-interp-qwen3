@@ -25,7 +25,7 @@
 \definecolor{rulecol}{HTML}{003A6C}
 \definecolor{subtlegray}{HTML}{555555}
 
-%% Section headings: bold, small-caps feel, with a thin rule
+%% Section headings with a bold small-caps feel and a thin rule
 \titleformat{\section}
   {\normalfont\normalsize\bfseries\color{camblue}}
   {}{0em}
@@ -52,21 +52,21 @@
 
 \noindent
 {\color{rulecol}\rule{\linewidth}{1.8pt}}\\[4pt]
-{\LARGE\bfseries The Geometry of Concept Representation\\[2pt]
-in Open-Source Language Models}\\[6pt]
+{\LARGE\bfseries Mechanistic Circuits and Concept Geometry\\[2pt]
+in an Instruction-Tuned Language Model}\\[6pt]
 {\color{rulecol}\rule{\linewidth}{0.5pt}}
 
 \vspace{8pt}
 \noindent
-{\normalsize
+{\footnotesize
 \textbf{Elisabeta-Iulia (Julia) Dima}\enspace$\cdot$\enspace
 MPhil Data Intensive Science\enspace$\cdot$\enspace
-University of Cambridge, June 2026
+University of Cambridge, July 2026
 }\\[2pt]
 \noindent
-{\small\color{subtlegray}
+{\scriptsize\color{subtlegray}
 Supervised by Dr Miles Cranmer and Dr Alessandro Favero\enspace$\cdot$\enspace
-Department of Applied Mathematics and Theoretical Physics
+DAMTP, Cambridge
 }
 
 \vspace{14pt}
@@ -75,90 +75,145 @@ Department of Applied Mathematics and Theoretical Physics
 \section{Motivation and Scientific Justification}
 %% ---------------------------------------------------------------
 
-Large language models (LLMs) routinely produce correct answers to arithmetic and reasoning problems, yet output accuracy cannot establish \emph{how} those answers are produced. A model can score highly on addition by exploiting digit-level heuristics or memorised templates rather than by computing the intended function. This distinction is not merely academic: if correct outputs rely on surface shortcuts, those shortcuts may fail under distributional shift or adversarial prompting, and no downstream audit based on accuracy alone would detect the failure.
+Large language models can produce correct answers to arithmetic and reasoning
+problems without necessarily implementing the intended computation. Output
+accuracy therefore cannot distinguish robust internal algorithms from surface
+heuristics, memorised templates, or prompt-specific associations. This thesis
+studies these aspects in \texttt{Qwen3-4B-Instruct}, an independently trained
+instruction-tuned model, using mechanistic interpretability methods that analyse
+the residual stream, sparse transcoder features, attribution graphs, activation
+patching, and learned input-side interventions.
 
-Mechanistic interpretability addresses this by reverse-engineering the internal computations of neural networks. Anthropic's recent paper \textit{On the Biology of a Large Language Model}~\cite{lindsey2025biology} demonstrated that sparse, interpretable circuits can be identified within large base models. Two significant gaps remain open, however. First, it is unknown whether analogous circuits arise in instruction-tuned models — which are the models actually deployed. Second, existing techniques require manual, task-by-task circuit tracing; there is no general method for determining where an arbitrary abstract concept first emerges in the residual stream, or what its representational geometry looks like.
-
-This thesis addresses both gaps through two complementary contributions: (1) a reproduction of Anthropic's circuit-tracing methodology on Qwen3-4B, an instruction-tuned 4-billion-parameter model, and (2) a new \emph{contrastive residual-stream delta} method for localising abstract concepts within the residual stream and characterising their geometry.
+The work has three purposes. The first is to test whether circuits reported in
+Anthropic's \textit{On the Biology of a Large Language Model}~\cite{lindsey2025biology}
+transfer to a different instruction-tuned model family. The second is to develop
+a general method for locating abstract concepts without relying on a prior
+circuit hypothesis. The third is to examine whether learned continuous prefixes
+can redirect model behaviour and whether the learned directions are
+interpretable relative to the concepts they represent.
 
 %% ---------------------------------------------------------------
 \section{Methodology}
 %% ---------------------------------------------------------------
 
-\textbf{Concept localisation.}\enspace
-For each concept under study, matched prompt pairs are constructed: one prompt instantiates the concept; the other does not; syntax, length, and answer format are held constant. The mean difference in residual-stream activations across layers and token positions — the \emph{delta trajectory} — reveals where the concept becomes geometrically salient. Trajectories are normalised against a permutation null baseline, removing confounds from layer-wise activation scale growth.
+The reproducibility study applies the attribution graph framework to Qwen3-4B
+through a linearised transcoder model. For two digit addition, sparse features
+are scanned across operand grids and token positions to identify range,
+residue, lookup, and sum-sensitive activations. Teacher-forced accuracy and
+entropy analyses separate errors in the first generated answer token from later
+continuation effects. A second reproduction studies multilingual antonym
+completion by suppressing and injecting transcoder features corresponding to
+operation, operand, and output language.
 
-\emph{Anchor} positions (layer and token where the delta is large and non-monotone) are ranked by a non-monotonicity score. Causal sufficiency of each anchor is then tested by activation patching: replacing residual-stream vectors in negative-concept examples with those from positive examples and measuring the resulting change in the model's first output token.
+The concept geometry study introduces a contrastive residual-stream method.
+For each concept, matched positive and negative prompt pairs are constructed so
+that syntax, length, scale, and answer format are held approximately constant.
+The mean residual-stream difference between the two sets defines a layer-wise
+concept delta at candidate token anchors. Delta norms are normalised by the
+residual activation scale and compared with a permutation null distribution.
+Inter-layer cosine similarities then show whether the concept direction remains
+stable across depth or rotates. Activation patching tests causal sufficiency by
+inserting positive-example residual states into negative examples and measuring
+the change in first-token output. Finally, each delta is projected through
+transcoder encoder and decoder directions to identify sparse features that read
+or write along the concept direction.
 
-\textbf{Feature attribution.}\enspace
-At each anchor, the delta vector is projected through the layer's \emph{transcoder} — a sparse autoencoder trained to reconstruct each MLP output — to retrieve individual features that activate contrastively and write along the concept direction. Their joint geometry defines a candidate concept manifold; attribution-graph connections among them form a \emph{feature constellation} describing how concept-relevant information is routed and transformed.
-
-\textbf{Tasks.}\enspace
-The method is applied to three arithmetic tasks with Qwen3-4B, ordered by representational complexity:
-\begin{itemize}
-  \item \textbf{Carry detection} — does the ones-digit sum in a single-step addition carry?
-  \item \textbf{GCD divisibility} — is $\gcd(a,7)=7$?
-  \item \textbf{Residue class} — is $a \equiv 1\pmod{7}$?
-\end{itemize}
-A soft-prompt (learned prefix) experiment serves as a diagnostic control, testing whether input-space perturbations can redirect concept-relevant computation.
+This pipeline is applied to three arithmetic contrasts of increasing
+representational difficulty, namely carry detection in addition, divisibility by
+seven through the greatest common divisor, and residue-class membership modulo
+seven. The soft-prompting chapter trains ten learned prefix embeddings with base
+model weights frozen, evaluating whether input-side perturbations can correct
+residue-class completion, balanced-parentheses judgements, and causal direction
+judgements.
 
 %% ---------------------------------------------------------------
 \section{Key Findings}
 %% ---------------------------------------------------------------
 
-\textbf{Carry} exhibits the clearest and strongest geometric structure. A stable concept direction emerges at layers 4--5 at the final-operand token. The inter-layer cosine-similarity matrix shows a single high-similarity block, indicating the direction is \emph{maintained} rather than rotating across layers. Activation patching from positive to negative examples restores near-perfect accuracy, confirming causal sufficiency. Transcoder analysis at this anchor recovers features with structured activation patterns over the operand grid — iso-sum detectors, parity detectors, operand-comparison features — consistent with a Fourier-like arithmetic substrate. Ablating all Fourier-structured features jointly leaves accuracy unchanged, indicating that this feature set is geometrically present but not part of the causal bottleneck under the tested intervention.
+The addition reproduction finds the same high-level digit-pair organisation
+reported for Claude 3.5 Haiku. Qwen3-4B reads operand information at digit
+positions and recombines decimal residues at the delimiter through lookup-like
+and sum-sensitive features. The first answer token is the main source of
+difficulty, while later answer tokens become highly confident under teacher
+forcing. This supports a lookup-like account of the tested two digit addition
+format rather than a sequential carry-propagation account.
 
-\textbf{GCD divisibility} shows a qualitatively different structure: the inter-layer cosine matrix exhibits a sharp block transition at a specific layer, indicating that the concept direction \emph{rotates} rather than persists. Concept-relevant features are localisable but more distributed across transcoder feature space than for carry. Figure~\ref{fig:gcd_summary} illustrates the concept summary for GCD at the primary anchor, including the top transcoder features projected along the delta direction.
+The multilingual reproduction shows that semantic operation and operand
+components can be edited across English, Chinese, and French. Suppressing
+antonym features and injecting synonym features moves completions toward synonym
+answers, and changing the operand concept from \textit{small} to \textit{hot} transfers strongly
+across languages. In contrast, the attempted output-language edit is weak or
+absent. Thus some mechanistic components transfer across languages and model
+families, while others depend more strongly on tokenisation, selected layer
+range, or prompt surface form.
+
+The concept-localisation results show that concept geometry is not uniform.
+For the addition task, stable direction appears around
+layers 4 and 5 at the final operand token, survives comparison with the
+permutation null baseline, and is causally sufficient under activation patching.
+The aligned transcoder features include operand comparison, iso-sum, parity, and
+Fourier-like grid structure. GCD divisibility is also localisable, but its
+inter-layer cosine matrix shows a block transition, indicating that the
+direction rotates rather than persisting as a single axis. At the rotation layer, 
+we see divisibility detection patterns, directly correlated with the task. Residue-class
+membership does not produce a stable direction above the null band, consistent
+with its low first-token accuracy and suggesting that this modular relation is
+not encoded as a linearly accessible binary contrast.
 
 \begin{figure}[h]
   \centering
-  \includegraphics[width=\linewidth]{gcd/concept_summary_T0_thesis.pdf}
-  \caption{\small Concept summary for GCD divisibility ($\gcd(a,7)=7$) at the primary anchor. Each panel shows a top transcoder feature's activation pattern projected along the contrastive delta direction, with positive values (blue) indicating features that activate more strongly on divisible inputs.}
-  \label{fig:gcd_summary}
+  \includegraphics[width=0.86\linewidth]{cosim_patterns_abc.pdf}
+  \caption{\small Contrastive residual-stream geometry for carry, GCD
+  divisibility, and residue-class membership. Carry shows a stable direction,
+  GCD shows a representational rotation, and residue class remains weak relative
+  to the null baseline.}
+  \label{fig:summary-cosim-patterns}
 \end{figure}
 
-\textbf{Residue class} produces no stable direction above the null permutation band at any tested anchor or layer. This is consistent with the model's low first-token accuracy (12\%) and suggests the model does not linearly encode modular residue membership in a form accessible to contrastive analysis — a negative result that itself characterises the limits of the model's arithmetic representations.
-
-\textbf{Reproducibility.}\enspace
-Anthropic's circuit-tracing methodology extends to Qwen3-4B. Interpretable circuits for addition are recovered, including carry-routing components analogous to those described for base models, with differences in layer distribution attributable to instruction-tuning.
-
-\textbf{Soft prompting.}\enspace
-Learned prefixes can repair response-format failures: first-token accuracy rises from 0\% to 28.6\% on balanced parentheses, and from 0\% to 53.8\% on causal-direction tasks. Residue class accuracy increases by only 1 percentage point, and the mean correct-token probability \emph{decreases}. Learned prefix embeddings do not align with identified concept directions and are not interpretable in transcoder feature space — consistent with encoding a continuous approximation of the information the model requires rather than structured semantic content.
-
-\begin{table}[h]
-\centering
-\small
-\setlength{\tabcolsep}{8pt}
-\begin{tabular}{@{}lrrrr@{}}
-\toprule
-Task & Base acc.\ (\%) & Prefix acc.\ (\%) & $\Delta$ (\%) & $\Delta\bar{p}(\text{correct})$ \\
-\midrule
-Residue class        & 15.0 & 16.0 & $+1.0$  & $-0.011$ \\
-Balanced parentheses &  0.0 & 28.6 & $+28.6$ & $+0.078$ \\
-Causal direction     &  0.0 & 53.8 & $+53.8$ & $+0.236$ \\
-\bottomrule
-\end{tabular}
-\caption{\small Soft-prompt results for Qwen3-4B ($k=10$ prefix tokens, base weights frozen).}
-\label{tab:sp_summary}
-\end{table}
+The soft-prompting experiments show that learned prefixes can redirect outputs
+when the main failure is response format. Accuracy rises from 0\% to 28.6\% on
+balanced parentheses and from 0\% to 53.8\% on causal direction judgements.
+Residue-class completion changes only from 15.0\% to 16.0\%, while the mean
+probability of the correct token decreases. The learned embeddings do not align
+with identified concept directions and are not interpretable through transcoder
+features, which makes soft prompting effective yet a non-interpretable
+transparent knowledge-editing method for our task.
 
 %% ---------------------------------------------------------------
 \section{Recommendations and Next Steps}
 %% ---------------------------------------------------------------
 
-The contrastive delta method is designed to generalise: any domain where a binary concept can be expressed through matched prompt pairs is accessible. Immediate extensions include chemical reactivity, logical entailment, and spectral classification, where contrastive prompt pairs can be constructed from existing scientific datasets.
+The main conclusion is that mechanistic structure identified in one model family
+can transfer to independently trained instruction-tuned models, but that the
+geometry of a target concept strongly conditions whether it can be localised,
+patched, or edited. Stable low-rank directions, rotating directions, and absent
+linear contrasts require different intervention strategies. This aspect has practical
+implications for activation steering, probing, and knowledge editing, where the
+existence of an accessible representation should be established before an edit is
+attempted.
 
-The Gram-matrix structure of the transcoder decoder projection — showing that cosine alignment scores conflate direct feature contributions with cross-feature interference — motivates a refined feature ranking criterion that accounts for co-activation geometry. This would improve the precision of feature constellation construction.
-
-Combining delta localisation with full attribution-graph analysis would link the geometric picture to causal pathways, enabling a mechanistic account of \emph{why} certain concepts resist contrastive decomposition. Finally, applying the method across model scales would test whether the observed heterogeneity in concept geometry scales with model capacity.
+Future work should test whether the transcoder features identified by delta
+projection form causally sufficient circuits when combined with full attribution
+graphs. The feature ranking procedure should also account for the
+non-orthogonality of decoder vectors and co-activation geometry. Finally, the
+contrastive delta method should be applied beyond binary concepts to multi-class and continuous concepts, 
+where the geometry may be more complex and the null distribution may need to be
+constructed differently.
 
 %% ---------------------------------------------------------------
 \section{Research Impact and Conclusion}
 %% ---------------------------------------------------------------
 
-This work delivers a model-agnostic concept localisation method that complements existing circuit-tracing approaches, and applies it to produce the first systematic geometric characterisation of arithmetic representations in an instruction-tuned LLM. The central finding — that concept geometry is non-uniform — has direct practical implications. Carry detection crystallises into a low-rank, causally active direction accessible to intervention. Residue class membership does not. This heterogeneity means that the success of activation-based steering, knowledge editing, or representation-based probing depends fundamentally on the representational form of the target concept, and that localisation should precede any editing attempt.
-
-As LLMs are deployed in high-stakes scientific and decision-making contexts, tools that distinguish genuine internal computation from surface-level pattern matching become essential for building reliable and auditable AI systems. The pipeline developed here — contrastive delta trajectories, anchor-conditioned transcoder projections, and attribution-graph feature constellations — provides a reusable, open-source foundation for this kind of analysis.
+Overall, this thesis contributes a reproduction of large-model circuit-tracing
+results in Qwen3-4B, a contrastive method for analysing concept geometry across
+layers and token positions, and an empirical evaluation of soft prompting as a
+residual-stream intervention. Together, these results show that instruction-tuned
+models can contain sparse, transferable, and interpretable computational
+structure, but also that correct or improved outputs do not imply transparent
+internal computation. Mechanistic evaluation must therefore ask where a
+representation is encoded, whether it is causally active, and whether an
+intervention changes the computation itself or only redirects the surface form of
+the answer.
 
 %% ---------------------------------------------------------------
 \vspace{8pt}
