@@ -35,6 +35,7 @@ import numpy as np
 from matplotlib.gridspec import GridSpec
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
+from matplotlib.ticker import FuncFormatter, MaxNLocator
 from PIL import Image
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -403,8 +404,30 @@ def _draw_mini_1d(ax, feature: dict, concept: str, mod: int = 7) -> bool:
     real_vals = values * scale
     colors = [_BAR_BLUE / 255 if p else _BAR_ORANGE / 255 for p in is_pos]
     x = np.arange(mod)
-    ax.bar(x, real_vals, color=colors, width=0.65)
+
+    # Very small or very large magnitudes otherwise print long tick labels
+    # ("0.00005", "150.00") that collide in these narrow panels -- rescale the
+    # plotted values by a power of ten and annotate that power separately,
+    # placed inside the axes (rather than matplotlib's default spot above the
+    # spine, which collides with the feature-label title drawn just above).
+    vmax = float(np.abs(real_vals).max())
+    exponent = int(np.floor(np.log10(vmax))) if vmax > 0 else 0
+    use_sci = exponent <= -2 or exponent >= 3
+    plot_vals = real_vals / (10.0**exponent) if use_sci else real_vals
+
+    ax.bar(x, plot_vals, color=colors, width=0.65)
     ax.set_xticks(x)
+    ax.yaxis.set_major_locator(MaxNLocator(nbins=4))
+
+    def _fmt_tick(v: float, _pos=None) -> str:
+        if abs(v) < 1e-9:
+            return "0"
+        return f"{v:g}"
+
+    ax.yaxis.set_major_formatter(FuncFormatter(_fmt_tick))
+    if use_sci:
+        ax.text(0.03, 0.99, f"$\\times10^{{{exponent}}}$", fontsize=9.5,
+                 color="black", ha="left", va="top", transform=ax.transAxes)
     ax.tick_params(labelsize=11.5, length=3.5)
     ax.set_xlabel(f"a mod {mod}", fontsize=12.5)
     ax.grid(False)
