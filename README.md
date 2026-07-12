@@ -18,7 +18,7 @@ The soft-prompting study tests whether learned continuous prefixes can modify mo
 <p align="center">
   <img src="docs/_static/images/gcd_concept_emergence.gif" alt="GCD concept emergence animation">
   <br>
-  <sub><em>The animation shows concept localisation for GCD divisibility. Each frame steps to the next anchor position (ranked by contrastive signal strength as the model reads the prompt) and shows the transcoder features most aligned with the divisibility direction at that position, their individual activation profiles, and how the residual-stream direction stabilises across layers. </em></sub>
+  <sub><em>The animation shows concept localisation for GCD divisibility. Each frame steps to the next anchor position (ranked by contrastive signal strength as the model reads the prompt) and shows the transcoder features most aligned with the divisibility direction at that position, their individual activation profiles (x-axis shows `a mod 7` feature activations), and how the residual-stream direction stabilises across layers. </em></sub>
 </p>
 
 The visualiser is designed for inspecting how a contrastive predicate emerges as the model consumes a prompt, and for connecting the residual-stream geometry to sparse transcoder features and attribution-supported feature constellations.
