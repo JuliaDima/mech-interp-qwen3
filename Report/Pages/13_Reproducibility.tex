@@ -75,7 +75,7 @@ $a+b$, while others show more diffuse activation.
     the analogous range-detection behaviour for $b$ in the fifties; L11~F152135 displays
     a mixed diagonal-grid pattern.
     At the delimiter, L29~F127104 and L34~F124769 form diagonal stripes of constant $a+b$.
-    \textcolor{red}{TODO: replace the fig with the proper one}}
+    }
   \label{fig:operand-pos-scan}
 \end{figure}
 
@@ -103,7 +103,7 @@ To avoid redundancy, features with peak activation below $0.05$ are discarded.
 For the focus prompt
 \promptinline{calc:~36 + 59 =~}, the top-ranked feature for the digit pair $(6,9)$
 serves as the reference lookup feature. 
-\textcolor{red}{add results from CSD3 - then uncomment the causal tests below.}
+% \textcolor{red}{add results from CSD3 - then uncomment the causal tests below.}
 
 % Causal validation (figures missing — CSD3 incident; restore when available)
 % We then run two causal checks on the reference lookup feature.
@@ -291,7 +291,7 @@ isolation, as quotation marks and non-Latin scripts alter segmentation
 (e.g.\ \textit{large} within an open quote ``large'' may receive a different token
 identifier than \textit{large} tokenised alone).
 
-\textcolor{red}{TODO: add the proper swaps figures when CSD3 is up}
+% \textcolor{red}{TODO: add the proper swaps figures when CSD3 is up}
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=0.96\textwidth]{Pages/Figures/op_swap.pdf}
@@ -313,7 +313,7 @@ identifier than \textit{large} tokenised alone).
   \label{fig:multilingual-language-swap}
 \end{figure}
 
-\begin{table}[htbp]
+\begin{table}[htbp!]
   \centering
   \small
   \begin{tabular}{@{}llll@{}}
@@ -355,7 +355,7 @@ transfer, while the EN$\to$ZH edit raises the Chinese answer token by a small am
 the selected early-layer
 features do not isolate output language.
 
-\clearpage
+% \clearpage
 \subsection{Attribution Graph Analysis}
 \label{subsec:attr-graph}
 
@@ -371,28 +371,27 @@ identified above.
 
 \begin{figure}[ht!]
   \centering
-  \includegraphics[width=\textwidth]{Pages/Figures/add_attr_graph_no_edges.pdf}
-  \vspace{0.4em}
+  % \includegraphics[width=\textwidth]{Pages/Figures/add_attr_graph_no_edges.pdf}
+  % \vspace{0.4em}
   \includegraphics[width=\textwidth]{Pages/Figures/add_attr_graph_all_edges.pdf}
-  \caption{Attribution graph for \promptinline{calc:~36 + 59 =~} at $N=0.75$. Upper panel shows attributed transcoder features at each layer and token position without edge routing. Lower panel shows the same graph with influence edges between features.}
+  \caption{Attribution graph for \promptinline{calc:~36 + 59 =~} at $N=0.75$, showing
+   attributed transcoder features at each layer 
+  and token position with influence edges between features. \textit{Subnode count} refers to 
+  features sharing the same layer and token positions grouped together for visual clarity.}
   \label{fig:attr-graph-viz}
 \end{figure}
 
-\section{Reproduction Findings}
-\label{sec:repro-conclusions}
+% \section{Reproduction Findings}
+% \label{sec:repro-conclusions}
 
-For addition, Qwen3-4B recovers the digit-pair organisation reported for
-Claude~3.5 Haiku.  The model reads the operands as separate decimal residues,
-then combines these residues at the delimiter through sum related
-features.
+% For addition, Qwen3-4B recovers the digit-pair organisation reported for
+% Claude~3.5 Haiku.  The model reads the operands as separate decimal residues,
+% then combines these residues at the delimiter through sum related
+% features.
 
-For multilingual antonyms, we show that operation and operand
-edits transfer across English, French, and Chinese.  This suggests that Qwen3-4B
-uses features for the semantic relation and for the operand concept that do not
-depend on one language.  However, for the output-language experiment, the same edit can
-either suppress the original answer without moving probability to the target-language
-answer, or not have any effect.
-
-Based on our findings, some circuits transfer across
-models and languages, while others depend on tokenisation, layer range, or the exact
-surface form of the task. 
+% For multilingual antonyms, we show that operation and operand
+% edits transfer across English, French, and Chinese.  This suggests that Qwen3-4B
+% uses features for the semantic relation and for the operand concept that do not
+% depend on one language.  However, for the output-language experiment, the same edit can
+% either suppress the original answer without moving probability to the target-language
+% answer, or not have any effect. 

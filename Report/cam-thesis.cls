@@ -46,7 +46,7 @@
 %% Using report class as base.
 %%
 %%%%%
-\PassOptionsToClass{a4paper,12pt,twoside,openright}{report}
+\PassOptionsToClass{a4paper,12pt,oneside,openany}{report}
 \DeclareOption*{\PassOptionsToClass{\CurrentOption}{report}}
 \ProcessOptions\relax
 \LoadClass{report}
@@ -77,7 +77,6 @@
 % Hyperref should be included in any case, but we make it non-obtrusive (i.e.: no hyperlink borders).
 % Why do we need a separate treatment of hyperref for the techreport? Because the guidelines say so. :)
 \ifcam@techreport
-    % TODO: If the thesis is compiled to PS, include the 'dvips' option to hyperref.
     \RequirePackage[
         pdfpagelabels=false,
         pdfborder={0 0 0},
@@ -455,7 +454,35 @@ for the degree of MPhil Data Intensive Science%
 % page of the TOC.
 \addtocontents{toc}{\protect\thispagestyle{empty}}
 \pagestyle{empty}
+\begingroup
+\makeatletter
+\renewcommand*\@makeschapterhead[1]{%
+  \vspace*{10\p@}%
+  {\parindent \z@ \raggedright
+    \normalfont
+    \interlinepenalty\@M
+    \Huge \bfseries ##1\par\nobreak
+    \vskip 15\p@
+  }}
+\renewcommand*\l@chapter[2]{%
+  \ifnum \c@tocdepth >\m@ne
+    \addpenalty{-\@highpenalty}%
+    \vskip 0.15em \@plus\p@
+    \setlength\@tempdima{1.5em}%
+    \begingroup
+      \parindent \z@ \rightskip \@pnumwidth
+      \parfillskip -\@pnumwidth
+      \leavevmode \bfseries
+      \advance\leftskip\@tempdima
+      \hskip -\leftskip
+      ##1\nobreak\hfil
+      \nobreak\hb@xt@\@pnumwidth{\hss ##2}\par
+      \penalty\@highpenalty
+    \endgroup
+  \fi}
+\makeatother
 \tableofcontents{}
+\endgroup
 
 \ifcam@glossary%
     \cam@printthesisglossary

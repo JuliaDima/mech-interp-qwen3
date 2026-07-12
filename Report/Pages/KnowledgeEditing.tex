@@ -57,8 +57,8 @@ Causal direction     &  0.0 & 53.8 & $+53.8$ & $+0.236$ \\
 Table~\ref{tab:sp_summary} shows that for residue-class completion 
 the prefix does not improve performance, 
 as the mean probability of the correct 
-token decreases despite a negligible accuracy change, 
-suggesting the model follows a leading-digit heuristic 
+token decreases despite a negligible accuracy change. 
+This suggests that the model follows a leading-digit heuristic 
 that the prefix weakens without substituting a reliable 
 modular computation. For balanced parentheses and causal
  direction, the baseline consistently predicts the token
@@ -66,7 +66,35 @@ modular computation. For balanced parentheses and causal
   rather than task knowledge, and the prefix redirects 
   probability mass toward yes/no tokens. We conclude that
    a learned prefix can correct an output-format 
-   failure when the model already encodes the relevant 
+   failure when the model already encodes the relevant
    computation, but cannot introduce a computation that
-    is absent, placing soft prompting here in a diagnostic
-     rather than a knowledge-editing role.
+    is absent.
+
+\paragraph{Prefix Interpretability.}
+
+To test whether the learned correction corresponds to a recognisable direction, we
+probe the trained prefix in two ways, mirroring the residual-stream methodology of
+Chapter~\ref{sec:concept_geometry}. First, we compute the prefix-induced shift at
+each scanned layer, $\Delta_l^{\mathrm{pfx}} = \mathbb{E}[h_l(x^{\mathrm{pfx}})] -
+\mathbb{E}[h_l(x^{\mathrm{base}})]$, and compare it by cosine similarity against a
+task-specific steering vector built the same way as the concept deltas in
+Equation~\ref{eq:concept_delta}: the mean activation on correctly answered prompts
+minus the mean activation on incorrectly answered ones. Second, we project each of
+the $k=10$ learned prefix vectors onto the input embedding matrix and read off its
+nearest real vocabulary tokens by cosine similarity, testing whether any prefix
+position converges toward an interpretable token such as a digit or \texttt{yes}/\texttt{no}.
+
+The probe, however, fails to find interpretable content for the learned prefix vectors. The prefix-induced shift does not align with
+the correct-vs-incorrect steering direction at any layer more than a diffuse,
+low-magnitude correlation would predict, so the correction is not simply a rescaled
+copy of the direction that already separates correct from incorrect completions
+under the frozen model. The nearest-neighbour decoding is similarly uninformative, as
+no prefix position consistently lands on the target vocabulary (digits for the
+residue-class task, \texttt{yes}/\texttt{no} for the other two) or on any other
+single, semantically coherent token. The closest neighbours vary by task and are
+dominated by high-frequency subword fragments unrelated to the answer.
+ 
+Thus, rather than encoding an identifiable
+concept, the learned prefix behaves as a continuous correction whose magnitude
+tracks how far the baseline output distribution already sits from committing to a
+valid answer, which is the interpretation adopted in the abstract of this thesis.

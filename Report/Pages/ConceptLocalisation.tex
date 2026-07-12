@@ -171,7 +171,7 @@ rotation.
 for steering vectors in Llama 2, which is similar to the residue-class heatmap 
 in Figure~\ref{fig:cosim_patterns}(c). However, we show that different tasks and anchors, such as
 carry and GCD heatmaps in Figure~\ref{fig:cosim_patterns}(a) and (b) respectively, 
-exhibit more structured patterns, with high-similarity blocks or representational rotations.
+exhibit more structured patterns, with high-similarity blocks or sharper representational rotations.
 
 \begin{figure}[ht!]
   \centering
@@ -240,38 +240,38 @@ where \(\tilde{x}_{i,[l]}^-\) is the negative prompt with the layer-\(l\) anchor
 activation from the positive prompt. A positive score means that the
 patched state moves the output toward the positive answer.
 
-\textcolor{red}{TODO: remove grad-dot-delta from report figs}
-% \paragraph{Gradient-dot-delta.}
+% \textcolor{red}{TODO: remove grad-dot-delta from report figs}
+\paragraph{Gradient-dot-delta.}
 
-% As a first-order approximation to patching, we score each layer by the
-% inner product of the output-margin gradient and the mean concept delta,
-% \begin{equation}
-% S_l^{\mathrm{grad}}
-% =
-% \frac{1}{N}\sum_{i=1}^{N}
-% \nabla_{h_{l,t^*}}m(x_i^- )\cdot\delta_l.
-% \label{eq:grad_delta_score}
-% \end{equation}
-% This follows from the Taylor expansion
-% \begin{equation}
-% m(\tilde{x}_{i,[l]}^-)
-% \approx
-% m(x_i^-)
-% +
-% \nabla_{h_{l,t^*}}m(x_i^-)
-% \cdot
-% \left(h_{l,t^*}(x_i^+) - h_{l,t^*}(x_i^-)\right).
-% \label{eq:patch_taylor}
-% \end{equation}
-% When the two scores match, the output is locally linear along the concept
-% direction.  When they diverge, higher-order effects dominate or the mean
-% delta is a poor summary of the individual pair differences.
+As a first-order approximation to patching, we score each layer by the
+inner product of the output-margin gradient and the mean concept delta,
+\begin{equation}
+S_l^{\mathrm{grad}}
+=
+\frac{1}{N}\sum_{i=1}^{N}
+\nabla_{h_{l,t^*}}m(x_i^- )\cdot\delta_l.
+\label{eq:grad_delta_score}
+\end{equation}
+This follows from the Taylor expansion
+\begin{equation}
+m(\tilde{x}_{i,[l]}^-)
+\approx
+m(x_i^-)
++
+\nabla_{h_{l,t^*}}m(x_i^-)
+\cdot
+\left(h_{l,t^*}(x_i^+) - h_{l,t^*}(x_i^-)\right).
+\label{eq:patch_taylor}
+\end{equation}
+When the two scores are similar, the output is locally linear along the concept
+direction.  When they diverge, higher-order effects dominate or the mean
+delta is a weak approximation of the individual pair differences.
 
 \begin{figure}[ht!]
   \centering
   \includegraphics[width=\textwidth]{Pages/Figures/causal_overlay_comparison.pdf}
-  \caption{Residual direction and activation patching for two
-  carry anchors.  The ones$_b$ anchor shows alignment of geometric and causal evidence.  The
+  \caption{Residual direction and activation patching for two anchors in the addition prompt.  
+  The ones$_b$ anchor shows alignment of geometric and causal evidence.  The
   operator anchor shows no causal effect on the answer, reflecting low separability
   of the concept at that anchor.}
   \label{fig:causal_overlay_comparison}
@@ -419,7 +419,7 @@ where \(\alpha=0\) gives full ablation and \(\alpha=1\) leaves the model unchang
 \paragraph{Decoder-Direction Injection.}
 
 Injection adds the decoder direction at a fixed token position whether or not the
-feature fires naturally,
+feature activates naturally,
 \begin{equation}
 y_l(x) \leftarrow y_l(x) + \delta_f\, w_{l,f}^{\mathrm{dec}}.
 \label{eq:injection}
@@ -435,14 +435,14 @@ concept pairs.
 \label{sec:carry_results}
 
 \paragraph{Carry Detection in Three-Digit Addition.}
-\textcolor{red}{TODO: add figs}
-The carry concept direction is strongest at the ones$_b$ anchor.
+% \textcolor{red}{TODO: add figs}
+Carry-related concept directions are present  at the ones$_a$ and ones$_b$ anchor.
 The delta norm peaks at layers 4--5, with secondary peaks at layers 19 and 22; the
 cosine heatmap shows a block transition near layers 4--5 followed by a stable carry
 direction in later layers. 
 
 \paragraph{Ablation.}
-Joint ablation of first \textcolor{red}{N} projected features with \(\alpha=0\) reduces accuracy from 100\% to 47.8\% on the
+Joint ablation of first ten projected features with \(\alpha=0\) reduces accuracy from 100\% to 47.8\% on the
 23 activating prompts. Individual ablations have no effect, indicating functional
 redundancy. The prediction shifts in Table~\ref{tab:carry_intervention} range from
 \(-8\) to \(-11\), close to the units digit of the second operand, suggesting these
@@ -495,28 +495,105 @@ Changed digits are bold.}
 \paragraph{Fourier Structure in Carry Feature Grids.}
 \label{sec:fourier_patterns}
 
-A subset of features at the ones$_b$ anchor shows structured activation over the
-\((a,b)\) operand grid, encoding parity, iso-sum, and
-iso-difference patterns (Figure~\ref{fig:fourier_selection}). We score each feature by its power in the two-dimensional
-Fourier modes \(\exp\!\left(\tfrac{2\pi i}{10}(ua+vb)\right)\), retaining those
-with \(S_f>0.6\). The selected features cluster in layers 12--14 and 21, close to delta
-maxima in Figure~\ref{fig:cosim_patterns}(a). Joint ablation of all
-selected features leaves accuracy unchanged (\(\Delta p = +0.003\)), indicating
-causal dispensability within this subset.
+Beyond the aggregate cosine ranking of Equation~\ref{eq:combined_cos}, we examine
+individual transcoder features for digit-level structure, independent of whether
+they rank highly under \(\sigma_{l,f}\). For every active feature \(f\) at every
+layer \(l\), and at the ones$_b$ anchor, we scan operands \(a,b\) and aggregate the
+post-ReLU activation into a \(10\times10\) grid,
+\begin{equation}
+X_{l,f}[a_0,b_0]
+=
+\mathbb{E}\bigl[z_{l,f}(x) \mid a\bmod 10=a_0,\; b\bmod 10=b_0\bigr],
+\label{eq:fourier_grid}
+\end{equation}
+min-max normalised to \([0,1]\) per feature.  Writing
+\(\hat X_{l,f}[u,v]\) for the mean-subtracted 2D FFT of \(X_{l,f}\), each frequency
+pair corresponds to a cosine mode \(\cos\bigl(2\pi(ua_0+vb_0)/10+\varphi_{u,v}\bigr)\),
+and we group modes into six symmetry classes: \emph{row}- or \emph{column}-only
+(\(v{=}0\) or \(u{=}0\), a function of a single digit), \emph{row-} or
+\emph{column-parity} at the Nyquist frequency (\(|u|{=}5,v{=}0\) or \(u{=}0,|v|{=}5\),
+i.e.\ \((-1)^{a_0}\) or \((-1)^{b_0}\)), global \emph{parity} (\(|u|{=}|v|{=}5\), i.e.\
+\((-1)^{a_0+b_0}\)), \emph{iso-sum} (\(u{=}v\), a function of \(a_0{+}b_0\)),
+\emph{iso-difference} (\(u{=}{-}v\), a function of \(b_0{-}a_0\)), or \emph{mixed}. The reconstruction from the top-\(K\) modes by amplitude is
+\begin{equation}
+\hat{X}_{l,f}^{(K)}[a_0,b_0]
+=
+\bar X_{l,f} + \sum_{k=1}^{K} A_k\cos\!\left(\frac{2\pi(u_ka_0+v_kb_0)}{10}+\varphi_k\right),
+\label{eq:fourier_recon}
+\end{equation}
+and we define the structured-energy fraction of a feature as the share of its non-DC
+spectral power carried by modes with an explicit digit-pair symmetry,
+\begin{equation}
+S_{l,f}
+=
+\frac{\displaystyle\sum_{(u,v)\,\in\,\{\text{parity, row-par., col-par., iso-sum, iso-diff.}\}} \bigl|\hat X_{l,f}[u,v]\bigr|^2}
+     {\displaystyle\sum_{(u,v)\neq(0,0)} \bigl|\hat X_{l,f}[u,v]\bigr|^2}.
+\label{eq:structured_energy}
+\end{equation}
+After scanning active features at every layer, we retain those with
+\(S_{l,f}>0.6\). The selected set concentrates almost entirely in layers 12--14 and
+21, at or beyond the layers where the delta trajectory in
+Figure~\ref{fig:cosim_patterns}(a) reaches its maximum.
+
+Figure~\ref{fig:fourier_selection} and Table~\ref{tab:fourier_features} show eight example features from this set, each
+with its activation grid alongside the smallest reconstruction (up to \(K{=}6\)
+modes in Equation~\ref{eq:fourier_recon}) reaching \(R^2\geq0.90\). 
+
+\begin{table}[ht!]
+\centering
+\small
+\begin{tabular}{@{}llll@{}}
+\toprule
+Feature & Layer & Symmetry category & Closed-form predicate \\
+\midrule
+$F_{1468}$   & 12 & row-parity      & $a_0 \bmod 2 = 1$ \\
+$F_{30390}$  & 21 & column-parity   & $a_0 \bmod 2 = 1 \text{ and } b_0 \bmod 2 = 1$ \\
+$F_{57984}$  & 13 & iso-difference  & $a_0 - b_0 = 0$ \\
+$F_{114215}$ & 14 & iso-sum         & $a_0 + b_0 = 10$ \\
+$F_{75746}$  & 13 & global parity   & $(a+b)\bmod 2 = 1$ \\
+$F_{56616}$  & 13 & iso-difference  & $|a-b| \equiv 3 \pmod{10}$ \\
+$F_{107956}$ & 13 & iso-difference  & $|a-b| \equiv 3 \pmod{10}$ \\
+$F_{132660}$ & 13 & iso-sum         & $a+b \bmod 10 \in \{4,5,6\}$ \\
+\bottomrule
+\end{tabular}
+\caption{Symmetry category of the eight features in Figure~\ref{fig:fourier_selection}
+and the arithmetic predicate each appears to encode.}
+\label{tab:fourier_features}
+\end{table}
+\clearpage
+This structure invites comparison with the Fourier circuits reported in small models
+trained from scratch on modular arithmetic. \citet{nanda2023progress} find that a
+one-layer transformer trained purely on modular addition converges onto a small
+shared set of low-frequency components, and \citet{zhong2023clock} show that the
+resulting \emph{clock} algorithm reads the sum directly off the phase of one or two
+dominant frequencies. In both accounts the structure is located in the
+\emph{weights}, since the token embeddings organise into circles at a handful of
+shared frequencies and every neuron's response follows from reading out those
+directions. The structure found here instead lives in \emph{activation} space,
+where individual transcoder features happen to respond to the operand grid as
+approximately single Fourier modes, so the basis is an empirical property of the
+dictionary's activation patterns rather than of the weights that produced them.
+
+Joint ablation of most ranked 60 features by their structured energy does not change task accuracy (\(\Delta p = +0.003\)), indicating
+causal dispensability within this subset. This suggests that while Qwen3-4B exhibits Fourier structure in the context
+of addition tasks provided by our dataset,
+ this structure is one capability among many, rather than a causal component.
 
 \begin{figure}[ht!]
   \centering
   \includegraphics[width=\textwidth]{Pages/Figures/fourier_selection.pdf}
-  \caption{Fourier-structured transcoder features at the carry ones$_b$ anchor.
-  Each feature is shown as an activation grid and a top-\(K\) Fourier
-  approximation.}
+  \caption{Fourier-structured transcoder features at the carry ones$_b$ anchor,
+  selected by structured-energy fraction \(S_{l,f}>0.6\)
+  (Equation~\ref{eq:structured_energy}). Each feature is shown as an activation grid
+  and its top-\(K\) Fourier approximation (Equation~\ref{eq:fourier_recon}), labelled
+  by the number of modes \(K\) needed to reach \(R^2\geq0.90\).}
   \label{fig:fourier_selection}
 \end{figure}
 
 \subsection{GCD Divisibility by Seven}
 \label{sec:gcd_results}
 
-In Figure \textcolor{red}{X}, several anchors exceed the null permutation band, indicating the
+In Figure \ref{fig:concept_overview_gcd}(b), several anchors exceed the null permutation band, indicating the
 binary component of this task. The inter-layer cosine matrix shows a block transition 
 at layer 10 for the ones$_a$ anchor in Figure~\ref{fig:cosim_patterns}(b). This anchor
 and layer position is also where projected features start exhibiting
@@ -525,21 +602,108 @@ it is an indication that the model already has feature detectors for divisibilit
 and that these features are
 revealed by the nature of our contrastive prompts.
 
-Moreover, ablation of the first \textcolor{red}{X} features ranked by absolute cosine described in Equation
-\ref{eq:combined_cos} reduces accuracy from \textcolor{red}{X} to \textcolor{red}{X} 
-on the \textcolor{red}{X} activating prompts. This indicates that these feature are causally relevant 
-to the GCD by seven, even though they appear before the seven token.
+% Moreover, ablation of the first \textcolor{red}{X} features ranked by absolute cosine described in Equation
+% \ref{eq:combined_cos} reduces accuracy from \textcolor{red}{X} to \textcolor{red}{X} 
+% on the \textcolor{red}{X} activating prompts. This indicates that these feature are causally relevant 
+% to the GCD by seven, even though they appear before the seven token.
 
 \subsection{Residue-Class Membership Modulo Seven}
 \label{sec:residue_results}
 
 No anchor consistently exceeds the permutation null band for 
 the residue-class contrast (\(a\equiv 1\pmod{7}\) 
-versus \(a\not\equiv 1\pmod{7}\)). Figure~\ref{fig:concept_summary_residue} 
- shows that the strongest projected features detect divisibility 
- by seven, similarly to the GCD divisibility results. However, 
- ablation of the first \textcolor{red}{X} strongest features \textcolor{red}{is}
- causally not sufficient to change the output, 
- as accuracy remains at \textcolor{red}{X} on the \textcolor{red}{X} activating prompts. This aspect
- indicates that the lack of a binary component, as the residue-class membership
- task is a multi-class problem, therefore the model does not learn a linear concept direction.
+versus \(a\not\equiv 1\pmod{7}\)). 
+Figure~\ref{fig:concept_overview_residue}(c)
+ shows that some of the strongest projected features detect divisibility
+ by seven, similarly to the GCD divisibility results.
+ 
+%  However, 
+%  ablation of the first \textcolor{red}{X} strongest features \textcolor{red}{is}
+%  causally not sufficient to change the output, 
+%  as accuracy remains at \textcolor{red}{X} on the \textcolor{red}{X} activating prompts. This aspect
+%  indicates that the lack of a binary component, as the residue-class membership
+%  task is a multi-class problem, therefore the model does not learn a linear concept direction.
+
+\clearpage
+\begin{figure}[p]
+\centering
+\thispagestyle{empty}
+\vspace*{\fill}
+\includegraphics[width=\textwidth]{Pages/Figures/carry/concept_overview_T0_thesis.pdf}
+\vspace*{\fill}
+\end{figure}
+\clearpage
+
+\begin{figure}[p]
+\centering
+\thispagestyle{empty}
+\vspace*{\fill}
+\includegraphics[width=\textwidth]{Pages/Figures/gcd/concept_overview_T0_thesis.pdf}
+\vspace*{\fill}
+\end{figure}
+\clearpage
+
+\begin{figure}[p]
+\centering
+\thispagestyle{empty}
+\vspace*{\fill}
+\includegraphics[width=\textwidth]{Pages/Figures/residue_class/concept_overview_T0_thesis.pdf}
+\vspace*{\fill}
+\end{figure}
+\clearpage
+
+\begin{figure}[p]
+\caption[Concept-localisation overview across all anchors, for carry, GCD, and residue class]{%
+Concept-localisation overview across all six anchors for each of the three concepts
+defined in Table \ref{tab:concept_pairs}, in order:
+
+\medskip
+\noindent(a) \textbf{Carry} (\promptinline{what is~\{a\}+\{b\}?~Answer:~}).
+Across all distinct features shown for the six anchors, the great
+majority are single-digit selectivity detectors firing for a specific
+ones-digit of $a$ or $b$ (e.g.\ $a_0=9$). Sometimes, they are gated by the other digit
+being non-zero or diffuse features without digit-pair structure. The
+cosine-similarity panels show high-similarity blocks for
+ones$_a$ and ones$_b$ anchors, consistent for all layers, and suggesting stable 
+concept representation at these positions.
+The other anchors in this figure show diffuse diagonals, indicating gradual 
+rotation of the carry direction across layers. Since the model uses ones$_a$ and ones$_b$ 
+to compute the carry (as shown using ablation in Table \ref{tab:carry_intervention}), 
+it is expected that the model has a \textit{high-vs-low} digit magnitude direction at these anchors, as
+high digits are more likely to produce a carry than low digits. 
+\label{fig:concept_overview_carry}
+
+\medskip
+\noindent(b) \textbf{GCD divisibility} (\promptinline{the~gcd~of~\{a\}~and~7~is:~}).
+Divisibility-by-seven detectors can be seen once the model
+reads ones$_a$ by layer 10, where a clear block rotation also appears. Here, the model
+does not yet read the operator (seven). However, the contrastive nature of our
+experiment reveals divisibility-by-seven features, indicating that the model has
+already learned a divisibility-by-seven representation for arbitrary integers, which
+it can later use to compute the GCD once the operator is read. This resembles predictive preactivation in human language comprehension, where contextual
+expectations can probabilistically activate representations of likely upcoming input before that
+input is encountered \citep{kuperberg2016prediction}. Here, however, the anticipated content
+appears to be computationally specific rather than a lexical identity (e.g. 
+anticipation of the token \texttt{7}).
+
+The delta trajectory row shows null-excess bands at anchors starting from ones$_a$, 
+and the inter-layer cosine matrix shows a block transition at layer
+ 10 for the ones$_a$ anchor, 
+ where projected features start exhibiting prime (e.g. $L^{10}_{74500}$, $L^{22}_{88709}$, $^{22}_{24461}$) and 
+ co-prime ($L^{13}_{12887}$) patterns by seven.
+
+ \label{fig:concept_overview_gcd}
+
+\medskip
+\noindent(c) \textbf{Residue class} (\promptinline{calc:~\{a\}\%7=~}). The
+delta trajectory row shows that the concept signal does not rise 
+above the permutation-null
+mean$+1\sigma$ band. This suggests that the residue class concept 
+is not binary, in contrast
+to the other concepts studied here. Most of the
+features read out below each constellation are, again, divisibility-by-seven
+detectors rather than detectors of the nominally selected class
+$a\equiv 1\pmod 7$.
+\label{fig:concept_overview_residue}
+}
+\end{figure}
