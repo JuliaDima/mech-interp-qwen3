@@ -1,0 +1,153 @@
+\documentclass[withindex,oneside,openany]{cam-thesis}
+\usepackage[T1]{fontenc}
+% \usepackage{mathpazo}
+% \usepackage{palatino}
+\usepackage{lmodern}
+
+\usepackage[numbers]{natbib} % Citations using numbers
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\graphicspath{{./}{Report/}}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{longtable}
+\usepackage{tikz}
+\usepackage{xcolor}
+\usepackage{pdflscape}
+\usepackage[most]{tcolorbox}
+
+\usepackage[most]{tcolorbox}
+\usepackage[scaled=0.92]{helvet} % clean sans font, works with pdfLaTeX
+
+\DeclareUnicodeCharacter{5927}{\textit{da}}
+\DeclareUnicodeCharacter{5FAE}{\textit{wei}}
+\DeclareUnicodeCharacter{0113}{\=e}
+\DeclareUnicodeCharacter{2014}{---}
+
+\newtcolorbox{promptbox}{
+  enhanced,
+  colback=black!2,
+  colframe=black!25,
+  boxrule=0.35pt,
+  arc=2pt,
+  left=6pt,
+  right=6pt,
+  top=5pt,
+  bottom=5pt,
+  before skip=6pt,
+  after skip=6pt,
+  fontupper=\sffamily\small,
+}
+
+\newcommand{\promptinline}[1]{%
+  {\sffamily\small\itshape ''#1''}%
+}
+
+\definecolor{heraldicred}{HTML}{BD2C2E}
+\definecolor{softviolet}{HTML}{8F80BA}
+
+\usetikzlibrary{arrows.meta, decorations.pathreplacing}
+
+\hypersetup{linkcolor=black}
+
+\makeatletter
+\cam@calcpaperdims{18mm}{18mm}{18mm}{18mm}
+\renewcommand\section{\@startsection {section}{1}{\z@}%
+  {-3.5ex \@plus -1ex \@minus -.2ex}%
+  {2.3ex \@plus .2ex}%
+  {\normalfont\large\bfseries}}
+\renewcommand\subsection{\@startsection{subsection}{2}{\z@}%
+  {-3.25ex\@plus -1ex \@minus -.2ex}%
+  {1.5ex \@plus .2ex}%
+  {\normalfont\normalsize\bfseries}}
+\renewcommand\subsubsection{\@startsection{subsubsection}{3}{\z@}%
+  {-3.25ex\@plus -1ex \@minus -.2ex}%
+  {1.5ex \@plus .2ex}%
+  {\normalfont\normalsize\itshape}}
+\makeatother
+
+\title{Mechanistic Circuits and Concept Representation in an Instruction-Tuned Language Model}
+\author{Elisabeta-Iulia (Julia) Dima}
+
+\college{King's College}
+\collegeshield{Pages/Figures/CollegeShields/Kings}
+
+\submissiondate{June, 2026}
+
+\supervision{Dr Miles Cranmer, Dr Alessandro Favero}
+
+\departments{Department of Applied Mathematics and Theoretical Physics\\
+Department of Physics}
+
+\date{June, 2026}
+
+\subjectline{Data Science}
+\keywords{mechanistic interpretability, Large Language Models}
+
+\submissionnotice{This dissertation is submitted for the degree of MPhil Data Intensive Science\\[4pt]
+Word count: 6{,}900\\[4pt]
+{\footnotesize Near-final MPhil thesis draft, with some figures provisional due to CSD3 disruption.}}
+
+
+\abstract{%
+  Whether a language model that produces correct answers to arithmetic problems genuinely
+  internalises the underlying computation, or relies on surface patterns from training,
+  cannot be determined from outputs alone. This thesis examines that question in Qwen3-4B,
+  an independently trained instruction-tuned model, through two complementary directions.
+
+  The first reproduces the circuit-tracing methodology from Anthropic's
+  \textit{On the Biology of a Large Language Model}, applying it to a model outside
+  the Claude family. We find that analogous arithmetic circuit structure is present,
+  with the residual stream encoding operand values at identifiable token positions and
+  attribution graphs recovering the same high-level topology. A multilingual experiment
+  confirms that the operation, operand, and output-language components of the circuit
+  can be independently suppressed and reinstated, with interventions transferring across
+  English, Chinese, and French. These results indicate that the mechanistic organisation
+  identified by Lindsey et al.\ is not specific to a single model family.
+
+  The second introduces a method for localising abstract concepts within the residual stream
+  via contrastive prompt pairs, designed to generalise to any domain in which concepts can be
+  expressed through matched inputs. Applied to three arithmetic tasks of increasing representational complexity
+  (carry detection, GCD divisibility, and residue class membership),
+  it identifies the geometric signature of each concept and characterises its localisability across tokens and layers.
+  The analysis surfaces structured transcoder features encoding mathematical relationships
+  (comparison operators, Fourier decomposition, and divisibility detectors),
+  illustrating in a more interpretable form how an instruction-tuned model 
+  internalises arithmetic computation.
+
+
+  In this thesis, we also study the optimisation of learned prefix embedding as a method for knowledge editing, 
+  examining whether gradient-based modifications to the input embedding space can adapt 
+  specific internal representations without affecting broader model behaviour. 
+  We find that while this method generally improves model predictions, 
+  the learned embeddings are not interpretable. Instead of encoding identifiable concepts, 
+  they appear to encode, in a continuous form, an approximation of the quantity of 
+  information the model requires to produce the target output, without correspondence 
+  to structured semantic content.
+}
+
+\begin{document}
+
+%% Title page, abstract, declaration etc.:
+\frontmatter{}
+
+\input{Pages/11Introduction}
+\input{Pages/12RelatedWork}
+\input{Pages/13_Reproducibility}
+\input{Pages/ConceptLocalisation}
+\input{Pages/KnowledgeEditing}
+\input{Pages/Conclusion}
+
+% \phantomsection
+\addcontentsline{toc}{chapter}{Bibliography}
+\bibliographystyle{plainnat}
+\bibliography{thesis}
+
+\appendix
+\input{Pages/Glossary}
+\input{Pages/AIUsage}
+
+% \printthesisindex
+
+\end{document}

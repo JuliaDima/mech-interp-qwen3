@@ -1,0 +1,397 @@
+\chapter{Reproducibility}
+\label{sec:repro}
+
+\makeatletter
+\@ifundefined{promptinline}{%
+  \newcommand{\promptinline}[1]{\mbox{\normalfont\footnotesize\sffamily\(\langle\)\,#1\,\(\rangle\)}}%
+}{%
+  \renewcommand{\promptinline}[1]{\mbox{\normalfont\footnotesize\sffamily\(\langle\)\,#1\,\(\rangle\)}}%
+}
+\makeatother
+
+\section{Two-Digit Addition Circuit Reproduction in Qwen3-4B}
+
+\citet{lindsey2025biology} report that Claude~3.5 Haiku does not solve
+prompts of the form \promptinline{calc:~a + b =~} by a symbolic carry
+algorithm.  The reported circuit instead uses sparse lookup features localised
+by the ones digits of the two operands.  A feature activation might
+encode various information, such as approximate operand magnitude,
+$a \bmod 10 = d_1$ and $b \bmod 10 = d_2$ for some $d_1, d_2 \in {0, \ldots, 9}$, 
+or ones digit of
+$d_1+d_2$.  We use this result as the hypothesis for Qwen3-4B.  The
+prior work gives the target pattern, but not every implementation detail needed
+for this model.  We therefore state our Qwen procedure explicitly, using the
+transcoder notation of Section~\ref{sec:interp-methods}.
+
+\subsection{Operand and Residue Feature Scan}
+\label{subsec:operand-plots}
+
+For a prompt \promptinline{calc:~a + b =~}, let $T$ be the index of the
+\promptinline{=} token.  For each feature $(\ell,k)$, we define the operand
+matrix
+
+\begin{equation}
+  M_{\ell,k}[a,b]
+    \;=\; a_{\ell,k,T}
+          \left( \text{\promptinline{calc:~a + b =~}}\right),
+    \qquad a,b \in \{0,\ldots,99\}.
+  \label{eq:operand-matrix}
+\end{equation}
+
+The expectation is that sum-sensitive features produce diagonal patterns, 
+single-operand features produce horizontal or vertical
+bands, ones-digit features repeat with period ten, and joint lookup features form regular
+grids of point clusters.
+
+\paragraph{Token-position feature localisation.}
+\citet{lindsey2025biology} report that operand-token features encode individual
+digits, while delimiter-token features encode digit combinations.  We test this
+separation in Qwen3-4B by applying Equation~\ref{eq:operand-matrix} at three positions
+in the prompt \promptinline{calc:~36 + 59 =~}, namely at the ones digit of $a$ (position~$4$),
+the ones digit of $b$ (position~$7$), and the \promptinline{=} token (position~$8$).
+At each position, we seed the scan from the attribution graph for the focus prompt,
+selecting the top~$15$ features by total edge weight and retaining one representative
+per distinct ones digit.  Figure~\ref{fig:operand-pos-scan} shows the resulting matrices.
+
+Features at positions $4$ and $7$ split between range detectors (vertical or horizontal
+bands localised to the operand's tens range) and period-10 ones-digit detectors.
+At the \promptinline{=} token, some sum-sensitive features form diagonal stripes of constant
+$a+b$, while others show more diffuse activation.
+
+\begin{figure}[ht!]
+  \centering
+  \includegraphics[width=\textwidth]{Pages/Figures/combined_ones(a)_filtered.pdf}
+  \vspace{0.6em}
+  \includegraphics[width=\textwidth]{Pages/Figures/combined_ones(b)_filtered.pdf}
+  \vspace{0.6em}
+  \includegraphics[width=\textwidth]{Pages/Figures/combined_=_filtered.pdf}
+  \caption{Operand matrices at the ones-digit position of $a$ (top row), the ones-digit
+    position of $b$ (middle row), and the \promptinline{=} token (bottom row), for the
+    prompt \promptinline{calc:~36 + 59 =~}.
+    At the ones-digit position of $a$, features L05~F016764, L20~F055089, and L22~F082013
+    form vertical bands detecting $a$ in the thirties;
+    L28~F001775 exhibits period-10 repetition tracking $a \bmod 10$.
+    At the ones-digit position of $b$, L05~F108452, L07~F034049, and L22~F053739 show
+    the analogous range-detection behaviour for $b$ in the fifties; L11~F152135 displays
+    a mixed diagonal-grid pattern.
+    At the delimiter, L29~F127104 and L34~F124769 form diagonal stripes of constant $a+b$.
+    }
+  \label{fig:operand-pos-scan}
+\end{figure}
+
+\paragraph{Lookup feature identification.}
+To identify specific lookup features for a digit pair $(d_1,d_2)$, we rank all
+features by the fraction of their total activation mass concentrated at the
+$200$ commutative cells satisfying $\{a \bmod 10,\, b \bmod 10\} = \{d_1,d_2\}$,
+
+\begin{equation}
+  s_{\ell,k}(d_1,d_2)
+    \;=\;
+    \frac{%
+      \displaystyle\sum_{a,b}
+        M_{\ell,k}[a,b]\;
+        \mathbb{1}\!\left[
+          \{a \bmod 10,\; b \bmod 10\} = \{d_1,d_2\}
+        \right]
+    }{%
+      \displaystyle\sum_{a,b} M_{\ell,k}[a,b]
+    }.
+  \label{eq:lookup-score}
+\end{equation}
+
+To avoid redundancy, features with peak activation below $0.05$ are discarded.  
+For the focus prompt
+\promptinline{calc:~36 + 59 =~}, the top-ranked feature for the digit pair $(6,9)$
+serves as the reference lookup feature. 
+% \textcolor{red}{add results from CSD3 - then uncomment the causal tests below.}
+
+% Causal validation (figures missing — CSD3 incident; restore when available)
+% We then run two causal checks on the reference lookup feature.
+% In the inhibition check, we scale its activation by
+% $\beta \in \{1.0,0.5,0.0,-1.0,-5.0,-10.0\}$; if the feature is necessary,
+% lower $\beta$ should reduce support for the correct ones digit.
+% In the substitution check, we replace earlier MLP inputs with those from
+% \promptinline{calc:~39+59=}; if the feature mediates the computation,
+% the predicted ones digit should shift from $5$ to $8$.
+
+\paragraph{Teacher-Forced Accuracy Analysis.}
+To characterise the difficulty profile of two-digit addition in Qwen3-4B and what
+structure the per-token confidence pattern reveals, we measure teacher-forced confidence at each answer position across
+the full operand grid. If $\mathbf{y}^*(a,b)=(y^*_0,y^*_1,\ldots)$ is the correct answer
+token sequence, then
+
+\begin{equation}
+  P_k(a,b)
+  = P\!\left(
+      y_k = y^*_k \;\middle|\;
+      y_0 = y^*_0,\ldots,y_{k-1}=y^*_{k-1},\;
+      \mathbf{x}(a,b)
+    \right),
+  \label{eq:teacher-forced}
+\end{equation}
+
+where $\mathbf{x}(a,b)$ is the prompt.  Teacher forcing removes uncertainty from
+earlier generation errors and isolates the residual difficulty at position $k$. 
+We show the results of this analysis in Figure~\ref{fig:positional-cascade}.
+
+\begin{figure}[ht!]
+  \centering
+  \includegraphics[width=\textwidth]{Pages/Figures/positional_cascade.pdf}
+  \caption{Teacher-forced confidence $P_k(a,b)$ over the two-digit addition grid at
+    answer positions $k=0,1,2$. At $k=0$ (grid mean $\mu_0=0.233$), the low confidence is
+    concentrated along higher sum magnitudes and carry-producing diagonals where $a \bmod 10 + b \bmod 10 \geq 10$.
+    However, once the first token is forced, confidence rises to $\mu_1=0.943$ at $k=1$
+    and $\mu_2=0.988$ at $k=2$, indicating that the primary representational difficulty
+    lies in the first generated digit, after which the remaining answer follows with higher
+    certainty.}
+  \label{fig:positional-cascade}
+\end{figure}
+
+\paragraph{Entropy and carry-class analysis.}
+Prediction entropy and carry class give the same negative evidence.  Entropy is
+highest near carry boundaries and larger sums, but confidence does not decrease
+monotonically with carry count.  The period-10 digit-pair grid is the stronger
+axis.
+
+\paragraph{Addition circuit interpretation.}
+In Qwen3-4B, the addition circuit reproduces the main signature reported for
+Claude~3.5 Haiku.  The model reads each operand at its digit position, then recombines the two
+residues at the delimiter through joint-modular and sum-sensitive features.  The first answer token carries most of the difficulty,
+and its confidence is organised by ones-digit pairs.  These results support a
+lookup-like account of this scanned \promptinline{calc:} format and two-digit
+grid.  The evidence does not support a sequential carry-propagation account for
+this specific setting.
+
+\clearpage
+
+\section{Multilingual Antonym Circuit Reproduction in Qwen3-4B}
+
+\citet{lindsey2025biology} report that antonym completion in Claude~3.5 Haiku
+involves three separable circuit components: features encoding the semantic relation
+(the antonym operation), features encoding the concept being negated (the input word),
+and features related to the output language.
+We test whether this decomposition holds in Qwen3-4B by independently suppressing
+and injecting each component using the source-exclusive and target-exclusive
+feature sets of the transcoder.
+If operation and operand features are language-neutral, interventions identified from
+English prompts should transfer to French and Chinese outputs.
+
+\subsection{Contrastive Feature Set Construction}
+\label{subsec:exclusive-features}
+
+Each experiment runs the model on prompts that differ in only one
+component (e.g. an antonym prompt versus a synonym prompt for the
+operation experiment, or the same antonym prompt in English versus French for the
+language experiment).  We refer to these as the source condition and target condition.
+At layer $\ell$, let $a_{\ell,k}^{\mathrm{src}}$ and
+$a_{\ell,k}^{\mathrm{tgt}}$ be the activation of transcoder feature $k$ under
+the two conditions.  Among the top-$K$ active features, we define
+source-exclusive and target-exclusive sets as
+
+\begin{equation}
+  \mathcal{S}^\ell
+    = \left\{k \in \mathcal{F}_{\mathrm{src}}^\ell
+        \;\middle|\; a_{\ell,k}^{\mathrm{tgt}} < \rho\,a_{\ell,k}^{\mathrm{src}}\right\},
+  \qquad
+  \mathcal{I}^\ell
+    = \left\{k \in \mathcal{F}_{\mathrm{tgt}}^\ell
+        \;\middle|\; a_{\ell,k}^{\mathrm{src}} < \rho\,a_{\ell,k}^{\mathrm{tgt}}\right\}.
+  \label{eq:exclusive-sets}
+\end{equation}
+
+We fix the threshold at $\rho=0.5$ and leave a feature unchanged when it is
+active at comparable strength in both conditions. Following \citet{lindsey2025biology}, we assign each circuit component a layer
+range by dividing the 36-layer network into thirds: operation features are sought
+in the middle third layers $\mathcal{L}_{\mathrm{op}} = \{12,\ldots,23\}$, operand features in the early third layers
+$\mathcal{L}_{\mathrm{oper}} = \{0,\ldots,11\}$, and output-language features in the first fifth layers $\mathcal{L}_{\mathrm{lang}} = \{0,\ldots,6\}$. For the operation
+and language interventions, we use the final prompt token as the anchor position; for the operand intervention, we use
+the positions at which the two prompts first diverge (the operand word tokens).
+
+\paragraph{Feature Suppression and Injection Policy.}
+
+At these layers and positions, we project the pre-MLP hidden state
+$\mathbf{h}^{\ell,p}$ through the transcoder encoder,
+
+\begin{equation}
+  \tilde{\mathbf{z}}^{\ell,p}
+    = \mathrm{ReLU}\!\left(
+        \mathbf{W}_{\mathrm{enc}}^{(\ell)}\mathbf{h}^{\ell,p}
+        + \mathbf{b}_{\mathrm{enc}}^{(\ell)}
+      \right).
+  \label{eq:reenc}
+\end{equation}
+
+We ablate source-exclusive activations and inject target-exclusive activations
+
+\begin{equation}
+  \tilde{z}^{\ell,p}_k \leftarrow 0,
+  \quad k \in \mathcal{S}^\ell;
+  \qquad
+  \tilde{z}^{\ell,p}_k \leftarrow \tilde{z}^{\ell,p}_k + \gamma v_k,
+  \quad k \in \mathcal{I}^\ell,
+  \label{eq:suppress-inject}
+\end{equation}
+
+where $v_k=a_{\ell,k}^{\mathrm{tgt}}$ and $\gamma \in \mathbb{R}$.  
+We decode the modified feature vector
+into the residual space,
+
+\begin{equation}
+  \tilde{\mathbf{o}}^{\ell,p}
+    = \mathbf{W}_{\mathrm{dec}}^{(\ell)}\tilde{\mathbf{z}}^{\ell,p}
+      + \mathbf{b}_{\mathrm{dec}}^{(\ell)},
+  \label{eq:decode-multi}
+\end{equation}
+
+then replace the standard MLP output at that position.  We monitor the next-token
+probability
+
+\begin{equation}
+  \pi_t(\gamma)
+    = \bigl[\mathrm{softmax}(\mathrm{logits}_T)\bigr]_t.
+  \label{eq:pi-gamma}
+\end{equation}
+
+A successful component edit lowers the source token and raises the target token
+as $\gamma$ increases. The intersection of the two curves indicates a \textit{crossover}.
+
+\subsection{Operation, Operand, and Language Interventions}
+\label{subsec:multilingual-experiments}
+
+\paragraph{Operation edit.}
+We identify features using a source prompt that asks for the opposite of
+``small'' and a target prompt that asks for a synonym of ``small''.  We select
+features at the final token over $\mathcal{L}_{\mathrm{op}}$ and apply the edit
+to English, French, and Chinese antonym prompts.  If operation features are
+language neutral, the edit should move each language from an antonym toward a
+synonym.
+
+\paragraph{Operand edit.}
+We identify features using a source prompt that asks for the opposite of
+``small'' and a target prompt that asks for the opposite of ``hot''.  We select
+features at the operand divergence position over $\mathcal{L}_{\mathrm{oper}}$.
+If operand features are language neutral, the edit should move the answer from
+the antonym of \textit{small} toward the antonym of \textit{hot} in each
+language.
+
+\paragraph{Output-language edit.}
+We identify features from source and target prompts that ask the same antonym
+question in different languages.  We select features at the final token over
+$\mathcal{L}_{\mathrm{lang}}$ for EN$\to$ZH, ZH$\to$FR, and FR$\to$EN.  If
+language is a separable component, the edit should move probability into the target
+language while preserving the antonym relation.
+
+\subsection{Multilingual Intervention Outcomes}
+\label{subsec:multilingual-results}
+ 
+We use $K=15$ active features per layer and $\rho=0.5$.
+Token probabilities are resolved in context: the target token is taken from
+the prompt-continuation tokenisation rather than from the surface form in
+isolation, as quotation marks and non-Latin scripts alter segmentation
+(e.g.\ \textit{large} within an open quote ``large'' may receive a different token
+identifier than \textit{large} tokenised alone).
+
+% \textcolor{red}{TODO: add the proper swaps figures when CSD3 is up}
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.96\textwidth]{Pages/Figures/op_swap.pdf}
+  \caption{Operation edit across English, Chinese, and French.}
+  \label{fig:multilingual-op-swap}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.96\textwidth]{Pages/Figures/operand_swap.pdf}
+  \caption{Operand edit from \textit{small} to \textit{hot}.}
+  \label{fig:multilingual-operand-swap}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.96\textwidth]{Pages/Figures/lang_swap.pdf}
+  \caption{Language edit between English, Chinese, and French.}
+  \label{fig:multilingual-language-swap}
+\end{figure}
+
+\begin{table}[htbp!]
+  \centering
+  \small
+  \begin{tabular}{@{}llll@{}}
+    \toprule
+    Intervention & Case & Representative probability shift & Interpretation \\
+    \midrule
+    Operation & English & $P(\mathrm{big})$ from $0.68$ to $\approx 0$, $P(\mathrm{tiny})$ peaks at $0.35$ & partial crossover \\
+    Operation & Chinese & $P(\text{d\`{a}})$ from $0.99$ to $\approx 0$, $P(\text{w\=ei})$ peaks at $0.75$ & crossover \\
+    Operation & French  & $P(\textit{grand})$ from $0.43$ to $\approx 0$, $P(\textit{petit})$ peaks at $0.80$ & crossover \\
+    \midrule
+    Operand & English & $P(\mathrm{cold})$ from $2.1\!\times\!10^{-7}$ to $0.994$ & crossover \\
+    Operand & Chinese & $P(\text{l\v{e}ng})$ from $1.5\!\times\!10^{-7}$ to $0.986$ & crossover \\
+    Operand & French & $P(\textit{froid})$ from $1.5\!\times\!10^{-7}$ to $0.037$, target peak at $0.998$ & crossover \\
+    \midrule
+    Language & EN$\to$ZH & $P(\text{d\`{a}})$ from $2.3\!\times\!10^{-4}$ to $0.044$ & weak transfer \\
+    Language & ZH$\to$FR & $P(\textit{grand})$ from $2.1\!\times\!10^{-7}$ to $2.3\!\times\!10^{-7}$ & no transfer \\
+    Language & FR$\to$EN & $P(\textit{large})$ from $1.3\!\times\!10^{-5}$ to $9.5\!\times\!10^{-6}$ & no transfer \\
+    \bottomrule
+  \end{tabular}
+  \caption{Multilingual intervention outcomes in Qwen3-4B.}
+  \label{tab:multilingual-summary}
+\end{table}
+
+Figures~\ref{fig:multilingual-op-swap}--\ref{fig:multilingual-language-swap}, detailed in Table \ref{tab:multilingual-summary}, show that the operation intervention supports a shared semantic-operation component.  In
+all three languages, antonym probability falls when we suppress antonym features
+and inject synonym features, especially for Chinese and French prompts.  
+The weaker English target peak may be attributed to a broader output distribution.
+
+For the operand intervention, the English-derived \textit{small-to-hot} edit
+moves the answer toward the antonym of \textit{hot} in English, Chinese, and
+French. The operand concept therefore transfers across the
+three languages with little loss.
+
+The language intervention does not indicate a stable language component.  
+The ZH$\to$FR and FR$\to$EN edit produce no
+transfer, while the EN$\to$ZH edit raises the Chinese answer token by a small amount,
+ yet not enough to count as an output-language crossover.  
+ Thus, based on our experiment in Qwen3-4B, 
+the selected early-layer
+features do not isolate output language.
+
+% \clearpage
+\subsection{Attribution Graph Analysis}
+\label{subsec:attr-graph}
+
+To support systematic inspection of the computed circuits, we developed an
+interactive visualisation tool for attribution graphs, explorable at
+\url{https://mechinterp-viz-94c364.uniofcam.dev/}.
+Each graph stores active transcoder features as nodes and linearised influence
+weights as directed edges, arranged by layer and token position. Edge colour
+encodes influence sign and node size encodes influence magnitude.  Figure~\ref{fig:attr-graph-viz}
+shows the graph for \promptinline{calc:~36 + 59 =~}, where the dense mid-to-late
+layer region at the last token position corresponds to the lookup features
+identified above.
+
+\begin{figure}[ht!]
+  \centering
+  % \includegraphics[width=\textwidth]{Pages/Figures/add_attr_graph_no_edges.pdf}
+  % \vspace{0.4em}
+  \includegraphics[width=\textwidth]{Pages/Figures/add_attr_graph_all_edges.pdf}
+  \caption{Attribution graph for \promptinline{calc:~36 + 59 =~} at $N=0.75$, showing
+   attributed transcoder features at each layer 
+  and token position with influence edges between features. \textit{Subnode count} refers to 
+  features sharing the same layer and token positions grouped together for visual clarity.}
+  \label{fig:attr-graph-viz}
+\end{figure}
+
+% \section{Reproduction Findings}
+% \label{sec:repro-conclusions}
+
+% For addition, Qwen3-4B recovers the digit-pair organisation reported for
+% Claude~3.5 Haiku.  The model reads the operands as separate decimal residues,
+% then combines these residues at the delimiter through sum related
+% features.
+
+% For multilingual antonyms, we show that operation and operand
+% edits transfer across English, French, and Chinese.  This suggests that Qwen3-4B
+% uses features for the semantic relation and for the operand concept that do not
+% depend on one language.  However, for the output-language experiment, the same edit can
+% either suppress the original answer without moving probability to the target-language
+% answer, or not have any effect. 

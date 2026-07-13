@@ -1,0 +1,100 @@
+\chapter{Soft Prompting as a Residual-Stream Intervention}
+\label{sec:k_e}
+
+\paragraph{Continuous Prefix Parameterisation.}
+We use soft prompting as a control intervention experiment, to test whether a small 
+input-side perturbation can improve first-token arithmetic or judgement behaviour,
+ and whether that perturbation is interpretable relative to the task. 
+
+Let $x=(t_1,\ldots,t_T)$ be a tokenised prompt and let $E\in\mathbb{R}^{V\times d}$ 
+be the embedding matrix. A soft prompt learns $P\in\mathbb{R}^{k\times d}$ and 
+prepends it to the real token embeddings,
+\begin{equation}
+\bigl(P_1,\ldots,P_k,e_{t_1},\ldots,e_{t_T}\bigr)
+\in \mathbb{R}^{(k+T)\times d}.
+\label{eq:soft_prompt_seq}
+\end{equation}
+We prepend $k$ pad-token positions to the input and replace them with the rows of $P$
+at the embedding layer before the forward pass, so the prefix enters the residual
+stream while all base-model parameters remain frozen and only $P$ is updated during training.
+
+\paragraph{Training Objective.}
+
+The objective is cross-entropy on the first answer token at the final prompt position,
+\begin{equation}
+\mathcal{L}
+=
+-\frac{1}{B}\sum_{b=1}^{B}
+\log
+\frac{\exp f_{y_b}(x_b)}
+     {\sum_v \exp f_v(x_b)}.
+\label{eq:soft_prompt_loss}
+\end{equation}
+We train with AdamW ($\mathrm{lr}=10^{-3}$, weight decay $10^{-4}$), 
+cosine annealing, and unit-norm gradient clipping on a $90/10$ train--validation
+ split, retaining the lowest validation-loss checkpoint.
+
+\paragraph{Results.}
+
+We evaluate one prefix length, $k=10$, on three tasks. The residue-class task uses prompts of the form \promptinline{calc: \{a\}\%7=}, where the model must predict the single-digit remainder modulo~7. The balanced-parentheses and causal-direction tasks use binary yes/no prompts of the form \promptinline{Is \{seq\} a valid bracket string? Answer yes or no:} and \promptinline{Does \{A\} lead to \{B\}? Answer yes or no:}, and test whether the prefix can correct a response-format failure.
+
+\begin{table}[ht!]
+\centering
+\small
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+Task & Base acc.\ (\%) & Prefix acc.\ (\%) & $\Delta$ acc.\ (\%) & $\Delta\,\bar{p}(\mathrm{correct})$ \\
+\midrule
+Residue class        & 15.0 & 16.0 & $+1.0$  & $-0.011$ \\
+Balanced parentheses &  0.0 & 28.6 & $+28.6$ & $+0.078$ \\
+Causal direction     &  0.0 & 53.8 & $+53.8$ & $+0.236$ \\
+\bottomrule
+\end{tabular}
+\caption{Soft-prompt validation results for Qwen3-4B with frozen base weights and prefix length $k=10$.}
+\label{tab:sp_summary}
+\end{table}
+
+Table~\ref{tab:sp_summary} shows that for residue-class completion 
+the prefix does not improve performance, 
+as the mean probability of the correct 
+token decreases despite a negligible accuracy change. 
+This suggests that the model follows a leading-digit heuristic 
+that the prefix weakens without substituting a reliable 
+modular computation. For balanced parentheses and causal
+ direction, the baseline consistently predicts the token
+  \texttt{1}, so the primary failure is response format 
+  rather than task knowledge, and the prefix redirects 
+  probability mass toward yes/no tokens. We conclude that
+   a learned prefix can correct an output-format 
+   failure when the model already encodes the relevant
+   computation, but cannot introduce a computation that
+    is absent.
+
+\paragraph{Prefix Interpretability.}
+
+To test whether the learned correction corresponds to a recognisable direction, we
+probe the trained prefix in two ways, mirroring the residual-stream methodology of
+Chapter~\ref{sec:concept_geometry}. First, we compute the prefix-induced shift at
+each scanned layer, $\Delta_l^{\mathrm{pfx}} = \mathbb{E}[h_l(x^{\mathrm{pfx}})] -
+\mathbb{E}[h_l(x^{\mathrm{base}})]$, and compare it by cosine similarity against a
+task-specific steering vector built the same way as the concept deltas in
+Equation~\ref{eq:concept_delta}: the mean activation on correctly answered prompts
+minus the mean activation on incorrectly answered ones. Second, we project each of
+the $k=10$ learned prefix vectors onto the input embedding matrix and read off its
+nearest real vocabulary tokens by cosine similarity, testing whether any prefix
+position converges toward an interpretable token such as a digit or \texttt{yes}/\texttt{no}.
+
+The probe, however, fails to find interpretable content for the learned prefix vectors. The prefix-induced shift does not align with
+the correct-vs-incorrect steering direction at any layer more than a diffuse,
+low-magnitude correlation would predict, so the correction is not simply a rescaled
+copy of the direction that already separates correct from incorrect completions
+under the frozen model. The nearest-neighbour decoding is similarly uninformative, as
+no prefix position consistently lands on the target vocabulary (digits for the
+residue-class task, \texttt{yes}/\texttt{no} for the other two) or on any other
+single, semantically coherent token. The closest neighbours vary by task and are
+dominated by high-frequency subword fragments unrelated to the answer.
+ 
+Thus, rather than encoding an identifiable
+concept, the learned prefix behaves as a continuous correction whose magnitude
+tracks how far the baseline output distribution already sits from committing to a
+valid answer, which is the interpretation adopted in the abstract of this thesis.
