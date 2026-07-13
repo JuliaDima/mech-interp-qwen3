@@ -641,7 +641,6 @@ def _save_heatmap_grid(
             rows=rows_for_plot,
             acts_1d=acts_1d,
             examples=sweep_examples,
-            projections=projections,
             out_path=out_path,
             concept=concept,
             anchor_label=anchor_label,
@@ -665,7 +664,7 @@ def _save_heatmap_grid(
             continue
         acts = sweep_npz[f.key]
         grid = _bin_to_heatmap(acts, sweep_examples)
-        max_val = float(grid.max())
+        max_val = float(np.nanmax(grid)) if not np.all(np.isnan(grid)) else 0.0
         if max_val == 0:
             log.debug("Feature %s never fires in sweep — skipping from heatmap", f.key)
             continue
@@ -792,10 +791,23 @@ def main() -> None:
              "Default 10 = original position 9 (units digit of second operand) + 1 sink token.",
     )
     parser.add_argument("--out_dir", default=None)
+    parser.add_argument(
+        "--rank_by_mean_act", action="store_true",
+        help="Ignore feature scores in features_file; instead rank all features in the "
+             "same layers by |mean_pos - mean_neg| over the sweep and select --rank_top_k.",
+    )
+    parser.add_argument(
+        "--rank_by_cohens_d", action="store_true",
+        help="Rank features by standardised effect size s_f = |mu_pos - mu_neg| / "
+             "(sqrt(0.5*(var_pos + var_neg)) + eps) and select --rank_top_k.",
+    )
+    parser.add_argument("--rank_top_k", type=int, default=10,
+                        help="Number of features to select when --rank_by_mean_act or "
+                             "--rank_by_cohens_d is set.")
     args = parser.parse_args()
 
     feature_names = load_feature_names(args)
-    eval_only = not feature_names
+    eval_only = not feature_names and not args.rank_by_mean_act and not args.rank_by_cohens_d
 
     if not eval_only and args.sweep_dir is None:
         parser.error("--sweep_dir is required in modulation mode")
@@ -819,6 +831,45 @@ def main() -> None:
         args.model, transcoder_set, dtype=dtype, device=device
     )
     model.eval()
+
+    # --- differential-activation ranking: top-K by |mean_pos - mean_neg| across all sweep layers ---
+    if args.rank_by_mean_act:
+        from experiments.concept_localization.sweep_utils import apply_transcoder_all
+        residuals = np.load(args.sweep_dir / "sweep_residuals.npz")
+        pos_mask = residuals["pos_mask"].astype(bool)   # (N,)
+        all_layers = sorted(int(k[3:]) for k in residuals.files if k.startswith("H_L"))
+        log.info("rank_by_mean_act: all sweep layers %s", all_layers)
+        ranked: list[tuple[float, str]] = []
+        for layer in all_layers:
+            H = residuals[f"H_L{layer}"]                          # (N, d_model)
+            acts = apply_transcoder_all(model, layer, H)          # (N, n_features)
+            diff = np.abs(acts[pos_mask].mean(axis=0) - acts[~pos_mask].mean(axis=0))
+            for fid, d in enumerate(diff):
+                ranked.append((float(d), f"L{layer}_F{fid}"))
+        ranked.sort(key=lambda x: x[0], reverse=True)
+        feature_names = [name for _, name in ranked[:args.rank_top_k]]
+        log.info("Top %d features by differential activation: %s", args.rank_top_k, feature_names)
+
+    # --- Cohen's-d ranking: top-K by |mu_pos - mu_neg| / pooled_std ---
+    if args.rank_by_cohens_d:
+        from experiments.concept_localization.sweep_utils import apply_transcoder_all
+        residuals = np.load(args.sweep_dir / "sweep_residuals.npz")
+        pos_mask = residuals["pos_mask"].astype(bool)
+        all_layers = sorted(int(k[3:]) for k in residuals.files if k.startswith("H_L"))
+        log.info("rank_by_cohens_d: all sweep layers %s", all_layers)
+        ranked: list[tuple[float, str]] = []
+        for layer in all_layers:
+            H = residuals[f"H_L{layer}"]
+            acts = apply_transcoder_all(model, layer, H)
+            pos_acts = acts[pos_mask]
+            neg_acts = acts[~pos_mask]
+            pooled_std = np.sqrt(0.5 * (pos_acts.var(axis=0) + neg_acts.var(axis=0))) + 1e-8
+            score = np.abs((pos_acts.mean(axis=0) - neg_acts.mean(axis=0)) / pooled_std)
+            for fid, s in enumerate(score):
+                ranked.append((float(s), f"L{layer}_F{fid}"))
+        ranked.sort(key=lambda x: x[0], reverse=True)
+        feature_names = [name for _, name in ranked[:args.rank_top_k]]
+        log.info("Top %d features by Cohen's d: %s", args.rank_top_k, feature_names)
 
     # --- eval-only mode ---
     if eval_only:

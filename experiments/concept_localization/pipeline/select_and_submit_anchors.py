@@ -69,7 +69,7 @@ def main() -> None:
                         help="Single template for per-anchor jobs")
     parser.add_argument("--n", type=int, default=100,
                         help="Pairs per template for run_concept and null")
-    parser.add_argument("--top_k", type=int, default=15,
+    parser.add_argument("--top_k", type=int, default=30,
                         help="Top-k features for directional projection")
     parser.add_argument("--causal_pairs", type=int, default=50)
     parser.add_argument("--null_k", type=int, default=20)

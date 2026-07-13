@@ -274,7 +274,7 @@ def main() -> None:
     parser.add_argument("--transcoder_set", default=None)
     parser.add_argument("--dtype", default="bfloat16")
     parser.add_argument("--n", type=int, default=100, help="Pairs per template")
-    parser.add_argument("--top_k", type=int, default=15, help="Top-k features per layer")
+    parser.add_argument("--top_k", type=int, default=30, help="Top-k features per layer")
     parser.add_argument(
         "--out_dir",
         default=None,

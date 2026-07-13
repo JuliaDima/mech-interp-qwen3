@@ -45,7 +45,6 @@ logging.basicConfig(
 )
 log = logging.getLogger("run_anchor_pipeline")
 
-_N_LAYERS = 36
 _MODEL = default_model()
 _TRANSCODER_SET = default_transcoder_set()
 
@@ -90,7 +89,7 @@ def main() -> None:
                         help="Single template for all per-anchor analyses")
     parser.add_argument("--n", type=int, default=100,
                         help="Pairs per template for run_concept and null")
-    parser.add_argument("--top_k", type=int, default=15,
+    parser.add_argument("--top_k", type=int, default=30,
                         help="Top-k features for directional projection in run_concept")
     parser.add_argument("--causal_pairs", type=int, default=50,
                         help="Max pairs for causal patching analysis")
@@ -128,6 +127,7 @@ def main() -> None:
     # Load model once — reused across all stages that need it.
     log.info("=== Loading model (once) ===")
     model = _load_model(args.model, args.transcoder_set, args.dtype, compile=args.compile)
+    n_layers = model.cfg.n_layers
 
     # ── Stage 1: run_concept ──────────────────────────────────────────────
     log.info("=== Stage 1: run_concept ===")
@@ -201,7 +201,7 @@ def main() -> None:
 
     sweep_dir = out_dir / "sweep"
     sweep_dir.mkdir(parents=True, exist_ok=True)
-    target_layers = list(range(_N_LAYERS))
+    target_layers = list(range(n_layers))
 
     pairs = _load_concept(args.concept, args.n, 42)
     import random
@@ -253,7 +253,7 @@ def main() -> None:
         top_k=args.top_k,
         seed=42,
         dtype=args.dtype,
-        rank_by="score",
+        rank_by="dz",
         display_n_pairs=None,
         no_attr_filter=True,
         attr_min_survival=0.05,

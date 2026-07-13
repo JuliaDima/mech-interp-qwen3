@@ -37,31 +37,6 @@ if str(_REPO_ROOT) not in sys.path:
 import experiments.plot_style as ps
 
 
-def load_matrix_csv(path: str) -> np.ndarray:
-    """Load a 10x10 CSV as internal grid X[a,b].
-
-    The project CSV convention is rows b=0..9 and columns a=0..9, often
-    with labels like an empty top-left cell, a=0..a=9 columns, and b=0..b=9
-    rows.  Fourier code below uses axis 0 for a and axis 1 for b, matching
-    the sweep/all_feature_grid convention, so CSV values are transposed here.
-    """
-    # Plain numeric CSV: rows are b and columns are a.
-    try:
-        raw = pd.read_csv(path, header=None).values.astype(float)
-        if raw.shape == (10, 10):
-            return np.nan_to_num(raw.T, nan=0.0, posinf=0.0, neginf=0.0)
-    except Exception:
-        pass
-
-    # Labeled CSV: first column is row labels b=..., columns are a=... .
-    df = pd.read_csv(path, index_col=0)
-    raw = df.values.astype(float)
-
-    if raw.shape != (10, 10):
-        raise ValueError(f"Expected a 10x10 matrix, got shape {raw.shape}")
-
-    return np.nan_to_num(raw.T, nan=0.0, posinf=0.0, neginf=0.0)
-
 
 def signed_freq(k: int, N: int) -> int:
     """Convert FFT index to signed frequency."""
@@ -1026,22 +1001,6 @@ def write_latex_pdf_multi(
     print(f"Saved multi-feature PDF to: {out_path}")
 
 
-def save_modes_csv(modes: list[dict], path: str, N: int = 10) -> None:
-    rows = []
-    for m in modes:
-        rows.append({
-            "amplitude": m["amp"],
-            "u": m["u"],
-            "v": m["v"],
-            "phase": m["phase"],
-            "type": classify_mode(m["u"], m["v"], N=N),
-            "formula_term": (
-                f"{m['amp']:.6f}*cos(2π({m['u']}a + {m['v']}b)/{N} + {m['phase']:.6f})"
-            ),
-        })
-    pd.DataFrame(rows).to_csv(path, index=False)
-    print(f"Saved modes CSV to: {path}")
-
 
 def _parse_feat_key(key: str) -> tuple[int, int]:
     """Parse 'L13_F107956' → (layer=13, feat_id=107956)."""
@@ -1074,7 +1033,6 @@ def load_from_npz_dir(npz_dir: Path, layer: int, feat_id: int) -> np.ndarray:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("csv", nargs="?", default=None, help="Input 10x10 matrix CSV.")
     parser.add_argument("--feat_key", default=None,
                         help="Feature key like L13_F107956; requires --npz_dir")
     parser.add_argument("--npz_dir", default=None, type=Path,
@@ -1083,10 +1041,7 @@ def main():
     parser.add_argument("--fourier_r2_target", type=float, default=0.95,
                         help="Minimum R² for Fourier approximation; K is increased until reached.")
     parser.add_argument("--out", default=None, help="Output plot path.")
-    parser.add_argument("--approx-csv", default=None, help="Optional CSV path for reconstructed Fourier approximation.")
-    parser.add_argument("--modes-csv", default=None, help="Optional CSV path for top Fourier modes.")
     parser.add_argument("--title", default=None, help="Plot title.")
-    parser.add_argument("--cmap", default="Reds", help="Matplotlib colormap for matrix plots.")
     parser.add_argument("--no-mean-subtract", action="store_true", help="Do not subtract the mean before FFT.")
     # scan mode
     parser.add_argument("--scan_residuals", default=None, type=Path,
@@ -1156,31 +1111,8 @@ def main():
                         k_used=k_used, r2=r2_val)
         return
 
-    # ── Single CSV mode ───────────────────────────────────────────────────────
-    if not args.csv:
-        parser.error("Provide a CSV file, --feat_key + --npz_dir, or --scan_residuals")
-
-    X = load_matrix_csv(args.csv)
-    k_used, r2_val, modes, mu, C, Xhat = find_min_k(
-        X, r2_target=args.fourier_r2_target, k_max=args.K, subtract_mean=subtract_mean)
-    N = X.shape[0]
-    print(f"K={k_used}, R²={r2_val:.3f}")
-    print_report(mu, modes, C=C)
-
-    if args.approx_csv:
-        pd.DataFrame(
-            Xhat.T,
-            index=[f"b={i}" for i in range(N)],
-            columns=[f"a={i}" for i in range(N)],
-        ).to_csv(args.approx_csv)
-        print(f"Saved Fourier approximation CSV to: {args.approx_csv}")
-
-    if args.modes_csv:
-        save_modes_csv(modes, args.modes_csv, N=N)
-
-    out_path = args.out or (str(Path(args.csv).with_suffix("")) + "_fourier.pdf")
-    title = args.title or f"Fourier analysis --- {Path(args.csv).name}"
-    write_latex_pdf(X, Xhat, C, modes, mu, out_path, title, k_used=k_used, r2=r2_val)
+    if not args.feat_key and not args.scan_residuals:
+        parser.error("Provide --feat_key + --npz_dir or --scan_residuals")
 
 
 if __name__ == "__main__":

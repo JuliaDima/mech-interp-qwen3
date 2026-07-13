@@ -220,10 +220,7 @@ def main() -> None:
     args = parser.parse_args()
     resolve_model_args(args)
 
-    if args.layers == "all":
-        target_layers = list(range(36))
-    else:
-        target_layers = [int(x.strip()) for x in args.layers.split(",")]
+    _layers_arg = args.layers
     out_dir = (
         Path(args.out_dir) if args.out_dir else Path(f"runs/concept_localization/{args.concept}")
     )
@@ -244,6 +241,11 @@ def main() -> None:
         args.model, transcoder_set, dtype=dtype, device=device
     )
     model.eval()
+    n_layers = model.model.config.num_hidden_layers
+    if _layers_arg == "all":
+        target_layers = list(range(n_layers))
+    else:
+        target_layers = [int(x.strip()) for x in _layers_arg.split(",")]
 
     log.info("Loading dataset for %s (%d pairs/template)", args.concept, args.n)
     pairs = _load_concept(args.concept, args.n, args.seed)
