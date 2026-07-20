@@ -25,6 +25,7 @@ Registered concepts
     geometric_series        convergent vs divergent geometric series
     momentum_conservation   momentum conserved vs violated
     perfect_square          perfect square vs non-perfect square
+    prime                   3-digit prime vs non-prime
     syllogism               valid vs invalid syllogism
     triangle_inequality     valid vs invalid triangle side lengths
     wave_interference       constructive vs destructive interference
@@ -136,6 +137,10 @@ def _load_concept(name: str, n_per_template: int, seed: int):
         from experiments.concept_localization.concept_datasets.perfect_square_dataset import generate_perfect_square_pairs
 
         return generate_perfect_square_pairs(n_per_template, seed=seed)
+    if name == "prime":
+        from experiments.concept_localization.concept_datasets.prime_dataset import generate_prime_pairs
+
+        return generate_prime_pairs(n_per_template, seed=seed)
     if name == "syllogism":
         from experiments.concept_localization.concept_datasets.syllogism_dataset import generate_syllogism_pairs
 
@@ -166,6 +171,7 @@ CONCEPTS = [
     "geometric_series",
     "momentum_conservation",
     "perfect_square",
+    "prime",
     "syllogism",
     "triangle_inequality",
     "wave_interference",
@@ -176,6 +182,7 @@ SYMBOLIC_SUBSET = [
     "residue_class",
     "gcd",
     "perfect_square",
+    "prime",
     "decimal_termination",
     "dot_product_sign",
     "triangle_inequality",

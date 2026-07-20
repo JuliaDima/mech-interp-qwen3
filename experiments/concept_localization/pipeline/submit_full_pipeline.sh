@@ -18,10 +18,10 @@
 #
 # Usage
 # -----
-#   bash scripts/submit_full_pipeline.sh                    # all concepts
-#   bash scripts/submit_full_pipeline.sh carry              # carry only
-#   bash scripts/submit_full_pipeline.sh carry gcd          # specific concepts
-#   bash scripts/submit_full_pipeline.sh --dry-run carry    # preview for carry
+#   bash experiments/concept_localization/pipeline/submit_full_pipeline.sh                    # all concepts
+#   bash experiments/concept_localization/pipeline/submit_full_pipeline.sh carry              # carry only
+#   bash experiments/concept_localization/pipeline/submit_full_pipeline.sh carry gcd          # specific concepts
+#   bash experiments/concept_localization/pipeline/submit_full_pipeline.sh --dry-run carry    # preview for carry
 #
 # Optional env overrides
 # ----------------------
@@ -55,6 +55,7 @@ ALL_CONCEPTS=(
     syllogism
     triangle_inequality
     wave_interference
+    prime
 )
 
 # ── Defaults (override via env) ─────────────────────────────────────────────

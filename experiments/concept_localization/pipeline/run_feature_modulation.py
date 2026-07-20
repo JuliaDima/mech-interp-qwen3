@@ -30,6 +30,7 @@ import argparse
 import json
 import logging
 import pickle
+import random
 import re
 import sys
 from dataclasses import asdict, dataclass
@@ -435,6 +436,108 @@ def diff_metrics(
 
 
 
+@torch.no_grad()
+def dump_top_tokens_compare(
+    model,
+    concept: str,
+    anchor_label: str,
+    pairs: list,
+    pair_indices: list[int],
+    configs: dict[str, "dict[int, list[int]] | None"],
+    top_k: int,
+    out_path: Path,
+) -> None:
+    """Save top-K token distributions at the answer position under every named
+    config (feature_map=None means the plain baseline model), for both
+    prompt_pos and prompt_neg of each given pair index. One combined JSONL
+    record per pair, for later side-by-side comparison of what ablation does
+    to the model's answer distribution (not just its accuracy)."""
+    tok = model.tokenizer
+    records = []
+    for idx in pair_indices:
+        pair = pairs[idx]
+        rec = {"concept": concept, "anchor": anchor_label, "pair_idx": idx}
+        for side, prompt, target in (
+            ("pos", pair.prompt_pos, pair.predict_pos),
+            ("neg", pair.prompt_neg, pair.predict_neg),
+        ):
+            prompt_ids = tok(prompt, add_special_tokens=False).input_ids
+            tokens = tokenize_qwen_input(prompt_ids, tok, model.cfg.device).unsqueeze(0)
+            rec[f"id_{side}"] = f"{concept}_{anchor_label}_{idx}_{side}"
+            rec[f"prompt_{side}"] = prompt
+            rec[f"target_{side}"] = target
+            for cfg_name, feature_map in configs.items():
+                logits = (
+                    model(tokens) if feature_map is None
+                    else ablate_feature_directions(model, tokens, feature_map, alpha=0.0)
+                )
+                probs = torch.softmax(logits[0, -1], dim=-1)
+                top = probs.topk(top_k)
+                rec[f"top{top_k}_{cfg_name}_{side}"] = [
+                    [tok.decode([i.item()]), round(v.item(), 6)]
+                    for v, i in zip(top.values, top.indices)
+                ]
+        records.append(rec)
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with out_path.open("w") as f:
+        for r in records:
+            f.write(json.dumps(r) + "\n")
+    log.info(
+        "Dumped top-%d tokens (%d configs: %s) for %d pairs -> %s",
+        top_k, len(configs), list(configs), len(records), out_path,
+    )
+
+
+@torch.no_grad()
+def dump_top_tokens_dataset(
+    model,
+    concept: str,
+    anchor_label: str,
+    pairs: list,
+    n_samples: int,
+    top_k: int,
+    seed: int,
+    out_path: Path,
+) -> None:
+    """Sample n_samples random pairs; save the baseline (no intervention) top-K token
+    distribution at the answer position for both prompt_pos and prompt_neg.
+
+    One JSON record per pair (JSONL), for later qualitative LLM judging of answer
+    capability when the ablation accuracy delta was too small to be informative.
+    """
+    rng = random.Random(seed)
+    sample = rng.sample(pairs, min(n_samples, len(pairs)))
+
+    records = []
+    for idx, pair in enumerate(sample):
+        rec = {"concept": concept, "anchor": anchor_label, "pair_idx": idx}
+        for side, prompt, target in (
+            ("pos", pair.prompt_pos, pair.predict_pos),
+            ("neg", pair.prompt_neg, pair.predict_neg),
+        ):
+            prompt_ids = model.tokenizer(prompt, add_special_tokens=False).input_ids
+            tokens = tokenize_qwen_input(prompt_ids, model.tokenizer, model.cfg.device).unsqueeze(0)
+            logits = model(tokens)
+            probs = torch.softmax(logits[0, -1], dim=-1)
+            top = probs.topk(top_k)
+            top_tokens = [
+                [model.tokenizer.decode([i.item()]), round(v.item(), 6)]
+                for v, i in zip(top.values, top.indices)
+            ]
+            rec[f"id_{side}"] = f"{concept}_{anchor_label}_{idx}_{side}"
+            rec[f"prompt_{side}"] = prompt
+            rec[f"target_{side}"] = target
+            rec[f"top{top_k}_{side}"] = top_tokens
+        records.append(rec)
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with out_path.open("w") as f:
+        for r in records:
+            f.write(json.dumps(r) + "\n")
+    log.info("Dumped top-%d tokens for %d random pairs -> %s", top_k, len(records), out_path)
+
+
 # ---------------------------------------------------------------------------
 # reporting
 # ---------------------------------------------------------------------------
@@ -804,6 +907,19 @@ def main() -> None:
     parser.add_argument("--rank_top_k", type=int, default=10,
                         help="Number of features to select when --rank_by_mean_act or "
                              "--rank_by_cohens_d is set.")
+    parser.add_argument(
+        "--dump_top_tokens_if_flat", action="store_true",
+        help="If the joint ablation's 'all' accuracy delta is smaller than --flat_threshold "
+             "(accuracy metric uninformative), sample --dump_n random pairs and save the "
+             "baseline top-K token distribution (both pos/neg) to a JSONL dataset for later "
+             "qualitative LLM judging of answer capability.",
+    )
+    parser.add_argument("--flat_threshold", type=float, default=0.01,
+                        help="abs(delta_acc) below this counts as 'no change' for --dump_top_tokens_if_flat.")
+    parser.add_argument("--dump_n", type=int, default=30, help="Number of random pairs to sample.")
+    parser.add_argument("--dump_top_k", type=int, default=100, help="Top-K tokens to save per prompt.")
+    parser.add_argument("--dump_out", type=Path, default=None,
+                        help="Output JSONL path (default: <out_dir>/no_change_top_tokens.jsonl)")
     args = parser.parse_args()
 
     feature_names = load_feature_names(args)
@@ -1084,6 +1200,20 @@ def main() -> None:
     out_path = out_dir / "feature_modulation.json"
     out_path.write_text(json.dumps(results, indent=2))
     log.info("Saved → %s", out_path)
+
+    if args.joint and args.dump_top_tokens_if_flat:
+        delta_acc = rows[0]["metrics"]["change"]["all"]["accuracy"]
+        if abs(delta_acc) < args.flat_threshold:
+            anchor_label = args.sweep_dir.parent.name
+            dump_path = args.dump_out or (out_dir / "no_change_top_tokens.jsonl")
+            log.info(
+                "delta_acc=%.4f < flat_threshold=%.4f — dumping top-%d tokens for %d random pairs",
+                delta_acc, args.flat_threshold, args.dump_top_k, args.dump_n,
+            )
+            dump_top_tokens_dataset(
+                model, args.concept, anchor_label, all_pairs,
+                n_samples=args.dump_n, top_k=args.dump_top_k, seed=args.seed, out_path=dump_path,
+            )
 
 
     # Load scores (dec_cos, enc_cos) from edec_features.json if the features came from one,
