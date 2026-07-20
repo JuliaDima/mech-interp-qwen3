@@ -22,7 +22,6 @@ causal_direction) the script:
           concept.  Low max cosine (~0.3–0.5) indicates the vector lives in a
           region of embedding space not well-covered by any real token.
 
-Run on CPU — no GPU or full model load required.
 """
 
 from __future__ import annotations
@@ -55,11 +54,10 @@ _SHARD = Path(_SNAP) / "model-00001-of-00003.safetensors"
 _RUNS = _REPO / "runs" / "soft_prompt"
 _OUT = _RUNS / "figures"
 
-CONCEPTS = ["residue_class", "balanced_parentheses", "causal_direction"]
+CONCEPTS = ["residue_class", "balanced_parentheses"]
 LABELS = {
     "residue_class": "Residue class",
     "balanced_parentheses": "Balanced parentheses",
-    "causal_direction": "Causal direction",
 }
 TOP_K = 5  # nearest tokens to display per prefix position
 
@@ -116,6 +114,7 @@ def fig_nn_heatmap(W_E_n: np.ndarray, tokenizer) -> plt.Figure:
 
         vmax = top_cos.max()
         im = ax.imshow(top_cos, cmap=ps.CMAP_SEQ, vmin=0.0, vmax=vmax, aspect="auto")
+        ax.grid(False)
 
         for i in range(k):
             for j in range(TOP_K):
@@ -135,7 +134,8 @@ def fig_nn_heatmap(W_E_n: np.ndarray, tokenizer) -> plt.Figure:
         ax.set_xlabel("Nearest token rank", fontsize=9)
         ax.set_title(LABELS[concept], fontsize=11, fontweight="bold", pad=6)
 
-        plt.colorbar(im, ax=ax, fraction=0.046, pad=0.03)
+        cbar = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.03)
+        cbar.outline.set_visible(False)
 
     axes[0].set_ylabel("Prefix position", fontsize=9)
     fig.suptitle(
@@ -203,18 +203,16 @@ def main():
 
     print("Figure 1: nearest-token heatmap…")
     f1 = fig_nn_heatmap(W_E_n, tok)
-    for ext in ("pdf", "png"):
-        p = _OUT / f"prefix_interpretability_nn.{ext}"
-        f1.savefig(p, bbox_inches="tight", dpi=150)
-        print(f"  → {p}")
+    p = _OUT / "prefix_interpretability_nn.pdf"
+    f1.savefig(p, bbox_inches="tight", dpi=150)
+    print(f"  → {p}")
     plt.close(f1)
 
     print("Figure 2: max cosine per position…")
     f2 = fig_maxcos(W_E_n)
-    for ext in ("pdf", "png"):
-        p = _OUT / f"prefix_interpretability_maxcos.{ext}"
-        f2.savefig(p, bbox_inches="tight", dpi=150)
-        print(f"  → {p}")
+    p = _OUT / "prefix_interpretability_maxcos.pdf"
+    f2.savefig(p, bbox_inches="tight", dpi=150)
+    print(f"  → {p}")
     plt.close(f2)
 
     print("Done.")
