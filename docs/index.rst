@@ -26,6 +26,13 @@ This project provides an independent mechanistic interpretability pipeline speci
    robustness_experiment
    knowledge_editing
 
+.. toctree::
+   :maxdepth: 1
+   :caption: Visualization:
+
+   attribution_graph
+   concept_representation
+
 Features
 --------
 

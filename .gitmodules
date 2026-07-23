@@ -1,3 +1,0 @@
-[submodule "viz"]
-	path = viz
-	url = git@gitlab.developers.cam.ac.uk:eid23/mechinterp-viz.git

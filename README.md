@@ -1,19 +1,19 @@
-# Mechanistic Circuits and Concept Representation in Qwen3-4B
+# Concept Representation and Circuit Discovery in Qwen3-4B
 
-[![pipeline status](https://gitlab.developers.cam.ac.uk/phy/data-intensive-science-mphil/assessments/projects/eid23/badges/main/pipeline.svg)](https://gitlab.developers.cam.ac.uk/phy/data-intensive-science-mphil/assessments/projects/eid23/-/pipelines)
+[![CI](https://github.com/JuliaDima/mechinterp-Qwen3-4B/actions/workflows/ci.yml/badge.svg)](https://github.com/JuliaDima/mechinterp-Qwen3-4B/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
 ## Description
 
-This project is the submission of the MPhil Data Intensive Science research project at the University of Cambridge. The project report can be found under [Report](Report/thesis.pdf). The executive summary can be found under [Executive Summary](Report/ExecutiveSummary.pdf).
+This is a mechanistic interpretability pipeline for the instruction-tuned open-source model **Qwen3-4B**, built around a contrastive residual-stream method for studying **concept representation**: how a binary concept — carry detection, GCD divisibility, residue-class membership, causal direction, and others — is encoded across layers and token positions as the model reads a prompt.
 
-The thesis first reproduces two mechanistic interpretability experiments from [*On the Biology of a Large Language Model*](https://transformer-circuits.pub/2025/attribution-graphs/biology.html) (Lindsey et al., 2025) in the instruction-tuned open-source model **Qwen3-4B**. The first reproduction studies two-digit addition through attribution graphs, operand-grid feature scans, and teacher-forced accuracy analysis. The second tests multilingual antonym circuits by intervening on operation, operand, and output-language features across English, Chinese, and French.
+For each concept, matched positive/negative prompt pairs isolate a single computational predicate. The pipeline computes layerwise residual-stream delta trajectories between matched pairs, compares them against a permutation-null baseline to establish where the signal is statistically distinguishable from chance, validates candidate anchor positions by activation patching, and projects the resulting directions onto sparse transcoder features to identify which specific features carry the concept and how consistent that direction is across depth.
 
-The project then builds on these reproductions with a contrastive residual-stream method for studying concept representation, using matched prompt pairs defining a target computational predicate, such as carry detection, GCD divisibility, or residue-class membership. The pipeline computes layerwise delta trajectories, compares them with a permutation null baseline, validates anchors by activation patching, and projects the resulting directions through sparse transcoder features. 
+**Attribution graph generation is also part of the pipeline**: gradient-based circuit discovery through sparse transcoder features, following the *Attribution Graphs* methodology from [*On the Biology of a Large Language Model*](https://transformer-circuits.pub/2025/attribution-graphs/biology.html) (Lindsey et al., 2025). It is used for two case studies included in this repository — two-digit addition (attribution graphs, operand-grid feature scans, teacher-forced accuracy analysis) and multilingual antonym circuits (intervening on operation, operand, and output-language features across English, Chinese, and French) — and is available as a general-purpose tool for any prompt.
 
-The soft-prompting study tests whether learned continuous prefixes can modify model behaviour and whether those learned directions are interpretable relative to the residual-stream geometry.
+A soft-prompting module additionally tests whether learned continuous prefixes can modify model behaviour, and whether the resulting directions are interpretable relative to the residual-stream geometry uncovered by concept localization.
 
-**Visualising concept representations and attributions graphs**: [https://mechinterp-viz-94c364.uniofcam.dev/](https://mechinterp-viz-94c364.uniofcam.dev/)
+**Visualising concept representations and attribution graphs**: [https://mechinterp-viz-94c364.uniofcam.dev/](https://mechinterp-viz-94c364.uniofcam.dev/)
 
 <p align="center">
   <img src="docs/_static/images/gcd_concept_emergence.gif" alt="GCD concept emergence animation">
@@ -29,22 +29,20 @@ The visualiser is designed for inspecting how a contrastive predicate emerges as
 - **Inter-layer direction similarity**: a layer-by-layer cosine-similarity heatmap of the delta directions, showing how quickly the anchor direction stabilises across depth.
 - **Feature detail**: clicking a feature in the constellation opens its own activation-profile plot (mean positive/negative activation per modular input, or a 2D activation map).
 
-The visualised also provides an interactive view of the attribution graph for an input prompt. [Here](https://mechinterp-viz-94c364.uniofcam.dev/?conceptRun=%2Fdata%2Fcarry_T0.json) is an example for the addition dataset.
+The visualiser also provides an interactive view of the attribution graph for an input prompt. [Here](https://mechinterp-viz-94c364.uniofcam.dev/?conceptRun=%2Fdata%2Fcarry_T0.json) is an example for the addition dataset.
 
 
 ## Table of Contents
 
 - [Data Availability](#data-availability)
-- [Visualisation](#visualisation)
 - [Installation](#installation)
 - [Usage](#usage)
-- [Project Structure](#project-structure)
-- [Cluster Usage](#cluster-usage)
+  - [Concept Localisation](#concept-localisation)
+  - [Attribution Graphs](#addition-attribution-graphs)
+  - [Multilingual Antonym Interventions](#multilingual-antonym-interventions)
+  - [Batch Attribution Graph Jobs](#batch-attribution-graph-jobs)
 - [Model and Transcoders](#model-and-transcoders)
-- [Support](#support)
 - [License](#license)
-- [Project Status](#project-status)
-- [Note on the Use of AI Tools](#note-on-the-use-of-ai-tools)
 - [Authors and Acknowledgment](#authors-and-acknowledgment)
 
 ---
@@ -74,8 +72,8 @@ Pre-computed experiment outputs (residual-stream delta arrays, transcoder projec
 1. **Clone the repository:**
 
     ```bash
-    git clone https://gitlab.developers.cam.ac.uk/phy/data-intensive-science-mphil/assessments/projects/eid23
-    cd eid23
+    git clone https://github.com/JuliaDima/mechinterp-Qwen3-4B.git
+    cd mechinterp-Qwen3-4B
     ```
 
 2. **Create and activate the environment:**
@@ -102,40 +100,21 @@ Pre-computed experiment outputs (residual-stream delta arrays, transcoder projec
 
 ## Usage
 
-### Reproducibility Experiments
-
-The thesis begins with two reproductions of the circuit-tracing methodology from Lindsey et al. in Qwen3-4B.
-
-#### Addition attribution graphs
-
-Builds node-ablation attribution graphs and recovers lookup-like addition circuits.
-
-```bash
-miq attribute -t mwhanna/qwen3-4b-transcoders -p "calc: 36+59=" \
-    --slug addition_36_59 --graph_file_dir graphs/
-```
-
-#### Multilingual antonym interventions
-
-Tests whether operation, operand, and output-language components can be independently suppressed and injected across English, Chinese, and French. The experiment code is under `experiments/multilingual_circuits/`.
-
----
-
 ### Concept Localisation
 
 Finds where and how a contrastively specified concept is encoded across layers and token positions, using residual-stream deltas projected onto transcoder features.
 
-**Main thesis concepts**:
+**Bundled concepts**:
 `carry`, `gcd`, `residue_class`
 
-Additional dataset definitions are included for arithmetic, logic, physics, and language concepts, and can be 
-found [here](https://gitlab.developers.cam.ac.uk/phy/data-intensive-science-mphil/assessments/projects/eid23/-/tree/main/experiments/concept_localization/concept_datasets?ref_type=heads).
+Additional dataset definitions are included for arithmetic, logic, physics, and language concepts, and can be
+found [here](https://github.com/JuliaDima/mechinterp-Qwen3-4B/tree/main/experiments/concept_localization/concept_datasets).
 
 #### Run a single concept
 
 ```bash
 # Full pipeline (GPU required — submit via Slurm)
-sbatch scripts/sbatch_run.sh python -m experiments.concept_localization.pipeline.run_concept \
+python -m experiments.concept_localization.pipeline.run_concept \
     --concept carry
 ```
 
@@ -163,92 +142,24 @@ Committed visualiser exports are available as `data/carry_T0.concept.json`, `dat
 
 ---
 
+### Addition Attribution Graphs
+
+Builds node-ablation attribution graphs and recovers lookup-like addition circuits.
+
+```bash
+miq attribute -t mwhanna/qwen3-4b-transcoders -p "calc: 36+59=" \
+    --slug addition_36_59 --graph_file_dir graphs/
+```
+
+### Multilingual Antonym Interventions
+
+Tests whether operation, operand, and output-language components can be independently suppressed and injected across English, Chinese, and French. The experiment code is under `experiments/multilingual_circuits/`.
+
 ### Batch Attribution Graph Jobs
 
 ```bash
 python scripts/submit_concept_attribution_graphs.py
 ```
-
----
-
-### Soft Prompt / Knowledge Editing
-
-Trains a learned $k=10$ token prefix on frozen base weights and evaluates whether input-space perturbations align with concept directions identified in the localisation step.
-
-```bash
-python experiments/soft_prompt/run.py
-```
-
-Results are saved as a summary table and per-task checkpoint under `runs/soft_prompt/`.
-
----
-
-### Compile the Report
-
-The thesis is written in LaTeX and compiled from `Report/`:
-
-```bash
-cd Report
-make all
-```
-
-The executive summary compiles as a standalone document from `Report/`:
-
-```bash
-cd Report
-pdflatex ExecutiveSummary && bibtex ExecutiveSummary && \
-pdflatex ExecutiveSummary && pdflatex ExecutiveSummary
-```
-
----
-
-## Project Structure
-
-```
-src/mechinterp_qwen3/            # core package (pip install -e .)
-  attribution_model.py           # AttributionModel: Qwen3-4B + transcoders
-  interventions.py               # feature ablation/injection hooks
-  transcoder/                    # SingleLayerTranscoder, CrossLayerTranscoder
-  probe/                         # linear probes on residual stream
-  utils/                         # hf_utils, model_utils, token_utils, config_utils
-
-experiments/
-  concept_localization/          # main experiment pipeline
-    concept_datasets/            # one dataset file per concept (17 concepts)
-    pipeline/                    # run_concept.py, delta_feature_projections.py
-    plots/                       # plot_emergence_per_anchor.py
-    concept_emergence_gif/       # model-based token-consumption GIF renderer
-  addition/                      # Anthropic reproduction (Fourier, operand plots)
-  multilingual_circuits/         # operation, operand, language interventions
-  soft_prompt/                   # knowledge editing via soft prompt optimisation
-
-scripts/
-  sbatch_run.sh                  # universal Slurm wrapper
-  submit_concept_attribution_graphs.py
-  render_gcd_readme_gif.py       # README GIF, captured from the live visualiser via Playwright
-
-Report/               # LaTeX report source
-  thesis.tex                     # main document
-  Pages/                         # chapter .tex files and figures
-  cam-thesis.cls                 # Cambridge thesis class
-
-data/                            # lightweight exports for README and visualiser
-docs/_static/images/             # README and documentation images
-runs/                            # all outputs (on RDS, not committed)
-config.yaml                      # project-wide defaults
-```
-
----
-
-## Cluster Usage
-
-All inference jobs require GPU and run via Slurm:
-
-```bash
-sbatch scripts/sbatch_run.sh python <command>
-```
-
-CPU-only jobs (plotting, export, report compilation) can run directly on the login node.
 
 ---
 
@@ -265,37 +176,6 @@ This project is licensed under the [MIT License](https://opensource.org/license/
 
 ---
 
-## Note on the Use of AI Tools
-
-[Claude Code](https://claude.ai/code) (Anthropic, claude-sonnet-4-6) was used as an AI coding assistant throughout this project. Its use is described below.
-
-#### Report writing and editing
-
-Claude Code was used to assist with drafting, restructuring, and proofreading sections of the LaTeX thesis report and the executive summary. This included suggesting alternative phrasings, trimming overlong sections, and checking mathematical notation for consistency. All scientific claims, results, and interpretations are the author's own.
-
-#### Code assistance
-
-Claude Code (Anthropic) and GitHub Copilot (OpenAI Codex) were used as coding assistants throughout the project, primarily for code style, boilerplate, and software engineering practice: docstrings, type annotations, repetitive utility functions, and minor debugging. The overall experiment design, analysis pipeline structure, result verification, and substantive implementation choices are the author's own.
-
-Claude Code was additionally used for LaTeX debugging (Unicode character declarations, `\middle` scoping, figure path resolution across compilation directories).
-
-#### Example interaction — LaTeX path fix
-
-**Prompt:** The `cam-thesis.cls` file hardcodes `Pages/Figures/CollegeShields/CUni.pdf` but compilation from a parent directory fails to resolve this path. How can I make the path auto-detect the working directory?
-
-**Claude Code suggestion:**
-```latex
-\IfFileExists{Pages/Figures/CollegeShields/CUni.pdf}%
-  {\def\cam@CUniPath{Pages/Figures/CollegeShields/CUni.pdf}}%
-  {\def\cam@CUniPath{Report/Pages/Figures/CollegeShields/CUni.pdf}}
-```
-
-**Modification used:** The suggestion was adopted directly and integrated into `cam-thesis.cls` alongside an equivalent block for `dis_logo.pdf`.
-
----
-
 ## Authors and Acknowledgment
 
-This project is implemented by [Elisabeta-Iulia (Julia) Dima](mailto:eid23@cam.ac.uk) at the University of Cambridge, supervised by Dr Miles Cranmer and Dr Alessandro Favero.
-
-June 2026
+Developed by [Elisabeta-Iulia (Julia) Dima](mailto:eid23@cam.ac.uk), with guidance from Dr Miles Cranmer and Dr Alessandro Favero during the project's early development at the University of Cambridge.
