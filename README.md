@@ -3,16 +3,14 @@
 <p align="center">
   <a href="https://github.com/JuliaDima/mechinterp-qwen3/actions/workflows/ci.yml"><img src="https://github.com/JuliaDima/mechinterp-qwen3/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License"></a>
-  <a href="https://mechinterp-viz-94c364.uniofcam.dev/"><img src="https://img.shields.io/badge/Visualiser-Live%20Demo-blueviolet" alt="Visualiser"></a>
+  <a href="https://mechinterp-viz-94c364.uniofcam.dev/"><img src="https://img.shields.io/badge/Visualiser-mechinterp--viz--94c364.uniofcam.dev-blueviolet" alt="Visualiser"></a>
 </p>
 
-## Description
-
-This is a mechanistic interpretability pipeline for the instruction-tuned open-source model **Qwen3-4B**, built around a contrastive residual-stream method for studying **concept representation**: how a binary concept — a contrastive predicate the model must resolve as it reads a prompt — is encoded across layers and token positions. The set of concepts covered is intentionally growing; see [Concept Localisation](#concept-localisation) below for where they're defined.
+This is a mechanistic interpretability project for the instruction-tuned open-source model **Qwen3-4B**, built around a contrastive residual-stream method for studying **concept representation**: how a binary concept — a contrastive predicate the model must resolve as it reads a prompt — is encoded across layers, tokens, and anchor positions. The set of concepts covered is intentionally growing; see [Concept Localisation](#concept-localisation) below for where they're defined.
 
 For each concept, matched positive/negative prompt pairs isolate a single computational predicate. The pipeline computes layerwise residual-stream delta trajectories between matched pairs, compares them against a permutation-null baseline to establish where the signal is statistically distinguishable from chance, validates candidate anchor positions by activation patching, and projects the resulting directions onto sparse transcoder features to identify which specific features carry the concept and how consistent that direction is across depth.
 
-**Visualising concept representations and attribution graphs**: [https://mechinterp-viz-94c364.uniofcam.dev/](https://mechinterp-viz-94c364.uniofcam.dev/)
+The concepts and attribution graphs can be explored at [https://mechinterp-viz-94c364.uniofcam.dev/](https://mechinterp-viz-94c364.uniofcam.dev/).
 
 <p align="center">
   <img src="docs/_static/images/gcd_concept_emergence.gif" alt="GCD concept emergence animation">
@@ -165,4 +163,4 @@ This project is licensed under the [MIT License](https://opensource.org/license/
 
 ## Authors and Acknowledgment
 
-Developed by [Elisabeta-Iulia (Julia) Dima](mailto:eid23@cam.ac.uk), with guidance from Dr Miles Cranmer and Dr Alessandro Favero during the project's development at the University of Cambridge.
+Developed by [Elisabeta-Iulia (Julia) Dima](mailto:eid23@cam.ac.uk), supervised by Dr Miles Cranmer and Dr Alessandro Favero at the Department of Applied Mathematics and Theoretical Physics, University of Cambridge.
