@@ -1,17 +1,16 @@
-# Concept Representation and Circuit Discovery in Qwen3-4B
+# Mechanistic Circuits and Concept Representation in Qwen3-4B
 
-[![CI](https://github.com/JuliaDima/mechinterp-Qwen3-4B/actions/workflows/ci.yml/badge.svg)](https://github.com/JuliaDima/mechinterp-Qwen3-4B/actions/workflows/ci.yml)
-[![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+<p align="center">
+  <a href="https://github.com/JuliaDima/mechinterp-qwen3/actions/workflows/ci.yml"><img src="https://github.com/JuliaDima/mechinterp-qwen3/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License"></a>
+  <a href="https://mechinterp-viz-94c364.uniofcam.dev/"><img src="https://img.shields.io/badge/Visualiser-Live%20Demo-blueviolet" alt="Visualiser"></a>
+</p>
 
 ## Description
 
-This is a mechanistic interpretability pipeline for the instruction-tuned open-source model **Qwen3-4B**, built around a contrastive residual-stream method for studying **concept representation**: how a binary concept — carry detection, GCD divisibility, residue-class membership, causal direction, and others — is encoded across layers and token positions as the model reads a prompt.
+This is a mechanistic interpretability pipeline for the instruction-tuned open-source model **Qwen3-4B**, built around a contrastive residual-stream method for studying **concept representation**: how a binary concept — a contrastive predicate the model must resolve as it reads a prompt — is encoded across layers and token positions. The set of concepts covered is intentionally growing; see [Concept Localisation](#concept-localisation) below for where they're defined.
 
 For each concept, matched positive/negative prompt pairs isolate a single computational predicate. The pipeline computes layerwise residual-stream delta trajectories between matched pairs, compares them against a permutation-null baseline to establish where the signal is statistically distinguishable from chance, validates candidate anchor positions by activation patching, and projects the resulting directions onto sparse transcoder features to identify which specific features carry the concept and how consistent that direction is across depth.
-
-**Attribution graph generation is also part of the pipeline**: gradient-based circuit discovery through sparse transcoder features, following the *Attribution Graphs* methodology from [*On the Biology of a Large Language Model*](https://transformer-circuits.pub/2025/attribution-graphs/biology.html) (Lindsey et al., 2025). It is used for two case studies included in this repository — two-digit addition (attribution graphs, operand-grid feature scans, teacher-forced accuracy analysis) and multilingual antonym circuits (intervening on operation, operand, and output-language features across English, Chinese, and French) — and is available as a general-purpose tool for any prompt.
-
-A soft-prompting module additionally tests whether learned continuous prefixes can modify model behaviour, and whether the resulting directions are interpretable relative to the residual-stream geometry uncovered by concept localization.
 
 **Visualising concept representations and attribution graphs**: [https://mechinterp-viz-94c364.uniofcam.dev/](https://mechinterp-viz-94c364.uniofcam.dev/)
 
@@ -29,8 +28,11 @@ The visualiser is designed for inspecting how a contrastive predicate emerges as
 - **Inter-layer direction similarity**: a layer-by-layer cosine-similarity heatmap of the delta directions, showing how quickly the anchor direction stabilises across depth.
 - **Feature detail**: clicking a feature in the constellation opens its own activation-profile plot (mean positive/negative activation per modular input, or a 2D activation map).
 
-The visualiser also provides an interactive view of the attribution graph for an input prompt. [Here](https://mechinterp-viz-94c364.uniofcam.dev/?conceptRun=%2Fdata%2Fcarry_T0.json) is an example for the addition dataset.
+### Other experiments
 
+**Attribution graph generation is also part of the pipeline (as a reproduction experiment)**: gradient-based circuit discovery through sparse transcoder features, following the *Attribution Graphs* methodology from [*On the Biology of a Large Language Model*](https://transformer-circuits.pub/2025/attribution-graphs/biology.html) (Lindsey et al., 2025). It is used for two case studies included in this repository — two-digit addition (attribution graphs, operand-grid feature scans, teacher-forced accuracy analysis) and multilingual antonym circuits (intervening on operation, operand, and output-language features across English, Chinese, and French) — and is available as a general-purpose tool for any prompt. 
+
+The visualiser also provides an interactive view of the attribution graph for an input prompt. [Here](https://mechinterp-viz-94c364.uniofcam.dev/?conceptRun=%2Fdata%2Fcarry_T0.json) is an example for the addition dataset.
 
 ## Table of Contents
 
@@ -47,18 +49,6 @@ The visualiser also provides an interactive view of the attribution graph for an
 
 ---
 
-## Data Availability
-
-Model weights and transcoders are loaded from Hugging Face Hub and cached on the HPC at:
-
-```
-/rds/user/eid23/hpc-work/p28/cache/hf/hub/
-```
-
-Pre-computed experiment outputs (residual-stream delta arrays, transcoder projections, attribution graphs) are stored on RDS and are **not committed** to this repository. Pre-exported JSON for the interactive visualiser is committed under `data/` for the three main concepts (`carry`, `gcd`, `residue_class`).
-
----
-
 ## Installation
 
 ### Requirements
@@ -72,8 +62,8 @@ Pre-computed experiment outputs (residual-stream delta arrays, transcoder projec
 1. **Clone the repository:**
 
     ```bash
-    git clone https://github.com/JuliaDima/mechinterp-Qwen3-4B.git
-    cd mechinterp-Qwen3-4B
+    git clone https://github.com/JuliaDima/mechinterp-qwen3.git
+    cd mechinterp-qwen3
     ```
 
 2. **Create and activate the environment:**
@@ -104,11 +94,8 @@ Pre-computed experiment outputs (residual-stream delta arrays, transcoder projec
 
 Finds where and how a contrastively specified concept is encoded across layers and token positions, using residual-stream deltas projected onto transcoder features.
 
-**Bundled concepts**:
-`carry`, `gcd`, `residue_class`
-
-Additional dataset definitions are included for arithmetic, logic, physics, and language concepts, and can be
-found [here](https://github.com/JuliaDima/mechinterp-Qwen3-4B/tree/main/experiments/concept_localization/concept_datasets).
+Concept dataset definitions (arithmetic, logic, physics, and language concepts) live under
+[`experiments/concept_localization/concept_datasets/`](https://github.com/JuliaDima/mechinterp-qwen3/tree/main/experiments/concept_localization/concept_datasets) — that directory is the current, growing list.
 
 #### Run a single concept
 
@@ -120,10 +107,10 @@ python -m experiments.concept_localization.pipeline.run_concept \
 
 Output is found in `runs/concept_localization/{concept}/`.
 
-#### Run all main concepts
+#### Run several concepts in a batch
 
 ```bash
-for concept in carry gcd residue_class; do
+for concept in carry gcd; do   # replace with whichever concepts you want to (re)generate
     sbatch scripts/sbatch_run.sh python -m experiments.concept_localization.pipeline.run_concept \
         --concept $concept
 done
@@ -138,7 +125,7 @@ python -m experiments.concept_localization.plots.plot_emergence_per_anchor \
 
 #### Visualiser exports
 
-Committed visualiser exports are available as `data/carry_T0.concept.json`, `data/gcd_T0.concept.json`, and `data/residue_class_T0.concept.json`. These are lightweight summaries of the larger run directories on RDS and contain prompt tokens, anchor trajectories, null baselines, top transcoder features, and feature-constellation edges.
+Committed visualiser exports live under `data/*.concept.json` and `viz/data/*.json`, one file per bundled concept following the pattern `{concept}_T0.concept.json` / `{concept}_T0.json`. These are lightweight summaries of the larger run directories on RDS and contain prompt tokens, anchor trajectories, null baselines, top transcoder features, and feature-constellation edges.
 
 ---
 
@@ -178,4 +165,4 @@ This project is licensed under the [MIT License](https://opensource.org/license/
 
 ## Authors and Acknowledgment
 
-Developed by [Elisabeta-Iulia (Julia) Dima](mailto:eid23@cam.ac.uk), with guidance from Dr Miles Cranmer and Dr Alessandro Favero during the project's early development at the University of Cambridge.
+Developed by [Elisabeta-Iulia (Julia) Dima](mailto:eid23@cam.ac.uk), with guidance from Dr Miles Cranmer and Dr Alessandro Favero during the project's development at the University of Cambridge.

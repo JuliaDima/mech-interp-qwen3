@@ -77,3 +77,6 @@ Report/*.ind
 Report/*.log
 Report/*.out
 Report/*.toc
+actions-runner
+experiments/llm_to_code
+tests/test_llm_to_*
