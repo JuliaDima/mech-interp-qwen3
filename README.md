@@ -3,7 +3,7 @@
 <p align="center">
   <a href="https://github.com/JuliaDima/mechinterp-qwen3/actions/workflows/ci.yml"><img src="https://github.com/JuliaDima/mechinterp-qwen3/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://mechinterp-viz-94c364.uniofcam.dev/"><img src="https://img.shields.io/badge/Visualiser-mechinterp--viz--94c364.uniofcam.dev-5a3074" alt="Visualiser"></a>
-  <a href="https://juliadima.github.io/mechinterp-qwen3/"><img src="https://img.shields.io/badge/Docs-5a3074" alt="Docs"></a>
+  <a href="https://juliadima.github.io/mechinterp-qwen3/"><img src="https://img.shields.io/badge/Docs-blue" alt="Docs"></a>
 </p>
 
 This is a mechanistic interpretability project for the instruction-tuned open-source model **Qwen3-4B**, built around a contrastive residual-stream method for studying **concept representation**: how a binary concept — a contrastive predicate the model must resolve as it reads a prompt — is encoded across layers, tokens, and anchor positions. The set of concepts covered is intentionally growing; see [Concept Localisation](#concept-localisation) below for where they're defined.

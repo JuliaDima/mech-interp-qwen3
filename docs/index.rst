@@ -21,7 +21,6 @@ This project provides an independent mechanistic interpretability pipeline speci
    :caption: Experiments:
 
    concept_geometry
-   Reproducibility experiments <attribution_graph>
 
 .. toctree::
    :maxdepth: 1
