@@ -21,11 +21,7 @@ This project provides an independent mechanistic interpretability pipeline speci
    :caption: Experiments:
 
    concept_geometry
-   carry_discovery
-   accuracy_sweep
-   accuracy_sweep_performance
-   robustness_experiment
-   knowledge_editing
+   Reproducibility experiments <attribution_graph>
 
 .. toctree::
    :maxdepth: 1
