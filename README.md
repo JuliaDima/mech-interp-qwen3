@@ -45,7 +45,8 @@ The visualiser also provides an interactive view of the attribution graph for an
 - [License](#license)
 - [Authors and Acknowledgment](#authors-and-acknowledgment)
 
----
+<p>
+</p>
 
 ## Installation
 
@@ -84,7 +85,8 @@ The visualiser also provides an interactive view of the attribution graph for an
     export TRANSFORMERS_OFFLINE=1
     ```
 
----
+<p>
+</p>
 
 ## Usage
 
@@ -92,7 +94,7 @@ The visualiser also provides an interactive view of the attribution graph for an
 
 Finds where and how a contrastively specified concept is encoded across layers and token positions, using residual-stream deltas projected onto transcoder features.
 
-Concept dataset definitions (arithmetic, logic, physics, and language concepts) live under
+Concept dataset definitions (arithmetic, logic, and physics concepts) live under
 [`experiments/concept_localization/concept_datasets/`](https://github.com/JuliaDima/mechinterp-qwen3/tree/main/experiments/concept_localization/concept_datasets) — that directory is the current, growing list.
 
 #### Run a single concept
@@ -118,21 +120,22 @@ done
 
 ```bash
 python -m experiments.concept_localization.plots.plot_emergence_per_anchor \
-    --concept carry --template T0 --top_k 6 --thesis
+    --concept carry --template T0 --top_k 6 
 ```
 
 #### Visualiser exports
 
 Committed visualiser exports live under `data/*.concept.json` and `viz/data/*.json`, one file per bundled concept following the pattern `{concept}_T0.concept.json` / `{concept}_T0.json`. These are lightweight summaries of the larger run directories on RDS and contain prompt tokens, anchor trajectories, null baselines, top transcoder features, and feature-constellation edges.
 
----
+<p>
+</p>
 
 ### Addition Attribution Graphs
 
 Builds node-ablation attribution graphs and recovers lookup-like addition circuits.
 
 ```bash
-miq attribute -t mwhanna/qwen3-4b-transcoders -p "calc: 36+59=" \
+miq attribute -t mwhanna/qwen3-4b-transcoders -p "calc: 36+59= " \
     --slug addition_36_59 --graph_file_dir graphs/
 ```
 
@@ -146,20 +149,23 @@ Tests whether operation, operand, and output-language components can be independ
 python scripts/submit_concept_attribution_graphs.py
 ```
 
----
+<p>
+</p>
 
 ## Model and Transcoders
 
 - **Model**: `Qwen/Qwen3-4B` — 36 transformer layers, d\_model = 2560, 32 attention heads (8 KV heads), RoPE positional encoding, instruction-tuned
 - **Transcoders**: `mwhanna/qwen3-4b-transcoders` — one sparse autoencoder per MLP layer, trained to reconstruct MLP output in terms of interpretable features; accessed via `AttributionModel.transcoders[layer]`
 
----
+<p>
+</p>
 
 ## License
 
 This project is licensed under the [MIT License](https://opensource.org/license/mit/) — see the [LICENSE](LICENSE) file for details.
 
----
+<p>
+</p>
 
 ## Authors and Acknowledgment
 
