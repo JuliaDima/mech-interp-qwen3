@@ -20,6 +20,7 @@ This project provides an independent mechanistic interpretability pipeline speci
    :maxdepth: 1
    :caption: Experiments:
 
+   concept_geometry
    carry_discovery
    accuracy_sweep
    accuracy_sweep_performance
