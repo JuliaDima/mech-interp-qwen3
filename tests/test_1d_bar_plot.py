@@ -37,6 +37,9 @@ _REQUIRES_SWEEP = pytest.mark.skipif(
     not (_ANCHOR_DIR / "sweep_residuals.npz").exists(),
     reason="Sweep residuals not found",
 )
+_WITHHELD_SKIP = pytest.mark.skip(
+    reason="_bin_to_1d_bar is withheld from the public repository"
+)
 
 
 # --- Unit test: _bin_to_1d_bar ---
@@ -49,6 +52,7 @@ def _make_examples(residues_pos, residues_neg, m=7):
     ]
 
 
+@_WITHHELD_SKIP
 def test_bin_to_1d_bar_basic():
     """Single example per residue, activation = residue value."""
     m = 7
@@ -61,6 +65,7 @@ def test_bin_to_1d_bar_basic():
     np.testing.assert_allclose(neg, np.arange(m, dtype=np.float32))
 
 
+@_WITHHELD_SKIP
 def test_bin_to_1d_bar_mean():
     """Two examples with same residue — result should be their mean."""
     m = 7
@@ -72,6 +77,7 @@ def test_bin_to_1d_bar_mean():
     assert neg[2] == 0.0  # neg acts are 0 (second element of each pair)
 
 
+@_WITHHELD_SKIP
 def test_bin_to_1d_bar_residue_class_structure():
     """residue_class: all pos have a≡1, so blue bar only at x=1."""
     m = 7
@@ -166,6 +172,7 @@ def test_top7_feature_activations_match_json():
 
 @_REQUIRES_SWEEP
 @_REQUIRES_RDS
+@_WITHHELD_SKIP
 def test_feature_activation_bar_structure():
     """For residue_class, verify bar plot structure: pos only at x=1, neg absent at x=0,1."""
     from experiments.concept_localization.sweep_utils import apply_transcoder_all

@@ -169,4 +169,4 @@ This project is licensed under the [MIT License](https://opensource.org/license/
 
 ## Authors and Acknowledgment
 
-Developed by [Elisabeta-Iulia (Julia) Dima](mailto:eid23@cam.ac.uk), supervised by Dr Miles Cranmer and Dr Alessandro Favero at the Department of Applied Mathematics and Theoretical Physics, University of Cambridge.
+Developed by [Julia Dima](mailto:eid23@cam.ac.uk), supervised by Dr Miles Cranmer and Dr Alessandro Favero at the Department of Applied Mathematics and Theoretical Physics, University of Cambridge.

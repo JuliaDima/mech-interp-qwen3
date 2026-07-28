@@ -8,6 +8,12 @@ from transformer_lens import HookedTransformerConfig
 from mechinterp_qwen3.attribution_model import AttributionModel
 from mechinterp_qwen3.transcoder.single_layer_transcoder import SingleLayerTranscoder, TranscoderSet
 from mechinterp_qwen3.utils_seed import SeedConfig, set_all_seeds
+from tests.conftest import tokenizer_reachable
+
+_MODEL_TESTS_SKIP = pytest.mark.skipif(
+    not tokenizer_reachable("gpt2"),
+    reason="gpt2 tokenizer not reachable (no HF cache, no network)",
+)
 
 
 def test_basic_determinism():
@@ -62,6 +68,7 @@ def tiny_transcoder_set(tiny_cfg):
     )
 
 
+@_MODEL_TESTS_SKIP
 def test_model_determinism(tiny_cfg, tiny_transcoder_set):
     cfg = SeedConfig(seed=42, deterministic=True)
 
@@ -79,6 +86,7 @@ def test_model_determinism(tiny_cfg, tiny_transcoder_set):
     assert torch.allclose(logits1, logits2)
 
 
+@_MODEL_TESTS_SKIP
 def test_attribution_determinism(tiny_cfg, tiny_transcoder_set):
     from mechinterp_qwen3.run_attribution import attribute
 

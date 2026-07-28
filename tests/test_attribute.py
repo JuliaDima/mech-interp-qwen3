@@ -6,6 +6,12 @@ from mechinterp_qwen3.attribution_model import AttributionModel
 from mechinterp_qwen3.graph import Graph
 from mechinterp_qwen3.run_attribution import attribute
 from mechinterp_qwen3.transcoder.single_layer_transcoder import SingleLayerTranscoder, TranscoderSet
+from tests.conftest import tokenizer_reachable
+
+pytestmark = pytest.mark.skipif(
+    not tokenizer_reachable("gpt2"),
+    reason="gpt2 tokenizer not reachable (no HF cache, no network)",
+)
 
 
 @pytest.fixture

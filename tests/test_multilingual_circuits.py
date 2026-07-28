@@ -1,9 +1,12 @@
 """Tests for the multilingual circuits intervention experiment.
 
-All tests run on CPU with no network access. They cover the pure-logic
+Most tests run on CPU with no network access and cover the pure-logic
 components that are most likely to harbour silent bugs: token-ID resolution,
-feature partitioning, divergence detection, the intervention sweep pipeline,
-and the attention-sink tokenisation helper.
+feature partitioning, divergence detection, and the attention-sink
+tokenisation helper. The intervention-sweep/swap-hook tests additionally need
+the `tiny_model` fixture, which loads a real (if tiny) tokenizer and so
+requires either a local HF cache or network access; they skip automatically
+when neither is available.
 """
 from __future__ import annotations
 
@@ -29,6 +32,7 @@ from experiments.multilingual_circuits.run import (
 from mechinterp_qwen3.attribution_model import AttributionModel
 from mechinterp_qwen3.transcoder.single_layer_transcoder import SingleLayerTranscoder, TranscoderSet
 from mechinterp_qwen3.utils.token_utils import tokenize_qwen_input
+from tests.conftest import tokenizer_reachable
 
 
 # ---------------------------------------------------------------------------
@@ -100,6 +104,8 @@ def tiny_transcoder_set(tiny_cfg):
 
 @pytest.fixture
 def tiny_model(tiny_cfg, tiny_transcoder_set):
+    if not tokenizer_reachable("gpt2"):
+        pytest.skip("gpt2 tokenizer not reachable (no HF cache, no network)")
     return AttributionModel.from_config(tiny_cfg, tiny_transcoder_set)
 
 

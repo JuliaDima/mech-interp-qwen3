@@ -76,6 +76,11 @@ from experiments.concept_localization.pipeline.delta_feature_pipeline import (
 )
 
 
+_WITHHELD_SKIP = pytest.mark.skip(
+    reason="delta_feature_pipeline internals are withheld from the public repository"
+)
+
+
 DATASET_DIR = REPO_ROOT / "experiments" / "concept_localization" / "concept_datasets"
 CONCEPT_GENERATORS = {
     "carry": ("carry_dataset", "generate_carry_pairs"),
@@ -264,6 +269,7 @@ class _SimpleTokenizer:
         return SimpleNamespace(input_ids=text.split())
 
 
+@_WITHHELD_SKIP
 def test_feature_projection_requires_saved_sweep_examples(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError, match="Required sweep examples file is missing"):
         _load_anchor_inputs_and_examples(
@@ -271,6 +277,7 @@ def test_feature_projection_requires_saved_sweep_examples(tmp_path: Path) -> Non
         )
 
 
+@_WITHHELD_SKIP
 def test_survival_set_must_preexist_unless_filter_disabled(tmp_path: Path) -> None:
     args = SimpleNamespace(
         no_attr_filter=False,
@@ -284,6 +291,7 @@ def test_survival_set_must_preexist_unless_filter_disabled(tmp_path: Path) -> No
         _resolve_survival_set(args)
 
 
+@_WITHHELD_SKIP
 def test_bin_to_heatmap_preserves_nan_for_unsampled_cells() -> None:
     examples = [
         {"meta": {"a_pos": 1, "b_pos": 2, "a_neg": 3, "b_neg": 4}},
@@ -295,6 +303,7 @@ def test_bin_to_heatmap_preserves_nan_for_unsampled_cells() -> None:
     assert np.isnan(grid[0, 0])
 
 
+@_WITHHELD_SKIP
 def test_sweep_cache_metadata_validation_rejects_tampering(tmp_path: Path) -> None:
     anchor_dir = tmp_path / "anchor"
     sweep_dir = anchor_dir / "sweep"
@@ -338,6 +347,7 @@ def test_sweep_cache_metadata_validation_rejects_tampering(tmp_path: Path) -> No
         _validate_sweep_cache_metadata(anchor_dir, inputs, examples, npz)
 
 
+@_WITHHELD_SKIP
 def test_saved_sweep_examples_are_strictly_validated() -> None:
     model = SimpleNamespace(tokenizer=_SimpleTokenizer())
     valid = [{
@@ -364,6 +374,7 @@ def test_saved_sweep_examples_are_strictly_validated() -> None:
         _build_inputs_from_saved_examples(model, invalid_anchor)
 
 
+@_WITHHELD_SKIP
 def test_cache_validation_rejects_reordered_examples_and_bad_pos_mask(tmp_path: Path) -> None:
     anchor_dir = tmp_path / "anchor"
     sweep_dir = anchor_dir / "sweep"
@@ -392,6 +403,7 @@ def test_cache_validation_rejects_reordered_examples_and_bad_pos_mask(tmp_path: 
             _validate_sweep_cache_metadata(anchor_dir, [None] * 4, examples, npz)
 
 
+@_WITHHELD_SKIP
 def test_plot_metadata_requires_one_consistent_complete_schema() -> None:
     one_d = [
         {"meta": {"a_pos": 7, "a_neg": 8, "g": 7}},
@@ -419,6 +431,7 @@ def _patch_synthetic_projection(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+@_WITHHELD_SKIP
 def test_run_one_mode_rejects_explicitly_empty_display_set(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -441,6 +454,7 @@ def test_run_one_mode_rejects_explicitly_empty_display_set(
         )
 
 
+@_WITHHELD_SKIP
 def test_run_one_mode_requires_2d_plot_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
