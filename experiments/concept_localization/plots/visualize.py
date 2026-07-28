@@ -658,6 +658,8 @@ def plot_feature_heatmap_grid(
     cluster_labels: "dict[tuple[int, int], int] | None" = None,
     coverage: "np.ndarray | None" = None,  # (10,10) bool — True where prompt samples exist
     extra_titles: "dict[tuple[int, int], str] | None" = None,  # extra per-panel annotation
+    show_titles: bool = True,
+    dpi: int = 150,
 ) -> None:
     """Grid of 2-D heatmaps over swept input digits, one panel per feature.
 
@@ -683,7 +685,7 @@ def plot_feature_heatmap_grid(
     ps.apply()
     fig, axes = plt.subplots(
         nrows, ncols,
-        figsize=(ncols * cell, nrows * cell + 0.8),
+        figsize=(ncols * cell, nrows * cell + (0.8 if show_titles else 0)),
         squeeze=False,
     )
 
@@ -717,20 +719,21 @@ def plot_feature_heatmap_grid(
                         ax.text(a + 0.5, b + 0.5, "×", ha="center", va="center",
                                 fontsize=5, color="#aaaaaa", transform=ax.transData)
 
-        layer_s, fid_s = str(layer), str(feat_id)
-        title = rf"$L^{{{layer_s}}}_{{{fid_s}}}$"
-        if cluster_labels is not None and (layer, feat_id) in cluster_labels:
-            title += f" [C{cluster_labels[(layer, feat_id)]}]"
-        if m is not None:
-            dec = m.cos_sim
-            enc = m.enc_cos_sim
-            if enc != 0.0:
-                title += f"\ndec={dec:+.3f} enc={enc:+.3f}"
-            else:
-                title += f"  cs={dec:+.2f}"
-        if extra_titles and (layer, feat_id) in extra_titles:
-            title += f"\n{extra_titles[(layer, feat_id)]}"
-        ax.set_title(title, fontsize=7, pad=2)
+        if show_titles:
+            layer_s, fid_s = str(layer), str(feat_id)
+            title = rf"$L^{{{layer_s}}}_{{{fid_s}}}$"
+            if cluster_labels is not None and (layer, feat_id) in cluster_labels:
+                title += f" [C{cluster_labels[(layer, feat_id)]}]"
+            if m is not None:
+                dec = m.cos_sim
+                enc = m.enc_cos_sim
+                if enc != 0.0:
+                    title += f"\ndec={dec:+.3f} enc={enc:+.3f}"
+                else:
+                    title += f"  cs={dec:+.2f}"
+            if extra_titles and (layer, feat_id) in extra_titles:
+                title += f"\n{extra_titles[(layer, feat_id)]}"
+            ax.set_title(title, fontsize=7, pad=2)
         ax.set_xlabel(xlabel, fontsize=6, labelpad=1)
         ax.set_ylabel(ylabel, fontsize=6, labelpad=1)
         for sp in ax.spines.values():
@@ -739,12 +742,13 @@ def plot_feature_heatmap_grid(
     for idx in range(n, nrows * ncols):
         axes[idx // ncols][idx % ncols].set_visible(False)
 
-    fig.suptitle(
-        f"{concept} — feature activations at anchor {anchor_label}  (x={xlabel}, y={ylabel})",
-        fontsize=9, y=1.01,
-    )
+    if show_titles:
+        fig.suptitle(
+            f"{concept} — feature activations at anchor {anchor_label}  (x={xlabel}, y={ylabel})",
+            fontsize=9, y=1.01,
+        )
     fig.tight_layout(pad=0.5)
-    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
 
 

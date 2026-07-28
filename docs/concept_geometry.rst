@@ -270,65 +270,16 @@ clearly exceeds its own permutation null, and is causally sufficient under activ
 patching. The six anchors ranked by this score are what the visualiser's anchor stepper
 walks through for a given concept and template.
 
-Transcoder feature projection
----------------------------------
-
-Knowing that a concept has a well-defined, causally validated direction at some layer does
-not, on its own, say which sparse computational units carry it. Each transcoder decomposes
-the post-MLP residual contribution as a sum over its features,
-
-.. math::
-
-   h_l^{\mathrm{post}}(x) = h_l^{\mathrm{mid}}(x) + \sum_f z_{l,f}(x)\, w_{l,f}^{\mathrm{dec}},
-
-where :math:`h_l^{\mathrm{mid}}` is the residual entering the MLP block and
-:math:`w_{l,f}^{\mathrm{dec}}` is feature :math:`f`'s decoder direction. Taking the
-contrastive mean difference of both sides gives
-
-.. math::
-
-   \delta_l^{\mathrm{post}} = \delta_l^{\mathrm{mid}} + \sum_f \Delta z_{l,f}\, w_{l,f}^{\mathrm{dec}},
-   \qquad
-   \Delta z_{l,f} = \mathbb{E}[z_{l,f}(x^+)] - \mathbb{E}[z_{l,f}(x^-)],
-
-and projecting onto one feature's decoder direction :math:`w_{l,f'}^{\mathrm{dec}}`
-isolates that feature's share of the delta up to the decoder Gram matrix
-:math:`w_{l,f}^{\mathrm{dec}} \cdot w_{l,f'}^{\mathrm{dec}}` coupling it to every other
-feature. Features are ranked by the *decoder cosine*, the normalised alignment between
-their decoder direction and the delta itself,
-
-.. math::
-
-   \cos^{\mathrm{dec}}_{l,f} = \frac{w_{l,f}^{\mathrm{dec}} \cdot \delta_l^{\mathrm{post}}}
-                                     {\lVert w_{l,f}^{\mathrm{dec}} \rVert_2 \lVert \delta_l^{\mathrm{post}} \rVert_2 + \varepsilon},
-
-which asks whether the feature *writes* along the concept direction, and a secondary
-*encoder cosine*
-
-.. math::
-
-   \cos^{\mathrm{enc}}_{l,f} = \frac{w_{l,f}^{\mathrm{enc}} \cdot \delta_l}
-                                     {\lVert w_{l,f}^{\mathrm{enc}} \rVert_2 \lVert \delta_l \rVert_2 + \varepsilon},
-
-which asks whether the feature is *sensitive* to the concept direction in its input (a
-secondary statistic here since :math:`\delta_l` is measured on the MLP's output residual
-rather than its input). Features are ranked for display by the sum of the two,
-
-.. math::
-
-   \sigma_{l,f} = \cos^{\mathrm{dec}}_{l,f} + \cos^{\mathrm{enc}}_{l,f},
-
-with :math:`\sigma_{l,f} > 0` marking features aligned with the positive class and
-:math:`\sigma_{l,f} < 0` marking features aligned with the negative class — exactly the
-red/blue split shown in the visualiser's feature-alignment panel (:doc:`concept_representation`).
-
 Feature-direction interventions
 -----------------------------------
 
-Ranking by :math:`\sigma_{l,f}` is correlational; the pipeline also tests projected
-features causally by modifying the raw MLP output directly along their decoder
-directions, rather than replacing the whole MLP output with its transcoder reconstruction
-(which measurably degrades first-token accuracy on its own and would confound the test).
+Each transcoder feature has a decoder direction it writes into the residual stream, and the
+pipeline identifies which features are most aligned with a concept's delta direction (see
+:doc:`concept_representation` for how those alignment scores are shown in the visualiser).
+Ranking by alignment alone is correlational; the pipeline also tests projected features
+causally by modifying the raw MLP output directly along their decoder directions, rather
+than replacing the whole MLP output with its transcoder reconstruction (which measurably
+degrades first-token accuracy on its own and would confound the test).
 
 **Ablation** removes a feature's contribution from the MLP output it feeds into,
 
