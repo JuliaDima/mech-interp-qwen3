@@ -1,8 +1,10 @@
 Concept Representation Viewer
 ==============================
 
-This page documents the "Concept emergence" mode of the ``viz`` app (the Concept Atlas),
-which visualizes a complete run of the concept localization pipeline
+This page documents the "Concept emergence" mode of the visualiser app (the Concept
+Atlas), developed in its own
+`repository <https://gitlab.developers.cam.ac.uk/eid23/mechinterp-viz>`_, which
+visualizes a complete run of the concept localization pipeline
 (``experiments/concept_localization/``) for one concept and prompt template. Delta
 extraction (``extract_deltas_generic.py``) computes the contrastive residual-stream
 difference and its permutation null at every layer, and analysis

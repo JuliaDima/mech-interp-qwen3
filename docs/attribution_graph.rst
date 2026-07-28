@@ -2,7 +2,8 @@ Attribution Graph Viewer
 ========================
 
 This page documents the interactive attribution graph viewer (the "Attribution graph"
-mode of the visualiser app, developed in its own repository) and the computation it
+mode of the visualiser app, developed in its own
+`repository <https://gitlab.developers.cam.ac.uk/eid23/mechinterp-viz>`_) and the computation it
 visualizes. For the underlying gradient methodology, see :doc:`methodology`; for the
 exact JSON schema the viewer consumes, see
 `visualization-json-format.md <https://gitlab.developers.cam.ac.uk/eid23/mechinterp-viz/-/blob/main/docs/visualization-json-format.md>`_

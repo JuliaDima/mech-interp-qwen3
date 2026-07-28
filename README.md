@@ -125,7 +125,7 @@ python -m experiments.concept_localization.plots.plot_emergence_per_anchor \
 
 #### Visualiser exports
 
-Committed exports live under `data/*.concept.json`, one file per bundled concept following the pattern `{concept}_T0.concept.json`. These are lightweight summaries of the larger run directories on RDS and contain prompt tokens, anchor trajectories, null baselines, top transcoder features, and feature-constellation edges. The visualiser itself (which consumes the same export format under its own `data/*.json`) is developed in a separate repository — see the Visualiser badge above.
+Committed exports live under `data/*.concept.json`, one file per bundled concept following the pattern `{concept}_T0.concept.json`. These are lightweight summaries of the larger run directories on RDS and contain prompt tokens, anchor trajectories, null baselines, top transcoder features, and feature-constellation edges. The visualiser itself (which consumes the same export format under its own `data/*.json`) is developed in its own [repository](https://gitlab.developers.cam.ac.uk/eid23/mechinterp-viz) — see the Visualiser badge above for the live demo.
 
 <p>
 </p>
