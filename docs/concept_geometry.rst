@@ -362,5 +362,5 @@ Further reading
   discovery on individual prompts rather than the hypothesis-light, dataset-level method
   described on this page.
 * `experiments/concept_localization/concept_datasets/
-  <https://github.com/JuliaDima/mechinterp-qwen3/tree/main/experiments/concept_localization/concept_datasets>`_
+  <https://github.com/JuliaDima/mech-interp-qwen3/tree/main/experiments/concept_localization/concept_datasets>`_
   — the full, growing set of concept dataset modules.

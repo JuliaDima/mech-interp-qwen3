@@ -1,9 +1,9 @@
 # Mechanistic Circuits and Concept Representation in Qwen3-4B
 
 <p align="center">
-  <a href="https://github.com/JuliaDima/mechinterp-qwen3/actions/workflows/ci.yml"><img src="https://github.com/JuliaDima/mechinterp-qwen3/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/JuliaDima/mech-interp-qwen3/actions/workflows/ci.yml"><img src="https://github.com/JuliaDima/mech-interp-qwen3/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://mechinterp-viz-94c364.uniofcam.dev/"><img src="https://img.shields.io/badge/Visualiser-mechinterp--viz--94c364.uniofcam.dev-5a3074" alt="Visualiser"></a>
-  <a href="https://juliadima.github.io/mechinterp-qwen3/"><img src="https://img.shields.io/badge/Docs-blue" alt="Docs"></a>
+  <a href="https://juliadima.github.io/mech-interp-qwen3/"><img src="https://img.shields.io/badge/Docs-blue" alt="Docs"></a>
 </p>
 
 This is a mechanistic interpretability project for the instruction-tuned open-source model **Qwen3-4B**, built around a contrastive residual-stream method for studying **concept representation**: how a binary concept — a contrastive predicate the model must resolve as it reads a prompt — is encoded across layers, tokens, and anchor positions. The set of concepts covered is intentionally growing; see [Concept Localisation](#concept-localisation) below for where they're defined.
@@ -61,8 +61,8 @@ The visualiser also provides an interactive view of the attribution graph for an
 1. **Clone the repository:**
 
     ```bash
-    git clone https://github.com/JuliaDima/mechinterp-qwen3.git
-    cd mechinterp-qwen3
+    git clone https://github.com/JuliaDima/mech-interp-qwen3.git
+    cd mech-interp-qwen3
     ```
 
 2. **Create and activate the environment:**
@@ -95,7 +95,7 @@ The visualiser also provides an interactive view of the attribution graph for an
 Finds where and how a contrastively specified concept is encoded across layers and token positions, using residual-stream deltas projected onto transcoder features.
 
 Concept dataset definitions (arithmetic, logic, and physics concepts) live under
-[`experiments/concept_localization/concept_datasets/`](https://github.com/JuliaDima/mechinterp-qwen3/tree/main/experiments/concept_localization/concept_datasets) — that directory is the current, growing list.
+[`experiments/concept_localization/concept_datasets/`](https://github.com/JuliaDima/mech-interp-qwen3/tree/main/experiments/concept_localization/concept_datasets) — that directory is the current, growing list.
 
 #### Run a single concept
 
