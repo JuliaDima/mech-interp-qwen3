@@ -218,7 +218,7 @@ def _run_feature_projection_plots(
     running the model forward pass twice.  Skips attribution-graph survival filter
     (survival_set=None) since graphs may not exist yet at this pipeline stage.
     """
-    from experiments.concept_localization.pipeline.delta_feature_projections import (
+    from experiments.concept_localization.pipeline.delta_feature_pipeline import (
         _build_inputs_and_examples,
         run_one_mode,
     )

@@ -2,7 +2,7 @@
 anchors of carry/gcd/residue_class/prime. Ranking and anchor bookkeeping both
 live here; run_feature_modulation.py only ever receives explicit features.
 
-  default_encdec — the existing dec+enc_dec candidate pool (delta_feature_projections.py's
+  default_encdec — the existing dec+enc_dec candidate pool (delta_feature_pipeline.py's
                    edec_features.json), truncated to the top --top_k by |score|
                    (rank_top_encdec_features).
   cohens_d       — exhaustive scan of every transcoder feature in every layer cached in
@@ -101,7 +101,7 @@ def _summary_rows(concept: str, anchor: str, cfg_name: str, diff: dict) -> list[
 
 def rank_top_encdec_features(anchor_dir: Path, top_k: int) -> list[str]:
     """Top-K features from the existing dec+enc_dec candidate pool (edec_features.json,
-    written by delta_feature_projections.py), ranked by |score| and truncated.
+    written by delta_feature_pipeline.py), ranked by |score| and truncated.
 
     dec + enc_dec rows are pooled and deduped by feature (enc_dec's combined
     dec_cos+enc_cos score wins over dec-only when a feature appears in both, since

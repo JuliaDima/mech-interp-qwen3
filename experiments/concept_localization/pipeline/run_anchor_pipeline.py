@@ -246,7 +246,7 @@ def main() -> None:
 
     # ── Stage 4: activity-filtered delta projections (requires sweep) ─────
     log.info("=== Stage 4: delta_feature_projections ===")
-    from experiments.concept_localization.pipeline.delta_feature_projections import run_for_anchor
+    from experiments.concept_localization.pipeline.delta_feature_pipeline import run_for_anchor
     dfp_args = Namespace(
         concept=args.concept,
         score_mode=args.feature_score_modes,

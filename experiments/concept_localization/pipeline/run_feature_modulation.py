@@ -687,7 +687,7 @@ def _save_heatmap_grid(
     """Save an edec_topk_grid-style PDF for the modulated features.
 
     Reuses plot_feature_heatmap_grid (2D) or _plot_1d_grid (1D) from
-    delta_feature_projections.py.  Silently skips when examples lack
+    delta_feature_pipeline.py.  Silently skips when examples lack
     per-operand digit metadata.
     """
     if not sweep_examples or not all(
@@ -701,7 +701,7 @@ def _save_heatmap_grid(
 
     try:
         from experiments.concept_localization.analyze import FeatureMatch
-        from experiments.concept_localization.pipeline.delta_feature_projections import (
+        from experiments.concept_localization.pipeline.delta_feature_pipeline import (
             _bin_to_heatmap, _bin_to_1d_bar, _get_modulus, _plot_1d_grid,
         )
         if not is_1d:

@@ -58,14 +58,14 @@ from experiments.concept_localization.analyze import (
     compute_sharpness,
     project_onto_E_dec_model,
 )
-import experiments.concept_localization.pipeline.delta_feature_projections as dfp
+import experiments.concept_localization.pipeline.delta_feature_pipeline as dfp
 from experiments.concept_localization.concept_pair import ConceptPair
 from experiments.concept_localization.extract_deltas_generic import (
     LayerDeltas,
     _find_delimiter_anchor,
     _resolve_anchor,
 )
-from experiments.concept_localization.pipeline.delta_feature_projections import (
+from experiments.concept_localization.pipeline.delta_feature_pipeline import (
     _bin_to_heatmap,
     _build_inputs_from_saved_examples,
     _classify_plot_metadata,

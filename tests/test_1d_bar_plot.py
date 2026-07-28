@@ -1,4 +1,4 @@
-"""Tests for 1D bar plot generation in delta_feature_projections.py.
+"""Tests for 1D bar plot generation in delta_feature_pipeline.py.
 
 Test 1 (unit): _bin_to_1d_bar with synthetic data — no model needed.
 Test 2 (integration): load H_L10 from saved sweep + transcoder, compute
@@ -23,7 +23,7 @@ if str(_REPO_ROOT) not in sys.path:
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
-from experiments.concept_localization.pipeline.delta_feature_projections import _bin_to_1d_bar
+from experiments.concept_localization.pipeline.delta_feature_pipeline import _bin_to_1d_bar
 
 _ANCHOR_DIR = (
     _REPO_ROOT

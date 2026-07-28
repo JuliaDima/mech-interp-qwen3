@@ -1,7 +1,7 @@
 """Check which transcoder features separate N mod M == 0 vs != 0, for M in [2, 100],
 at the "ones_a" anchor (last digit of N) for gcd and residue_class.
 
-Default mode reuses the ~20 features already identified by delta_feature_projections
+Default mode reuses the ~20 features already identified by delta_feature_pipeline
 (edec_features.json, dec + enc+dec) — cheap, reads only those feature rows.
 
 --all_features scans every one of the 163840 transcoder features per layer (not just
