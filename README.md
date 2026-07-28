@@ -6,7 +6,7 @@
   <a href="https://juliadima.github.io/mech-interp-qwen3/"><img src="https://img.shields.io/badge/Docs-blue" alt="Docs"></a>
 </p>
 
-This is a mechanistic interpretability project for the instruction-tuned open-source model **Qwen3-4B**, built around a contrastive residual-stream method for studying **concept representation**: how a binary concept — a contrastive predicate the model must resolve as it reads a prompt — is encoded across layers, tokens, and anchor positions. The set of concepts covered is intentionally growing; see [Concept Localisation](#concept-localisation) below for where they're defined.
+This is a mechanistic interpretability project for the instruction-tuned open-source model **Qwen3-4B**, built around a contrastive residual-stream method for studying **concept representation**: how a binary concept — a contrastive predicate the model must resolve as it reads a prompt — is encoded across layers, tokens, and anchor positions. The set of concepts covered is **intentionally growing**; see [Concept Localisation](#concept-localisation) below for where they're defined.
 
 For each concept, matched positive/negative prompt pairs isolate a single computational predicate. The pipeline computes layerwise residual-stream delta trajectories between matched pairs, compares them against a permutation-null baseline to establish where the signal is statistically distinguishable from chance, validates candidate anchor positions by activation patching, and projects the resulting directions onto sparse transcoder features to identify which specific features carry the concept and how consistent that direction is across depth.
 
@@ -95,12 +95,12 @@ The visualiser also provides an interactive view of the attribution graph for an
 Finds where and how a contrastively specified concept is encoded across layers and token positions, using residual-stream deltas projected onto transcoder features.
 
 Concept dataset definitions (arithmetic, logic, and physics concepts) live under
-[`experiments/concept_localization/concept_datasets/`](https://github.com/JuliaDima/mech-interp-qwen3/tree/main/experiments/concept_localization/concept_datasets) — that directory is the current, growing list.
+[`experiments/concept_localization/concept_datasets/`](https://github.com/JuliaDima/mech-interp-qwen3/tree/main/experiments/concept_localization/concept_datasets) — that directory is the current, **growing list**.
 
 #### Run a single concept
 
 ```bash
-# Full pipeline (GPU required — submit via Slurm)
+# Full pipeline (GPU required — submit via Slurm) - for concepts in experiments/concept_localization/concept_datasets/
 python -m experiments.concept_localization.pipeline.run_concept \
     --concept carry
 ```
