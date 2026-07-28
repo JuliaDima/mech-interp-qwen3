@@ -183,10 +183,10 @@ def test_reported_residue_dataset_preserves_modular_invariant() -> None:
         a_pos = pair.meta["a_pos"]
         a_neg = pair.meta["a_neg"]
         r_neg = pair.meta["r_neg"]
-        assert a_pos % 7 == 1
+        assert a_pos % 7 == 0
         assert a_neg % 7 == r_neg
-        assert r_neg in {2, 3, 4, 5, 6}
-        assert pair.label_pos == "1"
+        assert r_neg in {1, 2, 3, 4, 5, 6}
+        assert pair.label_pos == "0"
         assert pair.label_neg == str(r_neg)
 
 

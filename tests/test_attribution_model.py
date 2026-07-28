@@ -5,6 +5,12 @@ from transformer_lens import HookedTransformerConfig
 
 from mechinterp_qwen3.attribution_model import AttributionMLP, AttributionModel, AttributionUnembed
 from mechinterp_qwen3.transcoder.single_layer_transcoder import SingleLayerTranscoder, TranscoderSet
+from tests.conftest import tokenizer_reachable
+
+_MODEL_TESTS_SKIP = pytest.mark.skipif(
+    not tokenizer_reachable("gpt2"),
+    reason="gpt2 tokenizer not reachable (no HF cache, no network)",
+)
 
 
 @pytest.fixture
@@ -65,6 +71,7 @@ def test_attribution_unembed():
     assert hasattr(runembed, "hook_post")
 
 
+@_MODEL_TESTS_SKIP
 def test_attribution_model_creation(tiny_cfg, tiny_transcoder_set):
     model = AttributionModel.from_config(tiny_cfg, tiny_transcoder_set)
 
@@ -78,6 +85,7 @@ def test_attribution_model_creation(tiny_cfg, tiny_transcoder_set):
     assert logits.shape == (1, 10, 100)
 
 
+@_MODEL_TESTS_SKIP
 def test_attribution_model_gradient_flow(tiny_cfg, tiny_transcoder_set):
     model = AttributionModel.from_config(tiny_cfg, tiny_transcoder_set)
 
