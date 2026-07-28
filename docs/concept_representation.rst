@@ -139,6 +139,8 @@ concepts), and the loader discovers every ``anchor_rank*_pos*`` directory beneat
 combining each anchor's ``results.json``, ``deltas.pt`` trajectories and cosine matrix,
 permutation null, and feature projections into one consolidated view. An anchor is kept
 even if some of these artifacts are missing; missing data is reported in the UI rather
-than silently dropped. See ``viz/docs/concept-run-visualization.md`` for the artifact
-discovery rules and the browser/server boundary (a static deployment requires running
-``viz/scripts/export_concept_run.py`` ahead of time to produce a single JSON file).
+than silently dropped. The visualiser's source lives in its own repository; see
+`concept-run-visualization.md <https://gitlab.developers.cam.ac.uk/eid23/mechinterp-viz/-/blob/main/docs/concept-run-visualization.md>`_
+there for the artifact discovery rules and the browser/server boundary (a static
+deployment requires running ``export_concept_run.py`` ahead of time to produce a
+single JSON file).

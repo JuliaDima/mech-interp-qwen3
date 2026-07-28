@@ -2,9 +2,11 @@ Attribution Graph Viewer
 ========================
 
 This page documents the interactive attribution graph viewer (the "Attribution graph"
-mode of the ``viz`` app) and the computation it visualizes. For the underlying gradient
-methodology, see :doc:`methodology`; for the exact JSON schema the viewer consumes, see
-``viz/docs/visualization-json-format.md`` in the repository.
+mode of the visualiser app, developed in its own repository) and the computation it
+visualizes. For the underlying gradient methodology, see :doc:`methodology`; for the
+exact JSON schema the viewer consumes, see
+`visualization-json-format.md <https://gitlab.developers.cam.ac.uk/eid23/mechinterp-viz/-/blob/main/docs/visualization-json-format.md>`_
+in that repository.
 
 What an attribution graph is
 -----------------------------
@@ -70,6 +72,7 @@ The app scans a ``graphs/`` directory for any JSON file containing both ``nodes`
 directly through the UI. An optional sibling ``metadata.json`` (or ``graph_metadata.json``
 / ``run_metadata.json``) supplies the prompt text, expected answer, model/transcoder
 identifiers, the node/edge pruning thresholds used, and before/after node and edge counts,
-all of which are rendered alongside the graph. See ``viz/docs/visualization-json-format.md``
+all of which are rendered alongside the graph. See
+`visualization-json-format.md <https://gitlab.developers.cam.ac.uk/eid23/mechinterp-viz/-/blob/main/docs/visualization-json-format.md>`_
 for the full key-by-key schema and the validation checklist to follow before publishing a
 new graph JSON file.
